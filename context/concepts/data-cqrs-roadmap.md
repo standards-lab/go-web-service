@@ -37,7 +37,7 @@ the release choreography against the new repository structure before rung 3 buil
 ## The ladder
 
 1. **Connectivity** (coordinated) — built, under the predecessors. The base `database` package
-   (wrapper, dialect seam, config block, lifecycle and readiness) and `postgres` open and ping;
+   (wrapper, dialect interface, config block, lifecycle and readiness) and `postgres` open and ping;
    the service's database configuration block, composition-root wiring, compose fragment, and a
    live database readiness check. The proof ran: the service boots against the compose postgres,
    `/readyz` turns 503 during an outage and heals when the database returns, and a failed

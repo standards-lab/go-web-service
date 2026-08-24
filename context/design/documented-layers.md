@@ -8,7 +8,7 @@ How this repository changes and releases.
 - The decay rule applies: a documentation section that no longer matches the code is a defect,
   fixed in the same change.
 - Refinements are additive (a new layer) or modifying (a new provider, a CQRS change) — touching
-  that layer's code, documentation, tests, and the seams it participates in.
+  that layer's code, documentation, tests, and the boundaries it shares with other layers.
 - The service is the repository's only releasable artifact, on simple semantic version tags,
   versionless until its first release. Each version is a coherent snapshot: code, documentation,
   and the pinned go-core, go-web-sdk, and go-database versions it was validated against. Dev

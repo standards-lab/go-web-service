@@ -21,8 +21,8 @@ go-core's staged coordinator replaced.
   lifecycle-bearing subsystem registers on the coordinator where it is built: the database at
   stage 0, ahead of the root stage, with its readiness check — so a subsystem cannot be
   constructed yet missing from startup, teardown, or the probe.
-- `internal/domain` and `internal/reactors` are the template's seams, still empty; the data
-  layer's domain services land in them.
+- `internal/domain` and `internal/reactors` are the template's domain and reactor layers, still
+  empty; the data layer's domain services land in them.
 - `internal/process` holds the pre-infrastructure main-sequence parts both binaries share; the
   exit-code convention cannot drift between them.
 - `cmd/db` reuses the construction with no coordinator: `withInfrastructure` passes nil —

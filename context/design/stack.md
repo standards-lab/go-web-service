@@ -30,8 +30,8 @@ use, at the resolution the purpose requires.
 
 Only three kinds of package import a provider: the composition root (`internal/infrastructure`, which
 constructs the Postgres provider and hands the pool downward as a primitive), the `cmd/*` binaries, and
-domain packages that declare native use. Everything else — handlers, `internal/config`,
-`internal/process`, and any domain package that stays within the standard tier — is provider-free. A
+domain packages that declare native use. Everything else — handlers, `internal/config`, and any
+domain package that stays within the standard tier — is provider-free. A
 lint step will enforce the allowlist, landing with the first domain package (`.golangci.yml`,
 `depguard`: the provider module is denied everywhere
 except the declared packages), so a package cannot take a native dependency without saying so.

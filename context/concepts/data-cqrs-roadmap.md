@@ -59,8 +59,10 @@ the release choreography against the new repository structure before rung 3 buil
    `GET /organizations/path/{path...}`; `path` on every read, projected from the recursive
    lineage query in the projection's FROM (`concepts/organization-lineage.md`); flat exact-match
    filters on projected fields; an unknown sort or filter field answers 400; the import-boundary
-   lint (`design/stack.md`) lands with the first domain package. Proof: paginated, filtered,
-   sorted reads over HTTP, and a path lookup.
+   lint (`design/stack.md`) lands with the first domain package. Remaining plan-mode detail
+   when the rung is reached: the shape of `internal/organization` — the projection with the
+   lineage FROM, its query functions, and its handlers — and the `.golangci.yml` allowlist.
+   Proof: paginated, filtered, sorted reads over HTTP, and a path lookup.
 4. **Writes** (coordinated). go-database: the command result envelope, the
    optimistic-concurrency contract, and the error model. This service: the first domain's full
    command surface. Two native choices are decided here: whether ids stay database-minted

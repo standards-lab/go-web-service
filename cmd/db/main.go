@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/standards-lab/go-web-service/internal/process"
+	"github.com/standards-lab/go-core/process"
 )
 
 const usage = `usage: db <command> [args]

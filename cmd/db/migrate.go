@@ -11,9 +11,10 @@ import (
 	pgxv5 "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 
+	"github.com/standards-lab/go-core/process"
+
 	"github.com/standards-lab/go-web-service/internal/config"
 	"github.com/standards-lab/go-web-service/internal/infrastructure"
-	"github.com/standards-lab/go-web-service/internal/process"
 )
 
 const migrateUsage = `usage: db migrate <verb> [flags]

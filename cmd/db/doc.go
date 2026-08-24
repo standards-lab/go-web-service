@@ -19,5 +19,5 @@
 // Migration files are cmd/db/migrations/NNNN_<slug>.{up,down}.sql, each a
 // single implicit transaction — no explicit COMMIT, nothing non-transactional
 // — so a failed migration rolls back atomically. Exit codes follow
-// internal/process: 0 ok, 1 runtime failure, 2 usage error.
+// go-core's process package: 0 ok, 1 runtime failure, 2 usage error.
 package main

@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/standards-lab/go-core/process"
 	"github.com/standards-lab/go-database/seed"
 
 	"github.com/standards-lab/go-web-service/internal/infrastructure"
-	"github.com/standards-lab/go-web-service/internal/process"
 )
 
 func seedCmd(args []string, stdout, stderr io.Writer) int {

@@ -10,8 +10,8 @@ go-core's staged coordinator replaced.
 ## Layout
 
 - `cmd/server` is the process entrypoint and nothing else: `main.go` composes its run function
-  from `internal/process` (the signal-derived root context, pre-logger failure reporting) and
-  hands off to the composition root.
+  from go-core's `process` package (the signal-derived root context, pre-logger failure
+  reporting) and hands off to the composition root.
 - `internal/app` is the composition root: `App` assembles infrastructure, the domain, and the
   reactors into a router and the coordinator, with `routes.go` and `middleware.go` as the build
   points. The server registers as the coordinator's root-stage service; `RegisterHealth` queries
@@ -23,8 +23,8 @@ go-core's staged coordinator replaced.
   constructed yet missing from startup, teardown, or the probe.
 - `internal/domain` and `internal/reactors` are the template's domain and reactor layers, still
   empty; the data layer's domain services land in them.
-- `internal/process` holds the pre-infrastructure main-sequence parts both binaries share; the
-  exit-code convention cannot drift between them.
+- Both binaries compose on go-core's `process` package for the pre-infrastructure main
+  sequence, so the exit-code convention cannot drift between them.
 - `cmd/db` reuses the construction with no coordinator: `withInfrastructure` passes nil —
   `New` then registers nothing — and drives the database's `Start` and deferred `Shutdown`
   directly, inheriting the configured logger, pool settings, and provider.

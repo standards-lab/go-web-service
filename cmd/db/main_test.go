@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/standards-lab/go-web-service/internal/process"
+	"github.com/standards-lab/go-core/process"
 )
 
 // The dispatch and flag-validation paths exit before any configuration or

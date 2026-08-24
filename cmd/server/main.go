@@ -4,9 +4,10 @@ import (
 	"io"
 	"os"
 
+	"github.com/standards-lab/go-core/process"
+
 	"github.com/standards-lab/go-web-service/internal/app"
 	"github.com/standards-lab/go-web-service/internal/config"
-	"github.com/standards-lab/go-web-service/internal/process"
 )
 
 func main() {

@@ -16,8 +16,8 @@ in `context/`, the implementation guide, and the reset file.
 
 - **Module layout.** One module at the root, `github.com/standards-lab/go-web-service`, with
   two binaries: `cmd/server` (the service) and `cmd/db` (database operations). The composition
-  root is `internal/app` over the `internal/{infrastructure,domain,reactors}` layers;
-  `internal/process` holds the pre-infrastructure main-sequence parts both binaries share.
+  root is `internal/app` over the `internal/{infrastructure,domain,reactors}` layers; both
+  binaries compose on go-core's `process` package for the pre-infrastructure main sequence.
 - **Dependencies.** go-core, go-web-sdk, go-database, and go-database/postgres at pinned
   releases, plus golang-migrate, on Go 1.27. The pins are the committed steady state; a
   gitignored local `go.work` serves sibling development.

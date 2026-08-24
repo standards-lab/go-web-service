@@ -1,0 +1,30 @@
+[tools]
+go = "1.27"
+golangci-lint = "latest"
+
+[env]
+APP_ENV = "local"
+
+[tasks.vet]
+description = "Run go vet"
+run = "go vet ./..."
+
+[tasks.serve]
+description = "Run the service locally"
+run = "go run ./cmd/server"
+
+[tasks.test]
+description = "Run tests"
+run = "go test -race ./..."
+
+[tasks.fmt]
+description = "Format all Go source"
+run = "gofmt -w ."
+
+[tasks.tidy]
+description = "Run go mod tidy"
+run = "go mod tidy"
+
+[tasks.lint]
+description = "Run golangci-lint"
+run = "golangci-lint run ./..."

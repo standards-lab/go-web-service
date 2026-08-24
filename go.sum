@@ -1,0 +1,4 @@
+github.com/standards-lab/go-core v0.2.0 h1:aqISVsIv/O2Pt0OXfUE1URPL9E+nJpA6orfxH+ccqO4=
+github.com/standards-lab/go-core v0.2.0/go.mod h1:9HoYemoKSa89kjAtXAZeNX4gftPS27J7ylEiCPy3gqY=
+github.com/standards-lab/go-web-sdk v0.3.0 h1:bKBKf77GIRh5P2VW4GJbtIOky9kUqMF7c7rn/HT67Fw=
+github.com/standards-lab/go-web-sdk v0.3.0/go.mod h1:s3j+ByjeBr2G/AiQ/8ij8pNn/IdfEOt7tLNFwQ5Bmnw=

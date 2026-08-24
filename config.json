@@ -1,0 +1,15 @@
+{
+  "log": {
+    "level": "info",
+    "format": "text"
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "read_timeout": "1m",
+    "read_header_timeout": "5s",
+    "write_timeout": "15m",
+    "idle_timeout": "2m"
+  },
+  "shutdown_timeout": "10s"
+}

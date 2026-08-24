@@ -1,0 +1,13 @@
+# Secrets are layered configuration and never committed.
+secrets*.json
+
+# Build and coverage artifacts.
+bin/
+*.test
+coverage.out
+coverage.html
+
+# Local workspace files.
+go.work
+go.work.sum
+tmp/

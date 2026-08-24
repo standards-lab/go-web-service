@@ -1,11 +1,11 @@
 # Organization lineage
 
-Captured at the database-migrations closeout (2026-08-14); the rung-3 shape settled in the
+Captured at the database-migrations closeout (2026-08-14); the `v1.data.reads` shape settled in the
 capability-tiers planning session (2026-08-17). The org path (`/acme/engineering/platform`) is a
-read-model projection composed at read time from the parent chain; nothing stores it, and rung 2's
+read-model projection composed at read time from the parent chain; nothing stores it, and the migrations session's
 sibling-scoped unique codes are what make every composed path unique.
 
-## Settled for rung 3
+## Settled for `v1.data.reads`
 
 - `path` is on every read. The organization projection's FROM wraps a recursive query
   (`WITH RECURSIVE`, SQL:1999 — portable) that walks the tree once per statement, and `path` is an
@@ -16,12 +16,12 @@ sibling-scoped unique codes are what make every composed path unique.
   `GET /organizations/path/{path...}` answers. A walk-down query (split the path, descend by code) is
   the optimization if resolution ever becomes hot; it is not needed now.
 - The lineage SQL belongs to the organization domain package, the read-side instance of the rule
-  that SQL stays with the consumer. Once rung 3 lands, this section is expressed by the code and
+  that SQL stays with the consumer. Once the reads task lands, this section is expressed by the code and
   goes; the section below stays.
 
 ## Held: materializing the lineage
 
-The read-time query has no write-path cost, and rung 4's re-parent command stays simple because of
+The read-time query has no write-path cost, and the writes task's re-parent command (`v1.data.writes`) stays simple because of
 it. What would trigger storing the lineage is not scale but the auth layer: unit-scoped grants need
 "is unit X under unit U?" on every authorized request, and a recursive walk per authorization check
 is the wrong cost model. When that arrives, three candidates, none chosen yet:
@@ -37,5 +37,5 @@ is the wrong cost model. When that arrives, three candidates, none chosen yet:
   prefix `LIKE` gives subtree queries. Standard SQL, the simplest to add, the weakest semantics.
 
 Whichever lands, the read model keeps `path` as a projected field, so the HTTP contract does not move.
-The write-path implication — what a re-parent must maintain — is rung 4's to weigh if the choice is
+The write-path implication — what a re-parent must maintain — is the writes task's to weigh if the choice is
 pulled forward.

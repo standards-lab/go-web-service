@@ -9,26 +9,26 @@ composition before they promote outward into the SDKs, the template, and the sta
 The service runs on one declared stack — Postgres for SQL — and uses each capability at the
 resolution its purpose requires: the library's standard tier by default, and the provider's
 native features where they earn it, contained and listed (`design/stack.md`). What version 1.0
-is, and what every layer must show on the way there, is `design/end-state.md`; the ordered path
-is `concepts/roadmap.md`. The change and release discipline is described in
-`design/documented-layers.md`.
-
-The repository was created in relay step 6 of the coordinator's restructure
-(standards-lab `concepts/restructure.md`): generated fresh from go-web-sdk-template
-template/v0.3.0, with go-service's data capability composed onto the baseline. The roadmap and
-the data ladder are carried from go-service as candidate direction; the re-plan session revises
-them against the new repository structure before the next build.
+is and the path to it live in the workspace roadmap at the coordinator (standards-lab
+`context/roadmap.toml`, goal `v1`); the concepts here carry each layer's design direction. The
+change and release discipline is described in `design/documented-layers.md`.
 
 ## Capability map
 
 Broad and unordered; each layer is detailed only when a session is about to build it. The
 baseline is running — `cmd/server`, the config files, and the README are authoritative for the
 composition root, configuration bootstrap, logging, lifecycle, HTTP server, probes, and the
-database with its migrate and seed tooling, all wired over the SDKs at pinned releases.
+database with its migrate and seed tooling, all wired over the SDKs at pinned releases. The
+layers are the `v1` goals in the workspace roadmap:
 
-- **Data composition and CQRS** — the first documented layer: a composed data model over plain
-  SQL and a CQRS-oriented interface. The prior R&D is `personnel-service-demo` (strict CQRS,
-  four-tier business-logic placement, the error model), catalogued at the coordinator.
+- **Data composition and CQRS** — the layer in flight: a composed data model over plain SQL and
+  a CQRS-oriented interface (`concepts/data-layer.md`).
 - **Auth and ABAC** — authentication providers behind one interface, and verb-keyed
-  attribute-based access control over the composed model.
-- **Observability** — logging, metrics, and tracing across the stack.
+  attribute-based access control over the composed model (`concepts/identity-linking.md`).
+- **Observability** — logging, metrics, and tracing through OpenTelemetry across the stack.
+- **Object storage** — the go-storage capability demonstrated in a documented layer.
+- **Messaging and reactor services** — NATS through go-messaging, and the reactor layer it
+  makes real.
+- **AI** — the go-ai capability demonstrated in a documented layer.
+- **Embedded client** — a web client embedded in and served by the service binary.
+- **Deployment** — deployment infrastructure in its own repository, targeting this service.

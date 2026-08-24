@@ -1,25 +1,28 @@
-# Service
+# go-web-service
 
-Generated from [go-web-sdk-template](https://github.com/standards-lab/go-web-sdk-template).
+The reference web service of
+[Go Minimal](https://github.com/standards-lab/docs/blob/main/standards/go-minimal/index.md), a
+minimal-dependency Go implementation of
+[Elemental Architecture](https://github.com/standards-lab/docs/blob/main/architectures/elemental-architecture/index.md).
+Initialized from the [go-web-sdk-template](https://github.com/standards-lab/go-web-sdk-template).
 
-## After generation
+## Stack
 
-Three steps localize the service's identity:
-
-1. Rename `envPrefix` in `internal/config/config.go` — the single constant every `APP_*`
-   environment-variable name derives from.
-2. Rename the `APP_ENV` key in `mise.toml`'s `[env]` block to follow the prefix.
-3. Rewrite this README for the service.
-
-Licensing and release automation are yours to define; CI arrives working (`.github/workflows/ci.yml`).
+- SQL: Postgres
 
 ## Getting started
 
-[mise](https://mise.jdx.dev/) provisions the toolchain and runs the tasks:
+[mise](https://mise.jdx.dev/) provisions the toolchain and runs the tasks. The database password
+lives in the gitignored secrets layer:
 
 ```sh
 mise trust && mise install
-mise run serve
+echo '{"database":{"password":"app"}}' > secrets.json
+
+mise run db-up      # start the local Postgres and wait for health
+mise run migrate    # apply the schema migrations
+mise run seed       # load the reference data
+mise run serve      # run the service
 ```
 
 The service logs `server ready` on `localhost:8080` (the `local` overlay binds loopback and runs
@@ -27,7 +30,7 @@ debug logging). From a second shell:
 
 ```sh
 curl localhost:8080/healthz   # 200 {"status":"ok"}
-curl localhost:8080/readyz    # 200 {"status":"ready","checks":[...]}
+curl localhost:8080/readyz    # 200 {"status":"ready","checks":[...]}  — lifecycle and database
 ```
 
 Ctrl-C drains in-flight requests and exits with `server stopped`.
@@ -44,6 +47,12 @@ Each task wraps a plain command, so the repository works without mise:
 | `mise run fmt` | `gofmt -w .` | Format the source |
 | `mise run tidy` | `go mod tidy` | Reconcile module requirements |
 | `mise run lint` | `golangci-lint run ./...` | Lint |
+| `mise run db -- <args>` | `go run ./cmd/db` | Run a db command |
+| `mise run migrate` | `go run ./cmd/db migrate up` | Apply all pending migrations |
+| `mise run seed` | `go run ./cmd/db seed` | Load the reference data |
+| `mise run db-up` | `docker compose up -d --wait` | Start the local Postgres |
+| `mise run db-down` | `docker compose down` | Stop the local Postgres (keep data) |
+| `mise run db-reset` | `docker compose down -v` | Stop the local Postgres and drop its data |
 
 ## Configuration
 
@@ -52,43 +61,15 @@ Configuration layers in a fixed precedence, later sources winning:
 1. `config.json` — the base file, every knob at its default.
 2. `config.<APP_ENV>.json` — the environment overlay; `mise.toml` sets `APP_ENV=local`, which
    activates the committed `config.local.json` (loopback host, debug logging).
-3. `secrets.json`, `secrets.<APP_ENV>.json` — gitignored secret layers.
-4. `APP_*` environment variables — the final override: `APP_LOG_LEVEL`, `APP_LOG_FORMAT`,
-   `APP_SERVER_HOST`, `APP_SERVER_PORT`, the four server timeout variables, and
-   `APP_SHUTDOWN_TIMEOUT`.
+3. `secrets.json`, `secrets.<APP_ENV>.json` — gitignored secret layers; the database password
+   goes here.
+4. `APP_*` environment variables — the final override: the log, server, and shutdown variables,
+   plus the `APP_DATABASE_*` family (`APP_DATABASE_HOST`, `APP_DATABASE_NAME`,
+   `APP_DATABASE_USER`, `APP_DATABASE_PASSWORD`, `APP_DATABASE_PORT`, and the pool settings).
 
 Every file is optional — a deployment can run on the base file and environment variables alone,
 or on environment variables only.
 
-## Building out the service
+## License
 
-The build points live in `internal`: `infrastructure/infrastructure.go` for the services the
-application composes on, `app/routes.go` for its domain services, `app/middleware.go` for its
-router-level middleware. `cmd/server` is the entrypoint alone and never changes.
-
-A domain service starts from its Entity. Give the Entity its own package, expose its Queries
-and Commands as the domain service's methods, bind those methods to routes in a `web.Module`,
-and mount the module in `routes` (`internal/app/routes.go`), its constructor drawing what it
-uses from the `Infrastructure` fields.
-
-An infrastructure service (a database pool, a storage client, an auth client) is a field on
-`Infrastructure` plus its construction in `New` (`internal/infrastructure/infrastructure.go`):
-assign the field, then declare the lifecycle on the coordinator —
-
-```go
-i.Pool = pool
-lc.Add(lifecycle.Service{Name: "db", Stage: 0, Start: pool.Ping, Shutdown: pool.Close, Check: pool})
-```
-
-Numbered stages start in ascending order ahead of the server's root stage and drain after it,
-so in-flight requests complete before their infrastructure closes. A service declared this way
-cannot be missing from the probe or the drain, and a field that does not exist fails the build
-at its access.
-
-Middleware that applies to every route stacks in `middleware` (`internal/app/middleware.go`),
-outermost first; middleware scoped to one domain service belongs on its module.
-
-Configuration grows by adding fields to `Config` in `internal/config/config.go` and delegating
-to their `Merge` and `Finalize` in the existing shape. The service keeps pace with its SDKs by
-updating its `go-core` and `go-web-sdk` pins and applying whatever adjustments the release
-notes call for.
+Apache 2.0 — see [LICENSE](LICENSE).

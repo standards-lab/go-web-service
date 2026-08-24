@@ -1,0 +1,10 @@
+# Project kind: this repository holds production Go source the developer owns and
+# answers for. The agent drafts changes as an implementation guide and writes tests,
+# docs, and context around them.
+[project]
+kind = "code"
+
+# Remote platform and the command that publishes a finished branch.
+[remote]
+platform = "github"
+publish = "gh pr create"

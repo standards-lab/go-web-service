@@ -7,6 +7,7 @@ import (
 
 	libconfig "github.com/standards-lab/go-core/config"
 	"github.com/standards-lab/go-core/logging"
+	"github.com/standards-lab/go-database"
 	"github.com/standards-lab/go-web-sdk"
 )
 
@@ -21,6 +22,7 @@ const defaultShutdownTimeout = 10 * time.Second
 type Config struct {
 	Log             logging.Config     `json:"log"`
 	Server          web.Config         `json:"server"`
+	Database        database.Config    `json:"database"`
 	ShutdownTimeout libconfig.Duration `json:"shutdown_timeout"`
 }
 
@@ -35,6 +37,7 @@ func (c *Config) Merge(src *Config) {
 	}
 	c.Log.Merge(&src.Log)
 	c.Server.Merge(&src.Server)
+	c.Database.Merge(&src.Database)
 }
 
 // Finalize applies the root default, reads the root's own environment
@@ -64,6 +67,9 @@ func (c *Config) Finalize(envPrefix string) error {
 	}
 	if err := c.Server.Finalize(envPrefix); err != nil {
 		return fmt.Errorf("server: %w", err)
+	}
+	if err := c.Database.Finalize(envPrefix); err != nil {
+		return fmt.Errorf("database: %w", err)
 	}
 	return nil
 }

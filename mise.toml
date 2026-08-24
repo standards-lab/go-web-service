@@ -28,3 +28,29 @@ run = "go mod tidy"
 [tasks.lint]
 description = "Run golangci-lint"
 run = "golangci-lint run ./..."
+
+# commands
+[tasks.db]
+description = "Run the db command (args after --)"
+run = "go run ./cmd/db"
+
+[tasks.migrate]
+description = "Apply all pending schema migrations"
+run = "go run ./cmd/db migrate up"
+
+[tasks.seed]
+description = "Load the reference data"
+run = "go run ./cmd/db seed"
+
+# services
+[tasks.db-up]
+description = "Start the local postgres and wait for health"
+run = "docker compose up -d --wait"
+
+[tasks.db-down]
+description = "Stop the local postgres (keep data)"
+run = "docker compose down"
+
+[tasks.db-reset]
+description = "Stop the local postgres and drop its data"
+run = "docker compose down -v"

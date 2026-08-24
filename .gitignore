@@ -1,3 +1,9 @@
+# Marathon session plan files.
+.claude/plans/
+
+# Per-machine mise overrides.
+mise.local.toml
+
 # Secrets are layered configuration and never committed.
 secrets*.json
 

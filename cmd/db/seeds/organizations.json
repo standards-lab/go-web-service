@@ -1,0 +1,9 @@
+[
+  { "parent": "", "code": "acme", "name": "Acme Corporation" },
+  { "parent": "acme", "code": "engineering", "name": "Engineering" },
+  { "parent": "engineering", "code": "platform", "name": "Platform" },
+  { "parent": "engineering", "code": "product", "name": "Product" },
+  { "parent": "acme", "code": "operations", "name": "Operations" },
+  { "parent": "operations", "code": "logistics", "name": "Logistics" },
+  { "parent": "acme", "code": "finance", "name": "Finance" }
+]

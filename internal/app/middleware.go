@@ -2,8 +2,8 @@ package app
 
 import (
 	"github.com/standards-lab/go-web-sdk"
-	"github.com/standards-lab/go-web-service/internal/infrastructure"
 	mw "github.com/standards-lab/go-web-sdk/middleware"
+	"github.com/standards-lab/go-web-service/internal/infrastructure"
 )
 
 // middleware declares the router-level stack, outermost first. It takes

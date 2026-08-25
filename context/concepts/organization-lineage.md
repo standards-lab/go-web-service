@@ -16,8 +16,8 @@ sibling-scoped unique codes are what make every composed path unique.
   `GET /organizations/path/{path...}` answers. A walk-down query (split the path, descend by code) is
   the optimization if resolution ever becomes hot; it is not needed now.
 - The lineage SQL belongs to the organization domain package, the read-side instance of the rule
-  that SQL stays with the consumer. Once the reads task lands, this section is expressed by the code and
-  goes; the section below stays.
+  that SQL stays with the consumer. Once `v1.data.reads.organization` lands, this section is expressed
+  by the code and goes; the section below stays.
 
 ## Held: materializing the lineage
 

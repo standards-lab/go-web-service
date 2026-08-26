@@ -192,7 +192,7 @@ func SelectPage[T any](
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var items []T
 	for rows.Next() {

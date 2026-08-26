@@ -24,53 +24,18 @@ settles it in plan mode; a section the code comes to express is deleted.
   `docs/` tier once the surfaces stop churning. The README carries only identity,
   getting-started, tasks, and configuration.
 
-## Reads (`v1.data.reads`) — settled direction
+## Reads and the service layout — built
 
-Settled in the capability-tiers planning session (2026-08-17); promoted from a task to a goal
-with three session-scoped tasks in the reads-replan session (2026-08-25), each repository on
-its own branch and pull request:
-
-- `v1.data.reads.query` — go-database's `query` package: page, sort, and exact-match filter
-  directives; a projection with one key field and name-to-expression fields; a builder that
-  emits standard SQL — placeholders through the dialect, paging in the SQL:2008
-  `OFFSET … FETCH` form, count and page as two statements, an unknown field a typed error
-  (go-database `context/concepts/query.md`).
-- `v1.data.reads.web` — go-web-sdk's HTTP read contract: the parsing of `page`, `size`, and
-  `sort` (`sort=name,-code`) and the `items`/`page`/`size`/`total` envelope (go-web-sdk
-  `context/concepts/direction.md`).
-- `v1.data.reads.organization` — this service's organization domain package with List, Find,
-  and find-by-path over `GET /organizations`, `GET /organizations/{id}`, and
-  `GET /organizations/path/{path...}`; `path` on every read, projected from the recursive
-  lineage query in the projection's FROM (`concepts/organization-lineage.md`); flat exact-match
-  filters on projected fields; an unknown sort or filter field answers 400; the import-boundary
-  lint (`design/stack.md`) lands with this first domain package. Remaining plan-mode detail
-  when the task is reached: the package's file shape — the projection with the lineage FROM,
-  its query functions, and its handlers — the sdk staging package's first contents, and the
-  `.golangci.yml` allowlist.
-
-## Service layout (settled in the reads-replan session, 2026-08-25)
-
-- `internal/` is the composition root only. `internal/{app,infrastructure,domain,reactors}`
-  construct, register, and mount; they define no domain infrastructure. `internal/domain.New`
-  constructs each domain package's services from infrastructure fields, and
-  `internal/app/routes.go` mounts their modules — the two edit points the template already
-  designates.
-- Domain packages — entities, domain services, projections, and their HTTP handlers together —
-  live at the module's base package layer, one package per domain. The grouping
-  (`domain/organization` versus a root-level `organization`) is settled at the organization
-  task's plan mode; the developer's instinct is `domain/organization`. Base packages outside
-  `internal/` are importable by other modules — accepted for a reference service, and named
-  here as a deliberate choice.
-- Promotion candidates stage in a base `sdk` package: request/response conventions not yet
-  library-worthy — first among them the domain-error-to-problem mapping for the reads 400/404
-  paths — are fleshed out there and promote to go-web-sdk or go-database when their design
-  settles. `v1.data.evaluation` is the scheduled checkpoint; every session in the goal names
-  what should promote outward — to the `sdk` package, the libraries, or the template.
-- Template implication on record: the template's `internal/domain` doc comment reads as if
-  services are defined in place. Once the base-package layout is proven here, the template's
-  doc.go and the landing-zone page should say defined in base packages, constructed in
-  `internal/domain` — a promotion candidate for the evaluation task or an earlier coordinator
-  sweep.
+The reads slice landed across the three repositories — go-database v0.2.0's `query` package,
+go-web-sdk v0.4.0's read contract, and this service's organization package
+(`organization-reads` session, 2026-08-26) — and the code expresses it. The domain-layer
+layout standard it settled and validated — role-aggregated files, the translation-file
+boundary, the `/api` module, the `sdk` staging package, the operation-shape principle — is
+`design/domain-architecture.md`. The staged library candidates and template implications are
+`concepts/sdk-promotion.md`, held for the writes planning session's consolidation, with
+`v1.data.evaluation` the final audit. Base packages outside `internal/` are importable by
+other modules — accepted for a reference service as a deliberate choice, the wiring kept
+compiler-private under `internal/`.
 
 ## Writes (`v1.data.writes`) — candidate direction
 

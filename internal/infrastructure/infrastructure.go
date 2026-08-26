@@ -19,10 +19,11 @@ type Infrastructure struct {
 
 // New constructs the infrastructure services in one place, each registering
 // on lc where it's built, so a service can't exist without a startup,
-// shutdown, or readiness declaration. lc goes unused today, because the
-// template's one service, Logger, has no lifecycle; it stays a parameter so
-// the first service that needs one — a database pool, for instance —
-// registers here without a signature change.
+// shutdown, or readiness declaration: the database registers at stage 0 with
+// its readiness check, ahead of the root stage. Construction performs no I/O
+// — connectivity belongs to the database's Start. A nil lc skips every
+// registration, which is how cmd/db reuses the construction and drives the
+// database's lifecycle itself.
 func New(
 	w io.Writer,
 	cfg *config.Config,

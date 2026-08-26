@@ -2,8 +2,7 @@
 // composition from the package's build points — routes.go registers the
 // modules the router mounts, and middleware.go declares the router-level
 // middleware stack, outermost first. Extending the service means editing a
-// build point's body; the signatures, cmd/server, and [App.Run] stay
-// untouched.
+// build point's body; cmd/server and [App.Run] stay untouched.
 //
 // [New] is the cold start, with no I/O: it constructs infrastructure (each
 // service registering on the coordinator where it is constructed), the

@@ -5,9 +5,9 @@ go 1.27
 require (
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/standards-lab/go-core v0.3.0
-	github.com/standards-lab/go-database v0.1.1
+	github.com/standards-lab/go-database v0.2.0
 	github.com/standards-lab/go-database/postgres v0.1.1
-	github.com/standards-lab/go-web-sdk v0.3.1
+	github.com/standards-lab/go-web-sdk v0.4.0
 )
 
 require (

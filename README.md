@@ -64,8 +64,9 @@ Configuration layers in a fixed precedence, later sources winning:
 3. `secrets.json`, `secrets.<APP_ENV>.json` — gitignored secret layers; the database password
    goes here.
 4. `APP_*` environment variables — the final override: the log, server, and shutdown variables,
-   plus the `APP_DATABASE_*` family (`APP_DATABASE_HOST`, `APP_DATABASE_NAME`,
-   `APP_DATABASE_USER`, `APP_DATABASE_PASSWORD`, `APP_DATABASE_PORT`, and the pool settings).
+   the `APP_DATABASE_*` family (`APP_DATABASE_HOST`, `APP_DATABASE_NAME`,
+   `APP_DATABASE_USER`, `APP_DATABASE_PASSWORD`, `APP_DATABASE_PORT`, and the pool settings),
+   and the reads paging policy (`APP_READS_DEFAULT_SIZE`, `APP_READS_MAX_SIZE`).
 
 Every file is optional — a deployment can run on the base file and environment variables alone,
 or on environment variables only.

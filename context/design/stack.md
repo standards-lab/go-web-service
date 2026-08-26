@@ -31,10 +31,12 @@ use, at the resolution the purpose requires.
 Only three kinds of package import a provider: the composition root (`internal/infrastructure`, which
 constructs the Postgres provider and hands the pool downward as a primitive), the `cmd/*` binaries, and
 domain packages that declare native use. Everything else — handlers, `internal/config`, and any
-domain package that stays within the standard tier — is provider-free. A
-lint step will enforce the allowlist, landing with the first domain package (`.golangci.yml`,
-`depguard`: the provider module is denied everywhere
-except the declared packages), so a package cannot take a native dependency without saying so.
+domain package that stays within the standard tier — is provider-free. The boundary is a
+documented convention; mechanical enforcement (`.golangci.yml`, `depguard` denying the
+provider module outside the declared packages) was deliberately deferred at the first domain
+package (2026-08-26) — the allowlist isn't validated against real usage yet, and an unproven
+denylist would block legitimate work. `v1.data.evaluation` re-asks with the full layer's
+evidence.
 
 ## What a provider swap changes
 
@@ -55,4 +57,6 @@ Every native use, by package, with what a port would replace:
   `CHECK` on `code` (`~` is Postgres syntax). The recursive lineage query is SQL:1999 and portable.
 - The migration and seed tooling in `cmd/db`: golang-migrate's pgx driver, and the `ON CONFLICT ON
   CONSTRAINT` idempotency in the organization loader.
+- `domain/organization` — no native use: the recursive lineage CTE is SQL:1999 and the whole
+  read path stays within the standard tier.
 - Domain packages as they land, each declaring the engine-specific SQL it owns.

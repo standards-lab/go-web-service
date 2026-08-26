@@ -5,19 +5,11 @@ capability-tiers planning session (2026-08-17). The org path (`/acme/engineering
 read-model projection composed at read time from the parent chain; nothing stores it, and the migrations session's
 sibling-scoped unique codes are what make every composed path unique.
 
-## Settled for `v1.data.reads`
-
-- `path` is on every read. The organization projection's FROM wraps a recursive query
-  (`WITH RECURSIVE`, SQL:1999 — portable) that walks the tree once per statement, and `path` is an
-  ordinary projected field, filterable and sortable like any other. This is what makes the library's
-  projection admit expression-backed fields, and it costs one whole-table walk per read, which is
-  fine at this scale.
-- Resolution — path to node — is a filter on that same lineage (`WHERE path = $1`), which is how
-  `GET /organizations/path/{path...}` answers. A walk-down query (split the path, descend by code) is
-  the optimization if resolution ever becomes hot; it is not needed now.
-- The lineage SQL belongs to the organization domain package, the read-side instance of the rule
-  that SQL stays with the consumer. Once `v1.data.reads.organization` lands, this section is expressed
-  by the code and goes; the section below stays.
+The read-side design landed in the `organization-reads` session (2026-08-26) and the code
+expresses it: `domain/organization`'s projection is declared from the `sdk.RecursivePath`
+computed-field pattern, `path` is an ordinary projected field, and the path lookup is a filter
+on it. One nuance survives as a note: the recursive CTE materializes per statement — every
+organization read walks the tree — which stays the accepted cost until the trigger below.
 
 ## Held: materializing the lineage
 

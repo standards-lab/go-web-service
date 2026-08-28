@@ -31,9 +31,10 @@ go-web-sdk v0.4.0's read contract, and this service's organization package
 (`organization-reads` session, 2026-08-26) — and the code expresses it. The domain-layer
 layout standard it settled and validated — role-aggregated files, the translation-file
 boundary, the `/api` module, the `sdk` staging package, the operation-shape principle — is
-`design/domain-architecture.md`. The staged library candidates and template implications are
-`concepts/sdk-promotion.md`, held for the writes planning session's consolidation, with
-`v1.data.evaluation` the final audit. Base packages outside `internal/` are importable by
+`design/domain-architecture.md`. The staged library candidates and template implications have
+all landed — go-database's and go-web-sdk's write releases and the template's
+`compose-on-releases` session — with `v1.data.evaluation` the final audit; the base `sdk`
+package deletes at `v1.data.writes.organization`. Base packages outside `internal/` are importable by
 other modules — accepted for a reference service as a deliberate choice, the wiring kept
 compiler-private under `internal/`.
 

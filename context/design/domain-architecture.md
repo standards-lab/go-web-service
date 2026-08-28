@@ -71,8 +71,8 @@ variation is different values at different construction sites.
 Library promotion candidates stage in the base `sdk` package: flat — a package meant to empty
 out accumulates no sub-packages — with each file named for the library its contents are bound
 for (`web.go` → go-web-sdk, `database.go` → go-database). Staging is cheap and deliberate; the
-`v1.data.evaluation` task rules on every tenant, and the writes planning session consolidates
-the current inventory (`concepts/sdk-promotion.md`).
+`v1.data.evaluation` task rules on every tenant. The consolidated inventory has landed in the
+libraries and the template; the package deletes at `v1.data.writes.organization`.
 
 ## The operation-shape principle
 

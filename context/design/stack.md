@@ -57,6 +57,11 @@ Every native use, by package, with what a port would replace:
   `CHECK` on `code` (`~` is Postgres syntax). The recursive lineage query is SQL:1999 and portable.
 - The migration and seed tooling in `cmd/db`: golang-migrate's pgx driver, and the `ON CONFLICT ON
   CONSTRAINT` idempotency in the organization loader.
-- `domain/organization` — no native use: the recursive lineage CTE is SQL:1999 and the whole
-  read path stays within the standard tier.
+- `domain/organization` — the read path stays within the standard tier (the lineage CTE is
+  SQL:1999). The command path declares three native uses: `pg_advisory_xact_lock` serializing
+  transfers against the cycle race (a port swaps in the engine's application lock —
+  `sp_getapplock`, `GET_LOCK`, `DBMS_LOCK` — or a `FOR UPDATE` mutex row), RETURNING reached
+  through the library dialect's renderer for create's identity envelope (a port supplies its
+  dialect's rendering or re-shapes the insert), and `now()` in the update SET lists
+  (`CURRENT_TIMESTAMP` is the strictly standard spelling).
 - Domain packages as they land, each declaring the engine-specific SQL it owns.

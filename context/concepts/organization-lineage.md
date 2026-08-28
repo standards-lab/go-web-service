@@ -13,8 +13,10 @@ organization read walks the tree — which stays the accepted cost until the tri
 
 ## Held: materializing the lineage
 
-The read-time query has no write-path cost, and the writes task's re-parent command (`v1.data.writes`) stays simple because of
-it. What would trigger storing the lineage is not scale but the auth layer: unit-scoped grants need
+The read-time query has no write-path cost, and the landed transfer command
+(`v1.data.writes.organization`) stays simple because of it: a guarded parent_id update behind
+an ancestor-walk cycle check, transfers serialized by the tree's advisory lock. What would
+trigger storing the lineage is not scale but the auth layer: unit-scoped grants need
 "is unit X under unit U?" on every authorized request, and a recursive walk per authorization check
 is the wrong cost model. When that arrives, three candidates, none chosen yet:
 
@@ -28,6 +30,7 @@ is the wrong cost model. When that arrives, three candidates, none chosen yet:
 - **Materialized text path** — the composed string stored per row with a `text_pattern_ops` index;
   prefix `LIKE` gives subtree queries. Standard SQL, the simplest to add, the weakest semantics.
 
-Whichever lands, the read model keeps `path` as a projected field, so the HTTP contract does not move.
-The write-path implication — what a re-parent must maintain — is the writes task's to weigh if the choice is
-pulled forward.
+Whichever lands, the read model keeps `path` as a projected field, so the HTTP contract does
+not move. The write-path implication — what a transfer must then maintain — lands in the
+transfer command when the choice arrives; the edit/transfer command split anticipates exactly
+this.

@@ -19,7 +19,9 @@ A domain package holds the whole layer in role-named files, each aggregating its
 layer:
 
 - `doc.go` — the layer's architectural statement.
-- `entities.go` — every data structure of the layer.
+- `entities.go` — every data structure of the layer, command DTOs included (settled at
+  `v1.data.writes.organization`; a `commands.go` role file remains the documented overflow
+  split).
 - `database.go` — every go-database translation: projections, directive lowering, scanning,
   exposed only as complete operations. Translation files are **capability-named** — one per
   infrastructure integration, named for the library it adapts (`storage.go`, `messaging.go`,
@@ -51,6 +53,27 @@ vocabulary, so an unknown sort or filter name is a typed rejection before any SQ
 the wire, a problem's detail carries error text only on a 400, where it is request-shaped and
 client-actionable; any other status sends the bare title.
 
+## The command side
+
+Settled at `v1.data.writes.organization`, by the organization commands:
+
+- A command handler works in one order: path id, then the If-Match precondition, then the
+  strictly decoded body, then the service. Commands return identity and version only; create
+  answers 201 with a Location header, delete 204.
+- Validation places by kind: the handler owns transport syntax (path id, precondition, body
+  decode), the service owns domain semantics (field rules mirroring the schema's checks), and
+  the translation file owns any check that needs SQL (the transfer cycle walk). The database's
+  own check constraints stay unmatched backstops — a breach is a 500, not a client error.
+- The layer's `web.ErrorWriter` matcher is its error vocabulary, wired in `Routes`: 428/400
+  for the precondition pair, 400 for validation and read-contract rejections, 404 for the
+  missing row, 409 for state conflicts (unique, foreign key, cycle), 412 for the failed guard.
+  Whether this stays per-layer or moves to a composition-root instance is on the operations
+  pass's record.
+- A mutation whose reason changes its validation or handling is its own command: edit rewrites
+  the descriptive fields; transfer moves the node, carries the cycle check under the tree's
+  advisory lock, and takes the action route (`POST /{id}/transfer`) — the shape the people
+  domain's action commands follow.
+
 ## The web layer
 
 The term is **handler**. A handler builds a route **group**, not a module: the module layer is
@@ -71,8 +94,9 @@ variation is different values at different construction sites.
 Library promotion candidates stage in the base `sdk` package: flat — a package meant to empty
 out accumulates no sub-packages — with each file named for the library its contents are bound
 for (`web.go` → go-web-sdk, `database.go` → go-database). Staging is cheap and deliberate; the
-`v1.data.evaluation` task rules on every tenant. The consolidated inventory has landed in the
-libraries and the template; the package deletes at `v1.data.writes.organization`.
+`v1.data.evaluation` task rules on every tenant. The consolidated reads-era inventory landed
+in the libraries and the template, and the package emptied at `v1.data.writes.organization` —
+then re-seeded with its next tenant, the If-Match precondition parse bound for go-web-sdk.
 
 ## The operation-shape principle
 
@@ -82,13 +106,13 @@ exactly that, and reuse is legitimate only when it falls out of well-factored la
 bending the emitted SQL toward another operation's shape. The test: *would this abstraction
 change the SQL I'd have written by hand?* The stack this sorts into:
 
-1. **The AST** (go-database `query`): models any standard statement faithfully.
+1. **The AST** (go-database `ast`): models any standard statement faithfully.
 2. **Operation shapes**: each named operation owns its idiomatic statement — the paginated
    list is count + page over one shared WHERE; the single-row read is a bare select + WHERE
    with no ordering, paging, or count; each future write its own shape.
-3. **Computed-field patterns** (`sdk.RecursivePath`): reusable builders for standard SQL
-   shapes, declared as spec values.
-4. **Execution generics** (`sdk.Scan`, the Select executors): statement + execution + scan,
+3. **Computed-field patterns** (`operation.RecursivePath`): reusable builders for standard
+   SQL shapes, declared as spec values.
+4. **Execution generics** (`exec.Scan`, the `exec` runners): statement + execution + scan,
    one per operation shape.
 5. **The domain translation file**: vocabulary only.
 
@@ -112,6 +136,6 @@ Held here until promoted to the landing zone:
 
 ## Deferred by design
 
-Command DTO placement (`entities.go` vs a `commands.go` role file) is the writes session's
-decision. Multi-entity role refinements belong to the first multi-entity layer. A holistic
-operation pass over the whole architecture is planned once the writes features are locked in.
+Multi-entity role refinements belong to the first multi-entity layer. The holistic operation
+pass over the whole architecture is the next step (`v1.data.writes.operations`), the writes
+features now locked in.

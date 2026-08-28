@@ -34,17 +34,21 @@ boundary, the `/api` module, the `sdk` staging package, the operation-shape prin
 `design/domain-architecture.md`. The staged library candidates and template implications have
 all landed — go-database's and go-web-sdk's write releases and the template's
 `compose-on-releases` session — with `v1.data.evaluation` the final audit; the base `sdk`
-package deletes at `v1.data.writes.organization`. Base packages outside `internal/` are importable by
+package emptied at `v1.data.writes.organization` and re-seeded with the If-Match precondition
+parse. Base packages outside `internal/` are importable by
 other modules — accepted for a reference service as a deliberate choice, the wiring kept
 compiler-private under `internal/`.
 
-## Writes (`v1.data.writes`) — candidate direction
+## Writes (`v1.data.writes`) — built through the organization surface
 
-go-database: the command result envelope, the optimistic-concurrency contract, and the error
-model. This service: the organization command surface. Two native choices are decided here:
-whether ids stay database-minted (`uuidv7()`, a Postgres builtin) or the application mints them
-(`uuid.NewV7()`, portable), and `RETURNING` for the concurrency contract, which is not ISO SQL
-and stays contained domain SQL.
+The writes slice landed across the stack — go-database v0.3.0's command contract, go-web-sdk
+v0.5.0's ErrorWriter, and this service's organization commands (`organization-commands`
+session, 2026-08-28) — and the code expresses it. Both native choices settled: ids stay
+database-minted (`uuidv7()`), and RETURNING is consumed through the dialect's renderer,
+contained in the library layers; the port list carries both. The command-side layout rules the
+next layer builds by are `design/domain-architecture.md`. The holistic operation pass
+(`v1.data.writes.operations`) remains, with this session's ergonomics findings on its record
+in the workspace roadmap.
 
 ## Domain direction (candidate until a task settles it)
 
@@ -82,7 +86,9 @@ surfaces, routes, constraint names, and enum vocabularies are settled per task.
 On record for the cross-board evaluation: `cmd/db` is heavy boilerplate to rewrite per service
 — the dispatch, verb, and construction layers want a cheaper per-service shape — and the
 migrate-wrapper direction culled in the migrations session gets re-asked there with real usage
-behind it.
+behind it. The strict command-body decoder (`decode[T]` in the organization handler:
+MaxBytesReader, DisallowUnknownFields) is a go-web-sdk promotion candidate to rule on
+alongside the staged If-Match parse.
 
 ## Prior R&D
 

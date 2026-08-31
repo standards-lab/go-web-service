@@ -1,7 +1,7 @@
 # go-web-service
 
 The reference web service of
-[Go Minimal](https://github.com/standards-lab/docs/blob/main/standards/go-minimal/index.md), a
+[Go Elemental](https://github.com/standards-lab/docs/blob/main/standards/go-elemental/index.md), a
 minimal-dependency Go implementation of
 [Elemental Architecture](https://github.com/standards-lab/docs/blob/main/architectures/elemental-architecture/index.md).
 Initialized from the [go-web-sdk-template](https://github.com/standards-lab/go-web-sdk-template).

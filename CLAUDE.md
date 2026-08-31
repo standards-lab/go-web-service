@@ -1,7 +1,7 @@
 # go-web-service
 
-The reference web service of Go Minimal, the Standards Lab organization's minimal-dependency Go
-standard: a production web service composed from go-core, go-web-sdk, and go-database on the
+The reference web service of Go Elemental, the Standards Lab organization's Go implementation of
+the Elemental Architecture: a production web service composed from go-core, go-web-sdk, and go-database on the
 go-web-sdk-template baseline, on one declared stack (Postgres). Managed with the marathon
 workflow; start from `context/README.md`.
 

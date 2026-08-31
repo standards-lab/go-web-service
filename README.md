@@ -3,7 +3,7 @@
 The reference web service of
 [Go Elemental](https://github.com/standards-lab/docs/blob/main/standards/go-elemental/index.md), a
 minimal-dependency Go implementation of
-[Elemental Architecture](https://github.com/standards-lab/docs/blob/main/architectures/elemental-architecture/index.md).
+[Elemental Architecture](https://github.com/standards-lab/docs/blob/main/architecture.md).
 Initialized from the [go-web-sdk-template](https://github.com/standards-lab/go-web-sdk-template).
 
 ## Stack

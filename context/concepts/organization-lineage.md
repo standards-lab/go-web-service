@@ -8,7 +8,9 @@ sibling-scoped unique codes are what make every composed path unique.
 The read-side design landed in the `organization-reads` session (2026-08-26) and the code
 expresses it: `domain/organization`'s projection is declared from the `sdk.RecursivePath`
 computed-field pattern, `path` is an ordinary projected field, and the path lookup is a filter
-on it. One nuance survives as a note: the recursive CTE materializes per statement — every
+on it. (The `RecursivePath` mechanism retires under the DSL strategy — `v1.data.sql` moves the
+CTE into an authored SQL file; the read-model-projection claim itself is unchanged.) One
+nuance survives as a note: the recursive CTE materializes per statement — every
 organization read walks the tree — which stays the accepted cost until the trigger below.
 
 ## Held: materializing the lineage

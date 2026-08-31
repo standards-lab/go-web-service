@@ -18,7 +18,8 @@ workflow; start from `context/README.md`.
   variant is never a switch inside this service; it would be a separate focused reference.
 - **Documented layers.** The documented layer is the unit of change — each capability lands
   complete before the next begins (`context/design/documented-layers.md`). The service is
-  versionless until its first release; no tags, no `CHANGELOG.md` yet.
+  versionless until its first release: no tags yet; `CHANGELOG.md` accumulates under
+  `[Unreleased]` until the first cut, which `release.yml` turns into a GitHub release.
 - **Tests.** Hermetic by default: no live database in the suite. `internal/config/configtest`
   is the single source of valid test configuration — a new subsystem's required fields are set
   there once. Database-backed proof runs against the compose stack.

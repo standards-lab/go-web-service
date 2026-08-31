@@ -4,8 +4,10 @@
 # Per-machine mise overrides.
 mise.local.toml
 
-# Secrets are layered configuration and never committed.
+# Secrets are layered configuration and never committed; the example file is
+# the one committed exception.
 secrets*.json
+!secrets.example.json
 
 # Build and coverage artifacts.
 bin/

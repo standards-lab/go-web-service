@@ -13,11 +13,13 @@ Initialized from the [go-web-sdk-template](https://github.com/standards-lab/go-w
 ## Getting started
 
 [mise](https://mise.jdx.dev/) provisions the toolchain and runs the tasks. The database password
-lives in the gitignored secrets layer:
+lives in the gitignored secrets layer; copy the committed example to create it. A missing
+`secrets.json` is not a load error — the service starts with an empty password and fails only at
+the database connection, so this step comes first:
 
 ```sh
 mise trust && mise install
-echo '{"database":{"password":"app"}}' > secrets.json
+cp secrets.example.json secrets.json
 
 mise run db-up      # start the local Postgres and wait for health
 mise run migrate    # apply the schema migrations
@@ -35,9 +37,31 @@ curl localhost:8080/readyz    # 200 {"status":"ready","checks":[...]}  — lifec
 
 Ctrl-C drains in-flight requests and exits with `server stopped`.
 
+## API
+
+The organization domain is mounted under `/api`:
+
+| Method | Path | What it does |
+|--------|------|--------------|
+| `GET` | `/api/organizations` | List organizations (paged) |
+| `GET` | `/api/organizations/{id}` | Find one by id |
+| `GET` | `/api/organizations/path/{path...}` | Find one by hierarchical path |
+| `POST` | `/api/organizations` | Create an organization |
+| `PATCH` | `/api/organizations/{id}` | Edit an organization |
+| `POST` | `/api/organizations/{id}/transfer` | Move it under a new parent |
+| `DELETE` | `/api/organizations/{id}` | Delete an organization |
+
+```sh
+curl localhost:8080/api/organizations              # the seeded reference data, paged
+curl localhost:8080/api/organizations/path/acme/engineering    # lookup by hierarchical path
+```
+
 ## Tasks
 
-Each task wraps a plain command, so the repository works without mise:
+Each task wraps a plain command, so the repository works without mise — with one caveat:
+`mise.toml` sets `APP_ENV=local`, so a bare `go run ./cmd/server` outside mise loads the base
+configuration alone and binds `0.0.0.0` at info logging instead of the local overlay's loopback
+and debug. Set `APP_ENV=local` yourself when running without mise.
 
 | Task | Command | What it does |
 |------|---------|--------------|
@@ -70,6 +94,12 @@ Configuration layers in a fixed precedence, later sources winning:
 
 Every file is optional — a deployment can run on the base file and environment variables alone,
 or on environment variables only.
+
+The compose file honors `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_DB`, and
+`POSTGRES_PASSWORD` for the container, but the service does not read them: moving the container
+off the defaults splits the two until the matching `APP_DATABASE_*` variable (or secrets entry)
+follows. The defaults pair with `config.json` and `secrets.example.json`; change both sides
+together.
 
 ## License
 

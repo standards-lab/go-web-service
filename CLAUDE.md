@@ -5,13 +5,6 @@ standard: a production web service composed from go-core, go-web-sdk, and go-dat
 go-web-sdk-template baseline, on one declared stack (Postgres). Managed with the marathon
 workflow; start from `context/README.md`.
 
-## Role boundary
-
-go-web-service is a marathon **code** project (`.claude/marathon.toml` declares
-`kind = "code"`). The developer owns the production Go source — they apply it and answer for
-it. The agent writes everything else: tests, godoc and `doc.go`, prose documentation, the files
-in `context/`, the implementation guide, and the reset file.
-
 ## Repository specifics
 
 - **Module layout.** One module at the root, `github.com/standards-lab/go-web-service`, with

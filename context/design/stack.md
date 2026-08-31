@@ -4,6 +4,13 @@ The technologies this service composes, declared once, and the rules that keep e
 belongs. Settled in the capability-tiers planning session (2026-08-17); the port list grows as layers
 land.
 
+> Superseded direction (2026-08-31): the DSL strategy (`standards-lab
+> context/design/dsl-driven-services.md`, executed by `v1.data.sql`) replaces the query
+> vocabulary with authored SQL files carrying per-file tier headers, and retires `cmd/db` and
+> golang-migrate for a library `migrate` mechanism — which also changes how this note's port
+> list is maintained (every SQL file becomes a port-list candidate via its header). The claims
+> below describe the code as built; the executing sessions restate this note.
+
 ## One declared stack
 
 The service is one cohesive composition on one stack. It runs Postgres for SQL (18, from the compose

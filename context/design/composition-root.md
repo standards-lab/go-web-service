@@ -22,9 +22,10 @@ go-core's staged coordinator replaced.
   stage 0, ahead of the root stage, with its readiness check — so a subsystem cannot be
   constructed yet missing from startup, teardown, or the probe.
 - `internal/domain` and `internal/reactors` are the template's domain and reactor composition
-  layers, still empty. Domain services are defined in base-layer domain packages and
-  constructed here (`concepts/data-layer.md`, "Service layout"); these packages register and
-  compose only.
+  layers. `internal/domain` constructs the landed domain services (`domain/organization`
+  first); `internal/reactors` is still empty. Domain services are defined in base-layer domain
+  packages and constructed here (`concepts/data-layer.md`, "Service layout"); these packages
+  register and compose only.
 - Both binaries compose on go-core's `process` package for the pre-infrastructure main
   sequence, so the exit-code convention cannot drift between them.
 - `cmd/db` reuses the construction with no coordinator: `withInfrastructure` passes nil —

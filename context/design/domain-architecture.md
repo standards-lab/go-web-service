@@ -67,8 +67,10 @@ Settled at `v1.data.writes.organization`, by the organization commands:
 - The layer's `web.ErrorWriter` matcher is its error vocabulary, wired in `Routes`: 428/400
   for the precondition pair, 400 for validation and read-contract rejections, 404 for the
   missing row, 409 for state conflicts (unique, foreign key, cycle), 412 for the failed guard.
-  Whether this stays per-layer or moves to a composition-root instance is on the operations
-  pass's record.
+  Settled at the 2026-08-31 retrospective (`v1.web.adapter`): the writer becomes group-scoped
+  behind go-web-sdk's error-handler adapter, with the shared library vocabulary composed as a
+  common matcher and the layer contributing only its own errors; the per-layer wiring below
+  describes the code as built until that session lands.
 - A mutation whose reason changes its validation or handling is its own command: edit rewrites
   the descriptive fields; transfer moves the node, carries the cycle check under the tree's
   advisory lock, and takes the action route (`POST /{id}/transfer`) — the shape the people
@@ -105,6 +107,12 @@ from the statement an expert would hand-write; an API layer earns its place by r
 exactly that, and reuse is legitimate only when it falls out of well-factored layers without
 bending the emitted SQL toward another operation's shape. The test: *would this abstraction
 change the SQL I'd have written by hand?* The stack this sorts into:
+
+> Superseded (2026-08-31): the DSL strategy (`standards-lab
+> context/design/dsl-driven-services.md`, `v1.data.sql`) is this principle taken to its
+> conclusion — the statement an expert would hand-write becomes the authored artifact itself.
+> The principle stands; the enumerated stack below describes the v0.3.0 vocabulary as built
+> and is restated by the executing sessions.
 
 1. **The AST** (go-database `ast`): models any standard statement faithfully.
 2. **Operation shapes**: each named operation owns its idiomatic statement — the paginated

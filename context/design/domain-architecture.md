@@ -133,7 +133,7 @@ express* the operation through exported API; an inelegant-but-expressible shape 
 Held here until promoted to the landing zone:
 
 - The domain layer as a compositional grouping — one package, one Domain Service, one handler
-  — is a Go Minimal expression candidate.
+  — is a Go Elemental expression candidate.
 - The capability-named translation file is the in-package counterpart of EA's
   downward-dependency rule.
 - **Open tension:** EA's element definition says a Domain Service "anchors exactly one Entity"

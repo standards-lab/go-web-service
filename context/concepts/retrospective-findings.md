@@ -3,7 +3,9 @@
 Recorded at the 2026-08-31 workspace retrospective, from a full evaluation of the service as
 landed (`v1.data.writes.organization`). Grouped by the session that consumes each finding;
 the roadmap tasks cite this note (`v1.data.sql.organization`, `v1.data.sql.startup`,
-`goals.v1.auth`, `v1.testing`). It decays as those sessions consume it. The evaluation's
+`goals.v1.auth`). It decays as those sessions consume it; `v1.testing` consumed its section
+on 2026-09-01 (the decisions and the assertion list live in
+`standards-lab/context/design/testing-hierarchy.md`). The evaluation's
 verdict for balance: the composition root is the cleanest part of the repo — construction
 does no I/O, registration happens at construction, ordering is delegated, probes query the
 live coordinator — and the transfer implementation is correct as written; the findings are
@@ -81,19 +83,6 @@ Seams that do not exist yet, better cut deliberately than mid-auth-session:
   `internal/domain.New(infra)` (no error return): the roadmap adds a logger, tracer,
   authorization evaluator, and cross-domain interfaces — a per-domain deps struct and
   `New(infra) (*Domain, error)` is a ten-line change now, a four-domain refactor later.
-
-## For the testing session (`v1.testing`)
-
-The evaluation's coverage facts, as inputs: every function in
-`domain/organization/database.go` and five of six service methods sit at 0.0% — the transfer
-cycle rejection, concurrent transfers under the advisory lock, the guard's 404-vs-412 split,
-the RETURNING scan, the recursive projection, `NULLS NOT DISTINCT` root-code uniqueness, path
-recomposition after transfer, migration DDL, and seed idempotency are proven only by the
-manual compose-stack ritual, which is documented nowhere (the README shows curl for the
-probes and nothing for `/api/organizations`). CI runs no database. `handler_test.go` is a
-good rejection-path suite (`organization.New(nil)`, honestly labeled) but is the whole story.
-The session decides the tiers, their cadence against the per-PR unit rate, and the
-against-database suite's shape.
 
 ## Smaller items with no owning session
 

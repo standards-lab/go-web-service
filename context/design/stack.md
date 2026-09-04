@@ -10,6 +10,10 @@ land.
 > golang-migrate for a library `migrate` mechanism — which also changes how this note's port
 > list is maintained (every SQL file becomes a port-list candidate via its header). The claims
 > below describe the code as built; the executing sessions restate this note.
+>
+> Settled (2026-09-03): the `v1.data.sql.prototype` experiment built the shape, and
+> `v1.data.sql.integration.service` applies it here; the port list then becomes the set of
+> files declaring `--| tier: native`.
 
 ## One declared stack
 

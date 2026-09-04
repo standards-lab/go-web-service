@@ -7,6 +7,13 @@ Settled in the relay session that created the repository (2026-08-24), proven by
 server; it supersedes the composite-shutdown-hook arrangement the predecessor recorded, which
 go-core's staged coordinator replaced.
 
+> Superseded direction (2026-09-03): the `v1.data.sql.prototype` experiment settled the
+> composition root as one file per layer under `internal/app` (`infrastructure.go`,
+> `admin.go`, `domain.go`, `reactors.go`, with `routes.go` the list of mounts),
+> `internal/data` as the database's home, and `cmd/db` retired into the admin mount.
+> `v1.data.sql.integration.service` applies it and rewrites this note; the text below
+> describes the code as built.
+
 ## Layout
 
 - `cmd/server` is the process entrypoint and nothing else: `main.go` composes its run function
@@ -41,7 +48,7 @@ and readiness never flips. The predecessor's composite shutdown hook, and its ca
 hung drain starving infrastructure teardown, are gone with it — ordering is the coordinator's,
 declared per service at registration.
 
-## The hermetic test contract
+## The unit-test contract
 
 The suite runs with no live database, so it proves the cold start and the startup contract:
 construction performs no I/O, a dead database fails `Run` to exit 1 without a ready record, and

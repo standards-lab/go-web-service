@@ -136,11 +136,11 @@ Held here until promoted to the landing zone:
   — is a Go Elemental expression candidate.
 - The capability-named translation file is the in-package counterpart of EA's
   downward-dependency rule.
-- **Open tension:** EA's element definition says a Domain Service "anchors exactly one Entity"
-  (and rejected "feature" as an element on that basis). The one-service-per-layer standard
-  amends that the moment a multi-entity layer lands. Organization is single-entity, so nothing
-  conflicts yet; the people or inventory session — or a coordinator-level EA amendment —
-  settles it deliberately.
+- **Resolved (2026-09-03):** EA's element definition said a Domain Service "anchors exactly
+  one Entity". The `v1.data.sql.prototype` review amended it: a Domain Service anchors a
+  domain, a composition of one or more Entities, and "exactly one" was the single-entity
+  special case. The docs pass lands the amendment in the landing zone; the
+  `v1.data.sql.integration.service` task cites it here.
 
 ## Deferred by design
 

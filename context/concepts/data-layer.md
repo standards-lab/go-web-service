@@ -87,7 +87,7 @@ On record for the cross-board evaluation — with two items answered at the 2026
 retrospective: the `cmd/db` boilerplate and the re-asked migrate-wrapper direction resolve
 under the DSL strategy (`standards-lab context/design/dsl-driven-services.md`) — `cmd/db`
 retires for a library `migrate` mechanism triggered by the composition root
-(`v1.data.sql.migrate`, `v1.data.sql.startup`). The strict command-body decoder (`decode[T]`
+(`v1.data.sql.integration.service`). The strict command-body decoder (`decode[T]`
 in the organization handler: MaxBytesReader, DisallowUnknownFields) is a go-web-sdk promotion
 candidate now assigned to `v1.web.adapter` alongside the staged If-Match parse.
 

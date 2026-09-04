@@ -2,8 +2,8 @@
 
 Recorded at the 2026-08-31 workspace retrospective, from a full evaluation of the service as
 landed (`v1.data.writes.organization`). Grouped by the session that consumes each finding;
-the roadmap tasks cite this note (`v1.data.sql.organization`, `v1.data.sql.startup`,
-`goals.v1.auth`). It decays as those sessions consume it; `v1.testing` consumed its section
+the roadmap tasks cite this note (`v1.data.sql.integration.service`,
+`v1.data.sql.integration.listener`, `goals.v1.auth`). It decays as those sessions consume it; `v1.testing` consumed its section
 on 2026-09-01 (the decisions and the assertion list live in
 `standards-lab/context/design/testing-hierarchy.md`). The evaluation's
 verdict for balance: the composition root is the cleanest part of the repo — construction
@@ -11,7 +11,7 @@ does no I/O, registration happens at construction, ordering is delegated, probes
 live coordinator — and the transfer implementation is correct as written; the findings are
 headroom.
 
-## For the domain rewrite (`v1.data.sql.organization`)
+## For the domain rewrite (`v1.data.sql.integration.service`)
 
 Extract before domains multiply — four copies of each is the alternative:
 
@@ -42,7 +42,7 @@ Error semantics to settle in the rewrite (they interlock with go-database's
 cast error surfacing as 500; a database outage (`ErrNotReady`/`ErrConnectionFailed`) answers
 503, not 500.
 
-## For startup and the management listener (`v1.data.sql.startup`)
+## For startup and the management listener (`v1.data.sql.integration.listener`)
 
 - go-web-sdk's env composition hardcodes the `"server"` segment, so a second `web.Config`
   block cannot exist under one prefix — the SDK-side fix is on
@@ -50,7 +50,7 @@ cast error surfacing as 500; a database outage (`ErrNotReady`/`ErrConnectionFail
 - The composition root is singular by shape, not by parameter: `App` holds one `server`
   field, `routes()` feeds one router, `middleware()` is one stack, `RegisterHealth` is called
   once. The second listener is a real reshape of `internal/app`, and the template takes the
-  same reshape in its refresh (`v1.data.sql.hardening`).
+  same reshape (`v1.data.sql.integration.template`).
 - Developer-loop drift found around the compose stack: `compose/postgres.yml` honors
   `POSTGRES_PORT`/`POSTGRES_USER`/`POSTGRES_DB` while `config.json` declares none of them —
   set one and the tooling silently migrates/seeds/serves against the wrong database until
@@ -74,8 +74,8 @@ Seams that do not exist yet, better cut deliberately than mid-auth-session:
   changes at once, so the carrier design precedes the fourth domain.
 - **The single-row path has no authorization seam.** The list path can AND an extra predicate
   into both count and page, but the one-row read accepts one equality and nothing else — a
-  row-level grant filter on `GET /{id}` is not expressible. A `query`-mechanism requirement to
-  discover now (`v1.data.sql.plan`), not mid-auth.
+  row-level grant filter on `GET /{id}` is not expressible. A requirement on `sqlate`'s
+  projection to settle before auth, not mid-auth.
 - **Subtree authorization forces the lineage decision** (`concepts/organization-lineage.md`):
   unit-scoped grants ask "is X under U?" per request against a per-statement recursive CTE,
   and `path` is computed, so filtering on it can never use an index.

@@ -88,8 +88,9 @@ retrospective: the `cmd/db` boilerplate and the re-asked migrate-wrapper directi
 under the DSL strategy (`standards-lab context/design/dsl-driven-services.md`) — `cmd/db`
 retires for a library `migrate` mechanism triggered by the composition root
 (`v1.data.sql.integration.service`). The strict command-body decoder (`decode[T]`
-in the organization handler: MaxBytesReader, DisallowUnknownFields) is a go-web-sdk promotion
-candidate now assigned to `v1.web.adapter` alongside the staged If-Match parse.
+in the organization handler: MaxBytesReader, DisallowUnknownFields) landed in go-web-sdk v0.6.0
+as `web.DecodeJSON`, with the staged If-Match parse as `web.IfMatch`; the service adopts both at
+`v1.data.sql.integration.service`.
 
 ## Prior R&D
 

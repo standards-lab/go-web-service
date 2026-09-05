@@ -24,12 +24,13 @@ Extract before domains multiply — four copies of each is the alternative:
   vocabulary identical for every domain (`QueryError`, `UnknownFieldError`,
   `UnknownOperatorError`, `ErrUniqueViolation`, `ErrForeignKeyViolation`,
   `ErrVersionMismatch`, `sql.ErrNoRows`, `PreconditionError`); only `ErrCycle` is
-  organization's. `ErrorWriter` already takes a matcher list, first match wins — compose
+  organization's. `QueryError` and `PreconditionError` map themselves in go-web-sdk v0.6.0 and
+  leave the list. `ErrorWriter` already takes a matcher list, first match wins — compose
   `web.NewErrorWriter(orgStatus, sdk.CommonStatus)` instead of copying the switch (four
   places to forget 412).
 - **`decode[T]`, `pathID`, and the `ErrValidation`-wrapping UUID parse** are domain-independent
-  and promote (decode and the If-Match parse to go-web-sdk via `v1.web.adapter`; the UUID
-  path helper wherever the adapter session places it).
+  and promote (decode and the If-Match parse landed in go-web-sdk v0.6.0 as `web.DecodeJSON` and
+  `web.IfMatch`; the UUID path helper is still unplaced).
 - **Do not copy forward**: the `UnknownOperatorError` matcher branch is unreachable —
   `directives()` only ever emits `OpEq`, so filters are exact-match-only and the branch
   entrenches a vocabulary fiction; PATCH-with-PUT-semantics on `Edit` (omit `name` → 400 —

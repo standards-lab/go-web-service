@@ -50,8 +50,9 @@ as a parameter, keeping the file a service-shape-free adapter.
 No statement, connection, or query type crosses out of a translation file. The service surface
 and the handlers work at the web contract; the projection is the read contract's single field
 vocabulary, so an unknown sort or filter name is a typed rejection before any SQL renders. On
-the wire, a problem's detail carries error text only on a 400, where it is request-shaped and
-client-actionable; any other status sends the bare title.
+the wire, a problem's detail carries error text only on a 400 at the pinned go-web-sdk v0.5.0;
+v0.6.0's built-in set is 400, 413, and 428, with `ErrorWriter.Detail` adding a layer's own,
+adopted at `v1.data.sql.integration.service`. Any other status sends the bare title.
 
 ## The command side
 
@@ -67,10 +68,11 @@ Settled at `v1.data.writes.organization`, by the organization commands:
 - The layer's `web.ErrorWriter` matcher is its error vocabulary, wired in `Routes`: 428/400
   for the precondition pair, 400 for validation and read-contract rejections, 404 for the
   missing row, 409 for state conflicts (unique, foreign key, cycle), 412 for the failed guard.
-  Settled at the 2026-08-31 retrospective (`v1.web.adapter`): the writer becomes group-scoped
-  behind go-web-sdk's error-handler adapter, with the shared library vocabulary composed as a
-  common matcher and the layer contributing only its own errors; the per-layer wiring below
-  describes the code as built until that session lands.
+  go-web-sdk v0.6.0 ships the error-handler adapter (`Group.SetErrorWriter`, `Group.HandleErr`)
+  and maps the precondition pair itself; the layer converts at
+  `v1.data.sql.integration.service`, composing the shared library vocabulary as a common
+  matcher and contributing only its own errors. The per-layer wiring here describes the code
+  as built until then.
 - A mutation whose reason changes its validation or handling is its own command: edit rewrites
   the descriptive fields; transfer moves the node, carries the cycle check under the tree's
   advisory lock, and takes the action route (`POST /{id}/transfer`) — the shape the people

@@ -2,67 +2,41 @@ package sdk_test
 
 import (
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/standards-lab/go-web-service/sdk"
 )
 
-func ifMatch(t *testing.T, header string) (int64, error) {
+func pathID(t *testing.T, value string) (string, error) {
 	t.Helper()
-	r := httptest.NewRequest("PATCH", "/", nil)
-	if header != "" {
-		r.Header.Set("If-Match", header)
-	}
-	return sdk.IfMatch(r)
+	mux := http.NewServeMux()
+	var id string
+	var err error
+	mux.HandleFunc("GET /things/{id}", func(_ http.ResponseWriter, r *http.Request) {
+		id, err = sdk.PathID(r, "id")
+	})
+	mux.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/things/"+value, nil))
+	return id, err
 }
 
-func TestIfMatch_ParsesStrongIntegerTags(t *testing.T) {
-	cases := map[string]int64{
-		`"3"`:   3,
-		`"0"`:   0,
-		` "7" `: 7,
-		`"-1"`:  -1,
-	}
-	for header, want := range cases {
-		got, err := ifMatch(t, header)
-		if err != nil {
-			t.Errorf("IfMatch(%q) error: %v", header, err)
-			continue
-		}
-		if got != want {
-			t.Errorf("IfMatch(%q) = %d, want %d", header, got, want)
+func TestPathID_ReturnsCanonicalForm(t *testing.T) {
+	const want = "0192b3a4-5c6d-7e8f-9a0b-1c2d3e4f5a6b"
+	for _, in := range []string{want, "0192B3A4-5C6D-7E8F-9A0B-1C2D3E4F5A6B"} {
+		got, err := pathID(t, in)
+		if err != nil || got != want {
+			t.Errorf("PathID(%q) = %q, %v; want %q", in, got, err, want)
 		}
 	}
 }
 
-func TestIfMatch_MissingHeader(t *testing.T) {
-	_, err := ifMatch(t, "")
-
-	var pre *sdk.PreconditionError
-	if !errors.As(err, &pre) {
-		t.Fatalf("error = %v, want *PreconditionError", err)
-	}
-	if !pre.Missing {
-		t.Error("Missing = false, want true for an absent header")
-	}
-	if pre.Error() == "" {
-		t.Error("missing-header error carries no message")
-	}
-}
-
-func TestIfMatch_RejectsMalformedTags(t *testing.T) {
-	cases := []string{`3`, `*`, `W/"3"`, `""`, `"abc"`, `"1", "2"`}
-	for _, header := range cases {
-		_, err := ifMatch(t, header)
-
-		var pre *sdk.PreconditionError
-		if !errors.As(err, &pre) {
-			t.Errorf("IfMatch(%q) error = %v, want *PreconditionError", header, err)
-			continue
-		}
-		if pre.Missing {
-			t.Errorf("IfMatch(%q): Missing = true, want false for a present header", header)
+func TestPathID_RejectsNonUUIDs(t *testing.T) {
+	for _, in := range []string{"42", "not-a-uuid", "0192b3a4-5c6d-7e8f-9a0b"} {
+		_, err := pathID(t, in)
+		var pe *sdk.PathError
+		if !errors.As(err, &pe) || pe.Name != "id" || pe.Value != in {
+			t.Errorf("PathID(%q) error = %v; want a *PathError naming id and the value", in, err)
 		}
 	}
 }

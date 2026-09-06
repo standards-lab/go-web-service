@@ -51,7 +51,7 @@ cast error surfacing as 500; a database outage (`ErrNotReady`/`ErrConnectionFail
 - The composition root is singular by shape, not by parameter: `App` holds one `server`
   field, `routes()` feeds one router, `middleware()` is one stack, `RegisterHealth` is called
   once. The second listener is a real reshape of `internal/app`, and the template takes the
-  same reshape (`v1.data.sql.integration.template`).
+  same reshape under the listener task's own repositories.
 - Developer-loop drift found around the compose stack: `compose/postgres.yml` honors
   `POSTGRES_PORT`/`POSTGRES_USER`/`POSTGRES_DB` while `config.json` declares none of them —
   set one and the tooling silently migrates/seeds/serves against the wrong database until

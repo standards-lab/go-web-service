@@ -7,15 +7,13 @@ import (
 
 	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-web-sdk"
+
 	"github.com/standards-lab/go-web-service/internal/config"
-	"github.com/standards-lab/go-web-service/internal/domain"
-	"github.com/standards-lab/go-web-service/internal/infrastructure"
-	"github.com/standards-lab/go-web-service/internal/reactors"
 )
 
-// App is the application layer: it assembles infrastructure, the domain, and
-// the reactors into a router and a lifecycle coordinator, and runs the
-// process.
+// App is the application layer: it assembles infrastructure, the admin
+// layer, the domain, and the reactors into a router and a lifecycle
+// coordinator, and runs the process.
 type App struct {
 	cfg    *config.Config
 	logger *slog.Logger
@@ -23,23 +21,30 @@ type App struct {
 	server *web.Server
 }
 
+// New is the cold start: it composes the layers in dependency order and
+// performs no I/O, so a failed construction leaks no connections.
 func New(cfg *config.Config, w io.Writer) (*App, error) {
 	lc := lifecycle.New()
 
-	infra, err := infrastructure.New(w, cfg, lc)
+	infra, err := newInfrastructure(w, cfg, lc)
 	if err != nil {
 		return nil, err
 	}
 
-	dom := domain.New(infra)
+	adm, err := newAdmin(infra, cfg, lc)
+	if err != nil {
+		return nil, err
+	}
 
-	if _, err := reactors.New(infra, dom, lc); err != nil {
+	dom := newDomain(infra, lc)
+
+	if _, err := newReactors(infra, dom, lc); err != nil {
 		return nil, err
 	}
 
 	router := web.NewRouter()
 	router.Use(middleware(infra)...)
-	for _, m := range routes(dom, cfg) {
+	for _, m := range routes(dom, adm, cfg) {
 		router.Mount(m)
 	}
 
@@ -66,6 +71,9 @@ func New(cfg *config.Config, w io.Writer) (*App, error) {
 	}, nil
 }
 
+// Run is the hot start plus shutdown: the coordinator starts every stage,
+// serves until ctx ends or a service fails, and drains within the
+// configured timeout. It returns the process exit code.
 func (a *App) Run(ctx context.Context) int {
 	if err := a.lc.Run(ctx, a.cfg.ShutdownTimeout.Duration()); err != nil {
 		a.logger.Error("service failed", "error", err)

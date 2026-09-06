@@ -1,0 +1,27 @@
+# sqlint: the module's SQL conventions, one file per module at its root.
+# The engine and the sources mirror the runtime catalog the composition
+# root builds (internal/app/infrastructure.go), so the linter compiles
+# every statement exactly as the service does: the library's patterns
+# under sql, the application's under app, against PostgreSQL's native
+# forms. Each role names its directories and the checks that apply.
+
+engine = "github.com/standards-lab/sqlate/postgres"
+
+[sources]
+sql = "github.com/standards-lab/sqlate"
+app = "data/patterns"
+
+[statements]
+dirs = ["domain/*/statements", "data/statements"]
+verb_named = true
+delimiter = true
+native_forms = true
+
+[patterns]
+dirs = ["data/patterns"]
+delimiter = true
+native_forms = true
+
+[migrations]
+dirs = ["data/migrations"]
+single_statement = true

@@ -8,11 +8,10 @@ settles it in plan mode; a section the code comes to express is deleted.
 
 ## Strategy
 
-- The service demonstrates both tiers of the database capability on purpose: the library's
-  standard tier (ISO SQL through the wrapper and the query vocabulary) throughout, and native
-  Postgres features where they earn it, each contained in a package that declares it and
-  entered in the port list (`design/stack.md`). Standard SQL is preferred where it costs
-  nothing; a native choice is a choice, named as such.
+- The service demonstrates both tiers of the database capability on purpose: standard SQL
+  in authored files throughout, and native Postgres features where they earn it, each in a
+  file that declares it in its header and so enters the port list (`design/stack.md`).
+  Standard SQL is preferred where it costs nothing; a native choice is a choice, named as such.
 - Library-bound infrastructure is prototyped natively in the SDK repository that owns it —
   go-database for the persistence surface, go-web-sdk for the web surface — linked into this
   repository through the local gitignored `go.work` during development. Nothing is staged under
@@ -24,45 +23,18 @@ settles it in plan mode; a section the code comes to express is deleted.
   `docs/` tier once the surfaces stop churning. The README carries only identity,
   getting-started, tasks, and configuration.
 
-## Reads and the service layout — built
+## Reads and writes — built, and rewritten onto authored SQL
 
-The reads slice landed across the three repositories — go-database v0.2.0's `query` package,
-go-web-sdk v0.4.0's read contract, and this service's organization package
-(`organization-reads` session, 2026-08-26) — and the code expresses it. The domain-layer
-layout standard it settled and validated — role-aggregated files, the translation-file
-boundary, the `/api` module, the `sdk` staging package, the operation-shape principle — is
-`design/domain-architecture.md`. The staged library candidates and template implications have
-all landed — go-database's and go-web-sdk's write releases and the template's
-`compose-on-releases` session — with `v1.data.evaluation` the final audit; the base `sdk`
-package emptied at `v1.data.writes.organization` and re-seeded with the If-Match precondition
-parse. Base packages outside `internal/` are importable by
-other modules — accepted for a reference service as a deliberate choice, the wiring kept
-compiler-private under `internal/`.
-
-The service layout `v1.data.sql.integration.service` builds, settled 2026-09-06 against the
-prototype's review: three base-layer trees and the composition root. `data/` is the service's
-database infrastructure as the domains see it — the session-and-catalog grouping with the
-statements registry, `migrations/`, `patterns/`, `seeds/` and their statements behind the
-seeder, and the lowering from `web.Query` to `query.Directives`, which cannot promote by
-dependency direction and every domain's translation file calls. `domain/<layer>/` holds each
-domain with its `statements/`. `admin/database/` is the HTTP half over go-database's admin
-service, mounted under `/admin`. `internal/app` is one file per layer, as the template ships
-it. The prototype's `internal/data` was rejected: domain packages import the data package, and
-the topology-and-naming principle forbids a root-level package importing `internal/*`. The
-`sdk` staging package holds promotion candidates only and empties when If-Match's promotion
-lands. Database infrastructure setup and management are reference-architecture patterns this
-service proves and the docs pass documents, never template scaffolding.
-
-## Writes (`v1.data.writes`) — built through the organization surface
-
-The writes slice landed across the stack — go-database v0.3.0's command contract, go-web-sdk
-v0.5.0's ErrorWriter, and this service's organization commands (`organization-commands`
-session, 2026-08-28) — and the code expresses it. Both native choices settled: ids stay
-database-minted (`uuidv7()`), and RETURNING is consumed through the dialect's renderer,
-contained in the library layers; the port list carries both. The command-side layout rules the
-next layer builds by are `design/domain-architecture.md`. The holistic operation pass
-(`v1.data.writes.operations`) remains, with this session's ergonomics findings on its record
-in the workspace roadmap.
+The reads slice (`organization-reads`, 2026-08-26) and the writes slice
+(`organization-commands`, 2026-08-28) landed across the three repositories, and
+`v1.data.sql.integration.service` (2026-09-06) rewrote the service half onto sqlate v0.1.0,
+go-database v0.4.0, and go-web-sdk v0.6.0; the code expresses the layout, and the rules the next
+layer is built by are `design/domain-architecture.md` and `design/composition-root.md`. Both
+native choices settled at the writes slice stand: ids stay database-minted (`uuidv7()`), and
+RETURNING is the application's identity pattern; the port list carries both. Base packages
+outside `internal/` are importable by other modules, accepted for a reference service as a
+deliberate choice, the wiring kept compiler-private under `internal/`. The holistic operation
+pass (`v1.data.writes.operations`) remains.
 
 ## Domain direction (candidate until a task settles it)
 
@@ -85,6 +57,12 @@ catalog templates with owned instances, and category branches composed over a ge
   inheritance. A device row extends `item_instance` one to one; the devices package imports
   inventory, and inventory never imports devices. Future categories follow the same pattern as
   their own packages.
+- Soft delete as the standard's convention, recommended by the prototype's review and
+  deferred at `v1.data.sql.integration.service` to the first domain that needs it: `delete`
+  moves a record to the recycle bin, `restore` returns it, and `purge` removes it physically and
+  is administrative; a `deleted_at` column, a read model that excludes deleted rows with a
+  recycle view beside it, partial unique indexes over live rows, and the delete pattern as an
+  update, a pattern pair for the catalog.
 - Cross-domain invariants are enforced two ways: an SQL check inside the transaction where the
   dependency runs downward (custody checks person status), and an interface declared by the
   consuming domain and injected at the composition root where the check would otherwise run
@@ -97,14 +75,11 @@ surfaces, routes, constraint names, and enum vocabularies are settled per task.
 
 ## Evaluation evidence (`v1.data.evaluation`)
 
-On record for the cross-board evaluation — with two items answered at the 2026-08-31
-retrospective: the `cmd/db` boilerplate and the re-asked migrate-wrapper direction resolve
-under the DSL strategy (`standards-lab context/design/dsl-driven-services.md`) — `cmd/db`
-retires for a library `migrate` mechanism triggered by the composition root
-(`v1.data.sql.integration.service`). The strict command-body decoder (`decode[T]`
-in the organization handler: MaxBytesReader, DisallowUnknownFields) landed in go-web-sdk v0.6.0
-as `web.DecodeJSON`, with the staged If-Match parse as `web.IfMatch`; the service adopts both at
-`v1.data.sql.integration.service`.
+On record for the cross-board evaluation: the `sdk` package's tenants, `PathID` and `Command`,
+staged at `v1.data.sql.integration.service` for go-web-sdk; the shared status matcher and the
+directives lowering living in the `data` package, which the template cannot scaffold while it
+stays engine-free; and a generic seed helper, waiting under the sufficiency rule for the
+second service that repeats the per-table loop.
 
 ## Prior R&D
 

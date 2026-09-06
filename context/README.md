@@ -16,10 +16,11 @@ change and release discipline is described in `design/documented-layers.md`.
 ## Capability map
 
 Broad and unordered; each layer is detailed only when a session is about to build it. The
-baseline is running — `cmd/server`, the config files, and the README are authoritative for the
+baseline is running: `cmd/server`, the config files, and the README are authoritative for the
 composition root, configuration bootstrap, logging, lifecycle, HTTP server, probes, and the
-database with its migrate and seed tooling, all wired over the SDKs at pinned releases. The
-layers are the `v1` goals in the workspace roadmap:
+database with its admin service (startup migration and seeding, and the admin mount), all wired
+over the SDKs and sqlate at pinned releases. The layers are the `v1` goals in the workspace
+roadmap:
 
 - **Data composition and CQRS** — the layer in flight: a composed data model over plain SQL and
   a CQRS-oriented interface (`concepts/data-layer.md`).

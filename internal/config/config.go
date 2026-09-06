@@ -18,12 +18,14 @@ const envPrefix = "app"
 const defaultShutdownTimeout = 10 * time.Second
 
 // Config is the service's root configuration: the library capability blocks
-// plus the service-owned reads policy and shutdown timeout.
+// plus the service-owned reads policy, the admin switches, and the shutdown
+// timeout.
 type Config struct {
 	Log             logging.Config     `json:"log"`
 	Server          web.Config         `json:"server"`
 	Database        database.Config    `json:"database"`
 	Reads           ReadsConfig        `json:"reads"`
+	Admin           AdminConfig        `json:"admin"`
 	ShutdownTimeout libconfig.Duration `json:"shutdown_timeout"`
 }
 
@@ -40,6 +42,7 @@ func (c *Config) Merge(src *Config) {
 	c.Server.Merge(&src.Server)
 	c.Database.Merge(&src.Database)
 	c.Reads.Merge(&src.Reads)
+	c.Admin.Merge(&src.Admin)
 }
 
 // Finalize applies the root default, reads the root's own environment
@@ -75,6 +78,9 @@ func (c *Config) Finalize(envPrefix string) error {
 	}
 	if err := c.Reads.Finalize(envPrefix); err != nil {
 		return fmt.Errorf("reads: %w", err)
+	}
+	if err := c.Admin.Finalize(envPrefix); err != nil {
+		return fmt.Errorf("admin: %w", err)
 	}
 	return nil
 }

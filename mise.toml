@@ -26,21 +26,8 @@ description = "Run go mod tidy"
 run = "go mod tidy"
 
 [tasks.lint]
-description = "Run golangci-lint"
-run = "golangci-lint run ./..."
-
-# commands
-[tasks.db]
-description = "Run the db command (args after --)"
-run = "go run ./cmd/db"
-
-[tasks.migrate]
-description = "Apply all pending schema migrations"
-run = "go run ./cmd/db migrate up"
-
-[tasks.seed]
-description = "Load the reference data"
-run = "go run ./cmd/db seed"
+description = "Run golangci-lint, then sqlint over the SQL files"
+run = "golangci-lint run ./... && go tool sqlint"
 
 # services
 [tasks.db-up]

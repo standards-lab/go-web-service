@@ -1,6 +1,7 @@
 package organization_test
 
 import (
+	"database/sql/driver"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,26 +9,23 @@ import (
 	"testing"
 
 	"github.com/standards-lab/go-web-sdk"
+	"github.com/standards-lab/sqlate/sqltest"
+
 	"github.com/standards-lab/go-web-service/domain/organization"
 )
 
-// validID is any well-formed UUID: these tests exercise the rejection paths
-// that answer before the row would matter.
-const validID = "00000000-0000-7000-8000-000000000000"
-
 // module compiles the layer's route group the way the composition root
-// does. The nil database is never reached: these are the handler-local
-// rejection paths, which answer before any operation runs — the
-// database-backed paths are proven against the compose stack.
-func module(t *testing.T) *web.Module {
+// does, over the scripted driver with the given responses; with none
+// scripted, only the handler-local rejection paths can answer.
+func module(t *testing.T, responses ...sqltest.Response) http.Handler {
 	t.Helper()
-	svc := organization.New(nil)
-	return web.NewModule(organization.Routes(svc, web.Limits{DefaultSize: 20, MaxSize: 100}))
+	svc, _ := service(t, responses...)
+	r := web.NewRouter()
+	r.Mount(web.NewModule(organization.Routes(svc, web.Limits{DefaultSize: 20, MaxSize: 100})))
+	return r
 }
 
-// send drives one request through the module: a command's If-Match header
-// and body attach when given.
-func send(t *testing.T, method, path, ifMatch, body string) *httptest.ResponseRecorder {
+func send(t *testing.T, h http.Handler, method, path, ifMatch, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	var r *http.Request
 	if body == "" {
@@ -39,7 +37,7 @@ func send(t *testing.T, method, path, ifMatch, body string) *httptest.ResponseRe
 		r.Header.Set("If-Match", ifMatch)
 	}
 	rec := httptest.NewRecorder()
-	module(t).ServeHTTP(rec, r)
+	h.ServeHTTP(rec, r)
 	return rec
 }
 
@@ -58,105 +56,82 @@ func problem(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int) map[s
 	return body
 }
 
-func TestList_RejectsMalformedDirectives(t *testing.T) {
-	rec := send(t, "GET", "/organizations?page=x", "", "")
-
-	body := problem(t, rec, 400)
-	if body["detail"] == nil {
-		t.Error("400 problem carries no detail")
-	}
-}
-
-func TestList_RejectsOversizedPage(t *testing.T) {
-	rec := send(t, "GET", "/organizations?size=1000", "", "")
-
-	problem(t, rec, 400)
-}
-
-func TestFind_RejectsMalformedID(t *testing.T) {
-	rec := send(t, "GET", "/organizations/not-a-uuid", "", "")
-
-	body := problem(t, rec, 400)
-	if body["detail"] != "invalid command: id must be a UUID" {
-		t.Errorf("detail = %v, want the UUID message", body["detail"])
-	}
-}
-
-func TestCreate_RejectsMalformedBody(t *testing.T) {
-	rec := send(t, "POST", "/organizations", "", "{")
-
-	body := problem(t, rec, 400)
-	if body["detail"] == nil {
-		t.Error("400 problem carries no detail")
-	}
-}
-
-func TestCreate_RejectsUnknownField(t *testing.T) {
-	rec := send(t, "POST", "/organizations", "", `{"codex":"a"}`)
-
-	problem(t, rec, 400)
-}
-
-func TestCreate_RejectsBadCode(t *testing.T) {
-	rec := send(t, "POST", "/organizations", "", `{"code":"Bad_Code","name":"X"}`)
-
-	body := problem(t, rec, 400)
-	detail, _ := body["detail"].(string)
-	if !strings.Contains(detail, "code") {
-		t.Errorf("detail = %q, want it to name the code rule", detail)
-	}
-}
-
-func TestCreate_RejectsEmptyName(t *testing.T) {
-	rec := send(t, "POST", "/organizations", "", `{"code":"ok","name":""}`)
-
-	problem(t, rec, 400)
-}
-
-func TestCreate_RejectsMalformedParentID(t *testing.T) {
-	rec := send(t, "POST", "/organizations", "", `{"parent_id":"nope","code":"ok","name":"X"}`)
-
-	problem(t, rec, 400)
-}
-
-func TestCommands_RequireIfMatch(t *testing.T) {
+func TestRoutes_RejectBeforeAnyOperation(t *testing.T) {
 	cases := map[string]struct {
-		method, path, body string
+		method, path, ifMatch, body string
+		status                      int
+		detail                      string
 	}{
-		"edit":     {"PATCH", "/organizations/" + validID, `{"code":"ok","name":"X"}`},
-		"transfer": {"POST", "/organizations/" + validID + "/transfer", `{}`},
-		"delete":   {"DELETE", "/organizations/" + validID, ""},
+		"list: malformed page":       {"GET", "/organizations?page=x", "", "", 400, "query page"},
+		"list: oversized page":       {"GET", "/organizations?size=1000", "", "", 400, "query size"},
+		"find: malformed id":         {"GET", "/organizations/not-a-uuid", "", "", 400, "must be a UUID"},
+		"create: malformed body":     {"POST", "/organizations", "", "{", 400, "body:"},
+		"create: unknown field":      {"POST", "/organizations", "", `{"codex":"a"}`, 400, "codex"},
+		"create: empty body":         {"POST", "/organizations", "", " ", 400, "empty body"},
+		"create: bad code":           {"POST", "/organizations", "", `{"code":"Bad_Code","name":"X"}`, 400, "code must be"},
+		"create: empty name":         {"POST", "/organizations", "", `{"code":"ok","name":""}`, 400, "name must not be empty"},
+		"create: bad parent":         {"POST", "/organizations", "", `{"parent_id":"nope","code":"ok","name":"X"}`, 400, "parent_id must be a UUID"},
+		"edit: missing If-Match":     {"PUT", "/organizations/" + validID, "", `{"code":"ok","name":"X"}`, 428, "If-Match"},
+		"transfer: missing If-Match": {"POST", "/organizations/" + validID + "/transfer", "", `{"parent_id":null}`, 428, "If-Match"},
+		"delete: missing If-Match":   {"DELETE", "/organizations/" + validID, "", "", 428, "If-Match"},
+		"edit: malformed If-Match":   {"PUT", "/organizations/" + validID, `W/"3"`, `{"code":"ok","name":"X"}`, 400, "If-Match"},
+		"edit: malformed id":         {"PUT", "/organizations/not-a-uuid", `"1"`, `{"code":"ok","name":"X"}`, 400, "must be a UUID"},
+		"edit: missing name":         {"PUT", "/organizations/" + validID, `"1"`, `{"code":"ok"}`, 400, "name must not be empty"},
+		"transfer: bad parent":       {"POST", "/organizations/" + validID + "/transfer", `"1"`, `{"parent_id":"nope"}`, 400, "parent_id must be a UUID"},
+		"transfer: key omitted":      {"POST", "/organizations/" + validID + "/transfer", `"1"`, `{}`, 400, "parent_id is required"},
+		"edit on PATCH is unrouted":  {"PATCH", "/organizations/" + validID, `"1"`, `{"code":"ok","name":"X"}`, 405, ""},
 	}
+	h := module(t)
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			rec := send(t, c.method, c.path, "", c.body)
-
-			body := problem(t, rec, 428)
-			if detail, ok := body["detail"].(string); ok && detail != "" {
-				t.Errorf("428 problem carries detail %q; only a 400 carries detail", detail)
+			rec := send(t, h, c.method, c.path, c.ifMatch, c.body)
+			if c.detail == "" {
+				if rec.Code != c.status {
+					t.Fatalf("status = %d, want %d", rec.Code, c.status)
+				}
+				return
+			}
+			body := problem(t, rec, c.status)
+			if detail, _ := body["detail"].(string); !strings.Contains(detail, c.detail) {
+				t.Errorf("detail = %q, want it to contain %q", detail, c.detail)
 			}
 		})
 	}
 }
 
-func TestEdit_RejectsMalformedIfMatch(t *testing.T) {
-	for _, header := range []string{`3`, `*`, `W/"3"`, `"abc"`, `"1", "2"`} {
-		t.Run(header, func(t *testing.T) {
-			rec := send(t, "PATCH", "/organizations/"+validID, header, `{"code":"ok","name":"X"}`)
+func TestRoutes_OversizedBodyIs413(t *testing.T) {
+	rec := send(t, module(t), "POST", "/organizations", "", `{"name":"`+strings.Repeat("x", 1<<16)+`"}`)
+	problem(t, rec, 413)
+}
 
-			problem(t, rec, 400)
+func TestRoutes_LibraryErrorsMapThroughTheDataMatcher(t *testing.T) {
+	cases := map[string]struct {
+		responses             []sqltest.Response
+		method, path, ifMatch string
+		status                int
+	}{
+		"unknown filter field is 400": {nil, "GET", "/organizations?nope=1", "", 400},
+		"unknown operator is 400":     {nil, "GET", "/organizations?code[between]=a", "", 400},
+		"absent row is 404": {
+			[]sqltest.Response{{Columns: []string{"id", "parent_id", "code", "name", "version", "created_at", "updated_at", "path"}}},
+			"GET", "/organizations/" + validID, "", 404,
+		},
+		"stale version is 412": {
+			[]sqltest.Response{{Affected: 0}, {Columns: []string{"version"}, Rows: [][]driver.Value{{int64(9)}}}},
+			"DELETE", "/organizations/" + validID, `"1"`, 412,
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := send(t, module(t, c.responses...), c.method, c.path, c.ifMatch, "")
+			problem(t, rec, c.status)
 		})
 	}
 }
 
-func TestEdit_RejectsMalformedID(t *testing.T) {
-	rec := send(t, "PATCH", "/organizations/not-a-uuid", `"1"`, `{"code":"ok","name":"X"}`)
-
-	problem(t, rec, 400)
-}
-
-func TestTransfer_RejectsMalformedParentID(t *testing.T) {
-	rec := send(t, "POST", "/organizations/"+validID+"/transfer", `"1"`, `{"parent_id":"nope"}`)
-
-	problem(t, rec, 400)
+func TestCreate_AnswersCreatedWithLocation(t *testing.T) {
+	rec := send(t, module(t, identity(validID, 1)), "POST", "/organizations", "", `{"code":"acme","name":"Acme"}`)
+	if rec.Code != 201 || rec.Header().Get("Location") != "/organizations/"+validID {
+		t.Fatalf("status %d, Location %q, body %s", rec.Code, rec.Header().Get("Location"), rec.Body)
+	}
 }

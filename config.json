@@ -18,5 +18,8 @@
       "sslmode": "disable"
     }
   },
+  "admin": {
+    "seed": false
+  },
   "shutdown_timeout": "10s"
 }

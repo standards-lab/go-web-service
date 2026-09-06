@@ -16,39 +16,30 @@ import (
 //go:embed seeds/*.json
 var seedFiles embed.FS
 
-//go:embed statements/*.sql
-var seedStatements embed.FS
-
 // Seeder is the seed operation bound to its statements: the seed's insert
 // and lookup, authored files under statements/ (the native tier, ON
 // CONFLICT and RETURNING, declared in their headers; seeds never port),
-// compiled once against the catalog and held as handles. The admin
-// service owns the policy of when it runs; Seeder owns how. Seeder is the
-// admin service's Seeder.
+// held as handles over the package's compiled inventory. The admin service
+// owns the policy of when it runs; Seeder owns how. Seeder is the admin
+// service's Seeder.
 type Seeder struct {
-	db      *sqlate.DB
-	stmts   *query.Statements
+	db      *Database
 	seedOrg query.Rows[string]
 	findOrg query.Rows[string]
 }
 
-// NewSeeder compiles the seed statements against db's catalog, registers
-// them under "seed", and binds the handles; a compile failure is a wiring
-// defect and panics.
+// NewSeeder binds the seed handles from db's statements.
 func NewSeeder(db *Database) *Seeder {
-	stmts := db.Catalog.MustCompile(seedStatements, "statements", db.Dialect())
-	db.Register("seed", stmts)
 	return &Seeder{
-		db:      db.DB,
-		stmts:   stmts,
-		seedOrg: stmts.Statement("seed_organization").Scan(query.Scalar[string]),
-		findOrg: stmts.Statement("find_organization").Scan(query.Scalar[string]),
+		db:      db,
+		seedOrg: db.stmts.Statement("seed_organization").Scan(query.Scalar[string]),
+		findOrg: db.stmts.Statement("find_organization").Scan(query.Scalar[string]),
 	}
 }
 
-// Verify prepares every seed statement against the live schema.
+// Verify prepares the package's statements against the live schema.
 func (s *Seeder) Verify(ctx context.Context) error {
-	return query.Verify(ctx, s.db, s.stmts)
+	return s.db.Verify(ctx)
 }
 
 // organizationSeed is one row of seeds/organizations.json, the domain's

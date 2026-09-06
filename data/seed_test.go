@@ -35,14 +35,14 @@ func TestSeeder_RegistersAndVerifies(t *testing.T) {
 	s := data.NewSeeder(db)
 
 	reg := db.Registry()
-	if len(reg) != 1 || reg[0].Name != "seed" || len(reg[0].Statements.Statements()) != 2 {
-		t.Fatalf("registry = %+v; want the two seed statements under seed", reg)
+	if len(reg) != 1 || reg[0].Name != "data" || len(reg[0].Statements.Statements()) != 3 {
+		t.Fatalf("registry = %+v; want the lock and the two seed statements under data", reg)
 	}
 	if err := s.Verify(context.Background()); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	if got := len(rec.SQL(sqltest.OpPrepare)); got != 2 {
-		t.Fatalf("prepared %d statements; want 2", got)
+	if got := len(rec.SQL(sqltest.OpPrepare)); got != 3 {
+		t.Fatalf("prepared %d statements; want 3", got)
 	}
 }
 
@@ -117,3 +117,19 @@ func TestSeeder_Seed_RollsBackOnFailure(t *testing.T) {
 }
 
 var errBoom = errors.New("boom")
+
+func TestLock_TakesTheNamedLockInsideTheTransaction(t *testing.T) {
+	db, rec := newDatabase(t, sqltest.Response{Affected: 0})
+	_, err := db.Transact(context.Background(), func(tx *sqlate.Tx) (struct{}, error) {
+		return struct{}{}, db.Lock(context.Background(), tx, data.LockOrganizationTree)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lock := rec.Calls()[1]; lock.SQL != "SELECT pg_advisory_xact_lock(hashtext($1))" || lock.Args[0] != "organization.tree" {
+		t.Fatalf("lock call = %+v", lock)
+	}
+	if err := db.Lock(context.Background(), db.DB, data.LockOrganizationTree); !errors.Is(err, query.ErrTransactionRequired) {
+		t.Fatalf("outside a transaction: err = %v; want ErrTransactionRequired", err)
+	}
+}

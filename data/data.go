@@ -1,6 +1,8 @@
 package data
 
 import (
+	"context"
+	"embed"
 	"sort"
 	"sync"
 
@@ -9,6 +11,9 @@ import (
 	"github.com/standards-lab/sqlate/query"
 )
 
+//go:embed statements/*.sql
+var files embed.FS
+
 // Database is the database as a domain sees it: the session, and the
 // catalog of every pattern namespace the composition root registered. A
 // domain compiles its statements against Catalog and runs them through
@@ -16,18 +21,34 @@ import (
 // registry: every domain registers its compiled inventory at wiring, so
 // the admin service can walk the whole service's SQL the way the catalog
 // lists its patterns. Verification stays each domain's own lifecycle
-// stage.
+// stage. The package's own statements, under statements/, are the lock
+// and the seed's; they compile once here and register under "data".
 type Database struct {
 	*sqlate.DB
 	Catalog *query.Catalog
+
+	stmts *query.Statements
+	lock  query.Statement
 
 	mu       sync.Mutex
 	registry map[string]*query.Statements
 }
 
-// New groups a session with the catalog its statements compile against.
+// New groups a session with the catalog its statements compile against
+// and compiles the package's own statements; a compile failure is a
+// wiring defect and panics. No I/O happens here.
 func New(db *sqlate.DB, catalog *query.Catalog) *Database {
-	return &Database{DB: db, Catalog: catalog, registry: map[string]*query.Statements{}}
+	d := &Database{DB: db, Catalog: catalog, registry: map[string]*query.Statements{}}
+	d.stmts = catalog.MustCompile(files, "statements", db.Dialect())
+	d.lock = d.stmts.Statement("lock")
+	d.Register("data", d.stmts)
+	return d
+}
+
+// Verify prepares the package's own statements against the live schema;
+// the seeder's Verify runs it at the schema stage.
+func (d *Database) Verify(ctx context.Context) error {
+	return query.Verify(ctx, d.DB, d.stmts)
 }
 
 // Register records stmts under name, a domain's, at wiring; registering a

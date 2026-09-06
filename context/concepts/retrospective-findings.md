@@ -2,46 +2,18 @@
 
 Recorded at the 2026-08-31 workspace retrospective, from a full evaluation of the service as
 landed (`v1.data.writes.organization`). Grouped by the session that consumes each finding;
-the roadmap tasks cite this note (`v1.data.sql.integration.service`,
-`v1.data.sql.integration.listener`, `goals.v1.auth`). It decays as those sessions consume it; `v1.testing` consumed its section
-on 2026-09-01 (the decisions and the assertion list live in
-`standards-lab/context/design/testing-hierarchy.md`). The evaluation's
+the roadmap tasks cite this note (`v1.data.sql.integration.listener`, `goals.v1.auth`). It
+decays as those sessions consume it: `v1.testing` consumed its section on 2026-09-01 (the
+decisions and the assertion list live in `standards-lab/context/design/testing-hierarchy.md`),
+and `v1.data.sql.integration.service` consumed the domain-rewrite section on 2026-09-06 (the
+lock registry, the shared matcher, the path parse, and the guarded-command read live in the
+`data` and `sdk` packages; the verb rule is `design/domain-architecture.md`). One claim from
+it is wired but unproven live: a database outage answers 503 through `data.Status`, which maps
+the pool's and the session's connection errors. The evaluation's
 verdict for balance: the composition root is the cleanest part of the repo — construction
 does no I/O, registration happens at construction, ordering is delegated, probes query the
 live coordinator — and the transfer implementation is correct as written; the findings are
 headroom.
-
-## For the domain rewrite (`v1.data.sql.integration.service`)
-
-Extract before domains multiply — four copies of each is the alternative:
-
-- **The advisory-lock key registry leaves the domain package.** `const treeLock int64 = 1`
-  (`domain/organization/database.go:23`) is documented as "the service's advisory-lock key
-  registry" but lives inside one domain. Postgres advisory keys are database-global; people
-  and inventory both want locks, and nothing today prevents a collision. A service-level
-  registry, before domain two.
-- **The shared status matcher.** ~90% of `handler.go`'s `status()` switch is library
-  vocabulary identical for every domain (`QueryError`, `UnknownFieldError`,
-  `UnknownOperatorError`, `ErrUniqueViolation`, `ErrForeignKeyViolation`,
-  `ErrVersionMismatch`, `sql.ErrNoRows`, `PreconditionError`); only `ErrCycle` is
-  organization's. `QueryError` and `PreconditionError` map themselves in go-web-sdk v0.6.0 and
-  leave the list. `ErrorWriter` already takes a matcher list, first match wins — compose
-  `web.NewErrorWriter(orgStatus, sdk.CommonStatus)` instead of copying the switch (four
-  places to forget 412).
-- **`decode[T]`, `pathID`, and the `ErrValidation`-wrapping UUID parse** are domain-independent
-  and promote (decode and the If-Match parse landed in go-web-sdk v0.6.0 as `web.DecodeJSON` and
-  `web.IfMatch`; the UUID path helper is still unplaced).
-- **Do not copy forward**: the `UnknownOperatorError` matcher branch is unreachable —
-  `directives()` only ever emits `OpEq`, so filters are exact-match-only and the branch
-  entrenches a vocabulary fiction; PATCH-with-PUT-semantics on `Edit` (omit `name` → 400 —
-  full replacement on a PATCH verb); and `TransferOrganization.ParentID *string` treating
-  omitted and explicit null identically, so a transfer body of `{}` silently re-roots the
-  organization — for a destructive structural move, require the key.
-
-Error semantics to settle in the rewrite (they interlock with go-database's
-`concepts/v0.4-findings.md` items 4–5): a malformed filter value is a typed 400, not a 22P02
-cast error surfacing as 500; a database outage (`ErrNotReady`/`ErrConnectionFailed`) answers
-503, not 500.
 
 ## For startup and the management listener (`v1.data.sql.integration.listener`)
 

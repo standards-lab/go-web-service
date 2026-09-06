@@ -7,11 +7,14 @@ Settled in the relay session that created the repository (2026-08-24), proven by
 server; it supersedes the composite-shutdown-hook arrangement the predecessor recorded, which
 go-core's staged coordinator replaced.
 
-> Superseded direction (2026-09-03): the `v1.data.sql.prototype` experiment settled the
-> composition root as one file per layer under `internal/app` (`infrastructure.go`,
-> `admin.go`, `domain.go`, `reactors.go`, with `routes.go` the list of mounts),
-> `internal/data` as the database's home, and `cmd/db` retired into the admin mount.
-> `v1.data.sql.integration.service` applies it and rewrites this note; the text below
+> Superseded direction (2026-09-03, placement settled 2026-09-06): the `v1.data.sql.prototype`
+> experiment settled the composition root as one file per layer under `internal/app`
+> (`infrastructure.go`, `admin.go`, `domain.go`, `reactors.go`, with `routes.go` the list of
+> mounts), which go-web-sdk-template ships at template/v0.6.0, and `cmd/db` retired into the
+> admin mount. The database's home is a root-level `data` package, beside `domain/` and
+> `admin/`, since domain packages import it and the topology-and-naming principle forbids a
+> root-level package importing `internal/*`; the prototype's `internal/data` does not carry
+> over. `v1.data.sql.integration.service` applies it and rewrites this note; the text below
 > describes the code as built.
 
 ## Layout

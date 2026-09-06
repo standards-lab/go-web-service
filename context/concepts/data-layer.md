@@ -39,6 +39,20 @@ parse. Base packages outside `internal/` are importable by
 other modules — accepted for a reference service as a deliberate choice, the wiring kept
 compiler-private under `internal/`.
 
+The service layout `v1.data.sql.integration.service` builds, settled 2026-09-06 against the
+prototype's review: three base-layer trees and the composition root. `data/` is the service's
+database infrastructure as the domains see it — the session-and-catalog grouping with the
+statements registry, `migrations/`, `patterns/`, `seeds/` and their statements behind the
+seeder, and the lowering from `web.Query` to `query.Directives`, which cannot promote by
+dependency direction and every domain's translation file calls. `domain/<layer>/` holds each
+domain with its `statements/`. `admin/database/` is the HTTP half over go-database's admin
+service, mounted under `/admin`. `internal/app` is one file per layer, as the template ships
+it. The prototype's `internal/data` was rejected: domain packages import the data package, and
+the topology-and-naming principle forbids a root-level package importing `internal/*`. The
+`sdk` staging package holds promotion candidates only and empties when If-Match's promotion
+lands. Database infrastructure setup and management are reference-architecture patterns this
+service proves and the docs pass documents, never template scaffolding.
+
 ## Writes (`v1.data.writes`) — built through the organization surface
 
 The writes slice landed across the stack — go-database v0.3.0's command contract, go-web-sdk

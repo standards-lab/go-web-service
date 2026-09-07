@@ -18,17 +18,20 @@ type handler struct {
 }
 
 // Routes builds the admin domain's route group, rooted at /database. Reads:
-// diagnostics, the schema status, the pattern catalog, and the statements
-// registry. Operations: verify, up, down, steps, and force, each a POST
-// whose response is the resulting status, and seed, whose response is the
-// rows it inserted by table. force sets the history without running any
-// file, the operator's override for dirty state after the schema has been
-// repaired by hand. Every rejection is an RFC 9457 problem; a schema-state
-// conflict and a disabled seed carry their reason as the detail, since an
-// operator needs to know which version is dirty or pending, or that this
-// environment does not seed. The composition root mounts the group into
-// the admin mount. The confirmation token the strategy requires for down
-// and force arrives with the management listener.
+// diagnostics, the schema status, the pattern catalog, the statements
+// registry, and the named states. Operations: verify, up, down, steps, and
+// force, each a POST whose response is the resulting status; seed, which
+// applies the configured set or the one its body names and answers with
+// the rows it inserted by table; and state, which resets the database to
+// the state its body names and answers with the transition. force sets
+// the history without running any file, the operator's override for dirty
+// state after the schema has been repaired by hand. Every rejection is an
+// RFC 9457 problem; a schema-state conflict and a disabled seed carry
+// their reason as the detail, since an operator needs to know which
+// version is dirty or pending, or that this environment names no set. The
+// composition root mounts the group into the admin mount. The confirmation
+// token the strategy requires for down, force, and state arrives with the
+// management listener.
 func Routes(service *admin.Service) *web.Group {
 	h := &handler{service: service}
 	ew := web.NewErrorWriter(status)
@@ -39,12 +42,14 @@ func Routes(service *admin.Service) *web.Group {
 	g.HandleErr("GET", "/schema", h.status)
 	g.HandleErr("GET", "/patterns", h.patterns)
 	g.HandleErr("GET", "/statements", h.statements)
+	g.HandleErr("GET", "/states", h.states)
 	g.HandleErr("POST", "/schema/verify", h.verify)
 	g.HandleErr("POST", "/schema/up", h.up)
 	g.HandleErr("POST", "/schema/down", h.down)
 	g.HandleErr("POST", "/schema/steps", h.steps)
 	g.HandleErr("POST", "/schema/force", h.force)
 	g.HandleErr("POST", "/seed", h.seed)
+	g.HandleErr("POST", "/state", h.state)
 	return g
 }
 
@@ -66,6 +71,10 @@ func (h *handler) patterns(w http.ResponseWriter, _ *http.Request) error {
 
 func (h *handler) statements(w http.ResponseWriter, _ *http.Request) error {
 	return web.WriteJSON(w, http.StatusOK, h.service.Statements())
+}
+
+func (h *handler) states(w http.ResponseWriter, _ *http.Request) error {
+	return web.WriteJSON(w, http.StatusOK, h.service.States())
 }
 
 func (h *handler) verify(w http.ResponseWriter, r *http.Request) error {
@@ -107,12 +116,32 @@ func (h *handler) force(w http.ResponseWriter, r *http.Request) error {
 	return respond(w)(h.service.Force(r.Context(), body.Version))
 }
 
+// seed applies the configured set when the request carries no body.
 func (h *handler) seed(w http.ResponseWriter, r *http.Request) error {
-	n, err := h.service.Seed(r.Context())
+	var body State
+	if r.ContentLength != 0 {
+		var err error
+		if body, err = web.DecodeJSON[State](w, r, maxBody); err != nil {
+			return err
+		}
+	}
+	n, err := h.service.Seed(r.Context(), body.State)
 	if err != nil {
 		return err
 	}
 	return web.WriteJSON(w, http.StatusOK, n)
+}
+
+func (h *handler) state(w http.ResponseWriter, r *http.Request) error {
+	body, err := web.DecodeJSON[State](w, r, maxBody)
+	if err != nil {
+		return err
+	}
+	tr, err := h.service.Reset(r.Context(), body.State)
+	if err != nil {
+		return err
+	}
+	return web.WriteJSON(w, http.StatusOK, tr)
 }
 
 // respond writes an operation's resulting status, or returns its error.
@@ -126,14 +155,16 @@ func respond(w http.ResponseWriter) func(admin.Status, error) error {
 }
 
 // status is the domain's error vocabulary as one web.StatusMatcher: a
-// rejected verb argument (400), a version outside the set (400), a seed
-// the environment forbids (403), and the schema states an operation cannot
-// proceed from, dirty, pending, a history the set does not carry, a
-// migration with no down, as conflicts (409). A dialect without the lock
-// capability stays unmatched: it is a wiring defect (500).
+// rejected verb argument (400), a version outside the set (400), a state
+// the seeder does not declare (400), a seed the environment cannot serve
+// (403), and the schema states an operation cannot proceed from, dirty,
+// pending, a history the set does not carry, a migration with no down, as
+// conflicts (409). A dialect without the lock capability stays unmatched:
+// it is a wiring defect (500).
 func status(err error) (int, bool) {
 	switch {
-	case errors.Is(err, admin.ErrValidation), errors.Is(err, migrate.ErrVersionNotFound):
+	case errors.Is(err, admin.ErrValidation), errors.Is(err, migrate.ErrVersionNotFound),
+		errors.Is(err, admin.ErrUnknownState):
 		return http.StatusBadRequest, true
 	case errors.Is(err, admin.ErrSeedDisabled):
 		return http.StatusForbidden, true

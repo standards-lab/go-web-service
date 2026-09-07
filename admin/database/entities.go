@@ -11,3 +11,10 @@ type Steps struct {
 type Force struct {
 	Version int `json:"version"`
 }
+
+// State is the body of the state operation, and the optional body of the
+// seed operation: the name of the state to reset to, or of the set to
+// apply.
+type State struct {
+	State string `json:"state"`
+}

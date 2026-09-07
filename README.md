@@ -28,9 +28,9 @@ mise run serve      # run the service
 ```
 
 Startup does the database work itself, in lifecycle stages: the pool connects, the schema is
-verified and any pending migration applied, the reference data is seeded when the environment
-enables it (the `local` overlay does), and each domain verifies its statements against the
-migrated schema. The service then logs `server ready` on `localhost:8080` (the `local` overlay
+verified and any pending migration applied, the configured seed set is applied (the `local`
+overlay names `default`, the reference tree), and each domain verifies its statements against
+the migrated schema. The service then logs `server ready` on `localhost:8080` (the `local` overlay
 binds loopback and runs debug logging). From a second shell:
 
 ```sh
@@ -70,7 +70,7 @@ curl localhost:8080/api/organizations/path/acme/engineering    # lookup by hiera
 ## Admin
 
 The database admin service is mounted under `/admin/database`. Every endpoint triggers the same
-library function startup runs; the mutating ones answer with the resulting schema status.
+library function startup runs; the schema verbs answer with the resulting schema status.
 
 | Method | Path | What it does |
 |--------|------|--------------|
@@ -78,12 +78,20 @@ library function startup runs; the mutating ones answer with the resulting schem
 | `GET` | `/admin/database/schema` | The migration history against the embedded set |
 | `GET` | `/admin/database/patterns` | The pattern catalog |
 | `GET` | `/admin/database/statements` | Every domain's compiled statements |
+| `GET` | `/admin/database/states` | The named states the service declares |
 | `POST` | `/admin/database/schema/verify` | Verify the history and the seed statements |
 | `POST` | `/admin/database/schema/up` | Apply every pending migration |
 | `POST` | `/admin/database/schema/down` | Revert migrations (`{"steps": 1}`, the default) |
 | `POST` | `/admin/database/schema/steps` | Apply or revert `{"steps": n}`, negative to revert |
 | `POST` | `/admin/database/schema/force` | Set the history to `{"version": v}` without running a file |
-| `POST` | `/admin/database/seed` | Load the reference data (403 unless `admin.seed` is on) |
+| `POST` | `/admin/database/seed` | Apply the configured set, or `{"state": "…"}`, over what is there (403 with no set) |
+| `POST` | `/admin/database/state` | Reset to `{"state": "…"}`: revert every migration, apply the set, seed the state |
+
+A named state is one file under `data/seeds/`, keyed by table: `default` is the reference
+tree, `empty` is the schema with no rows. A set applies idempotently, so `admin.seed` names
+the state a deployment initializes with at its first start and leaves alone at every later
+one. The state operation is destructive, in the class of `down` and `force`, and
+`mise run db-state <state>` runs it against the local service.
 
 The mount serves on the API listener until the management listener lands; it is not for a
 public deployment as it stands.
@@ -92,8 +100,9 @@ public deployment as it stands.
 
 Each task wraps a plain command, so the repository works without mise, with one caveat:
 `mise.toml` sets `APP_ENV=local`, so a bare `go run ./cmd/server` outside mise loads the base
-configuration alone and binds `0.0.0.0` at info logging, with seeding off, instead of the local
-overlay's loopback, debug, and seeding. Set `APP_ENV=local` yourself when running without mise.
+configuration alone and binds `0.0.0.0` at info logging, with no seed set, instead of the local
+overlay's loopback, debug, and `default` set. Set `APP_ENV=local` yourself when running without
+mise.
 
 | Task | Command | What it does |
 |------|---------|--------------|
@@ -107,6 +116,7 @@ overlay's loopback, debug, and seeding. Set `APP_ENV=local` yourself when runnin
 | `mise run db-up` | `docker compose up -d --wait` | Start the local Postgres |
 | `mise run db-down` | `docker compose down` | Stop the local Postgres (keep data) |
 | `mise run db-reset` | `docker compose down -v` | Stop the local Postgres and drop its data |
+| `mise run db-state <state>` | `curl -d '{"state":"<state>"}' localhost:8080/admin/database/state` | Reset the running service's database to a named state |
 
 ## Tests
 
@@ -132,14 +142,15 @@ Configuration layers in a fixed precedence, later sources winning:
 
 1. `config.json`, the base file, every knob at its default.
 2. `config.<APP_ENV>.json`, the environment overlay; `mise.toml` sets `APP_ENV=local`, which
-   activates the committed `config.local.json` (loopback host, debug logging, seeding on).
+   activates the committed `config.local.json` (loopback host, debug logging, the `default`
+   seed set).
 3. `secrets.json` and `secrets.<APP_ENV>.json`, gitignored secret layers; the database password
    goes here.
 4. `APP_*` environment variables, the final override: the log, server, and shutdown variables,
    the `APP_DATABASE_*` family (`APP_DATABASE_HOST`, `APP_DATABASE_NAME`,
    `APP_DATABASE_USER`, `APP_DATABASE_PASSWORD`, `APP_DATABASE_PORT`, and the pool settings),
    the reads paging policy (`APP_READS_DEFAULT_SIZE`, `APP_READS_MAX_SIZE`), and the admin
-   switch (`APP_ADMIN_SEED`).
+   seed set (`APP_ADMIN_SEED`, a state name).
 
 Every file is optional: a deployment can run on the base file and environment variables alone,
 or on environment variables only.

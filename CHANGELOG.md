@@ -9,6 +9,12 @@ accumulate under [Unreleased] until the first cut.
 
 ### Added
 
+- Named database states: one file per state under `data/seeds/`, keyed by table (`default`, the
+  reference tree; `empty`, no rows). `GET /admin/database/states` lists them;
+  `POST /admin/database/state` resets the database to one, every migration reverted, the set
+  applied, the state's set seeded, and answers with the transition; `POST /admin/database/seed`
+  takes an optional `{"state": "…"}` to apply a named set over what is there. `mise run
+  db-state <state>` runs the reset against the local service.
 - The integration tier: the root `integration` package, a harness that runs the built service as
   a subprocess against the compose stack and a `//go:build integration` suite asserting the
   lifecycle, the organization API, the admin mount, and the 503 on a database outage through
@@ -33,6 +39,11 @@ accumulate under [Unreleased] until the first cut.
 
 ### Changed
 
+- `admin.seed` (`APP_ADMIN_SEED`) names the state whose set applies at startup and on a
+  bodyless seed, the way a deployment initializes its data; empty names none. The `local`
+  overlay names `default`.
+- The integration harness's `Reset` is one call to the state operation, and its `Options.Seed`
+  is a state name.
 - The organization domain runs on authored SQL: one `.sql` file per statement under
   `domain/organization/statements`, compiled by sqlate at construction and verified against the
   live schema at startup. Commands validate themselves on the entity types.

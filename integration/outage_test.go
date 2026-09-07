@@ -32,9 +32,9 @@ func databaseAddr() string {
 // restart.
 func TestOutage(t *testing.T) {
 	f := processtest.Forward(t, databaseAddr())
-	s := integration.Start(t, integration.Options{Seed: true, Database: f.Addr()})
+	s := integration.Start(t, integration.Options{Seed: integration.Default, Database: f.Addr()})
 	c := s.Client()
-	integration.Reset(t, c)
+	integration.Reset(t, c, integration.Default)
 	all := tree(t, c)
 	fin := all["finance"]
 	edit := map[string]any{"code": "fin", "name": "Finance"}

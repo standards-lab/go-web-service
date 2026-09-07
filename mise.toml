@@ -54,3 +54,11 @@ run = "docker compose down"
 [tasks.db-reset]
 description = "Stop the local postgres and drop its data"
 run = "docker compose down -v"
+
+# The running service does the work through its admin mount: every applied
+# migration reverted, the set applied, the named state's set seeded.
+[tasks.db-state]
+description = "Reset the running service's database to a named state"
+usage = 'arg "<state>" help="The state to reset to, one of GET /admin/database/states"'
+run = 'curl -sS --fail-with-body -H "Content-Type: application/json" -d "{\"state\":\"$usage_state\"}" http://127.0.0.1:8080/admin/database/state && echo'
+

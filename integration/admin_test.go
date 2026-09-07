@@ -56,9 +56,9 @@ type inventory struct {
 const admin = "/admin/database"
 
 func TestAdmin(t *testing.T) {
-	s := integration.Start(t, integration.Options{Seed: true})
+	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	c := s.Client()
-	integration.Reset(t, c)
+	integration.Reset(t, c, integration.Default)
 
 	schema := func(t *testing.T, res *webtest.Response) schemaStatus {
 		t.Helper()
@@ -187,11 +187,46 @@ func TestAdmin(t *testing.T) {
 		// The schema cases above recreated the table, so it is empty here.
 		integration.Revert(t, c)
 		schema(t, c.Post(t, admin+"/schema/up", nil))
-		if n := integration.Seed(t, c); n["organizations"] != seededTotal {
+		if n := integration.Seed(t, c, ""); n["organizations"] != seededTotal {
 			t.Errorf("seed on an empty table inserted %v, want %d", n, seededTotal)
 		}
-		if n := integration.Seed(t, c); n["organizations"] != 0 {
+		if n := integration.Seed(t, c, ""); n["organizations"] != 0 {
 			t.Errorf("seed on a seeded table inserted %v, want zero", n)
+		}
+	})
+
+	t.Run("states", func(t *testing.T) {
+		if got := integration.States(t, c); !equal(got, []string{"default", "empty"}) {
+			t.Errorf("states = %v, want default and empty", got)
+		}
+	})
+
+	t.Run("state", func(t *testing.T) {
+		total := func(t *testing.T) int {
+			t.Helper()
+			return webtest.Decode[page](t, c.Get(t, organizations), http.StatusOK).Total
+		}
+		// From the seeded tree to empty: the schema is rebuilt and current,
+		// the set inserted nothing, and the table is empty.
+		tr := integration.Reset(t, c, "empty")
+		if tr.State != "empty" || tr.Seeded["organizations"] != 0 || total(t) != 0 {
+			t.Errorf("reset to empty = %+v, total %d", tr, total(t))
+		}
+		assertCurrentSchema(t, schema(t, c.Get(t, admin+"/schema")))
+		// A named set applies over the empty state without a reset.
+		if n := integration.Seed(t, c, integration.Default); n["organizations"] != seededTotal || total(t) != seededTotal {
+			t.Errorf("seed default over empty inserted %v, total %d", n, total(t))
+		}
+		// Back to default from the seeded tree: rebuilt and seeded again.
+		tr = integration.Reset(t, c, integration.Default)
+		if tr.State != "default" || tr.Seeded["organizations"] != seededTotal || total(t) != seededTotal {
+			t.Errorf("reset to default = %+v, total %d", tr, total(t))
+		}
+		// An undeclared name is a 400 that names it, on both routes.
+		for _, path := range []string{admin + "/state", admin + "/seed"} {
+			if p := c.Post(t, path, map[string]string{"state": "nope"}).Problem(t, http.StatusBadRequest); !strings.Contains(p.Detail, `unknown state: "nope"`) {
+				t.Errorf("%s nope: detail = %q", path, p.Detail)
+			}
 		}
 	})
 

@@ -38,7 +38,9 @@ curl localhost:8080/healthz   # 200 {"status":"ok"}
 curl localhost:8080/readyz    # 200 {"status":"ready","checks":[...]}  — lifecycle, database, schema
 ```
 
-Ctrl-C drains in-flight requests and exits with `server stopped`.
+Ctrl-C drains in-flight requests and exits with `server stopped`. That serve, probe, and
+drain sequence is the one check a change to the composition root is verified by hand with;
+everything the running service does is asserted by the integration tier below.
 
 ## API
 
@@ -95,15 +97,32 @@ overlay's loopback, debug, and seeding. Set `APP_ENV=local` yourself when runnin
 
 | Task | Command | What it does |
 |------|---------|--------------|
-| `mise run vet` | `go vet ./...` | Compile-check and vet |
+| `mise run vet` | `go vet -tags integration ./...` | Compile-check and vet, the integration suite included |
 | `mise run serve` | `go run ./cmd/server` | Run the service locally |
-| `mise run test` | `go test -race ./...` | Run the tests |
+| `mise run test` | `go test -race ./...` | Run the unit tier |
+| `mise run integration` | an isolated `docker compose up`, `go test -tags integration ./integration/`, `down -v` | Run the integration tier against its own stack |
 | `mise run fmt` | `gofmt -w .` | Format the source |
 | `mise run tidy` | `go mod tidy` | Reconcile module requirements |
-| `mise run lint` | `golangci-lint run ./... && go tool sqlint` | Lint the Go and the SQL |
+| `mise run lint` | `golangci-lint run --build-tags integration ./... && go tool sqlint` | Lint the Go and the SQL |
 | `mise run db-up` | `docker compose up -d --wait` | Start the local Postgres |
 | `mise run db-down` | `docker compose down` | Stop the local Postgres (keep data) |
 | `mise run db-reset` | `docker compose down -v` | Stop the local Postgres and drop its data |
+
+## Tests
+
+Two tiers. The unit tier, `mise run test`, runs on every pull request and touches no service,
+network, or disk: a package that runs SQL proves it over sqlate's scripted driver. The
+integration tier, `mise run integration`, runs the composed service black-box through its API
+against the compose stack, in CI on every merge to main and on demand from the Actions tab.
+
+The suite lives in the `integration` package under the `integration` build tag. Its harness
+builds `cmd/server` once, runs it as a subprocess configured by `APP_*` variables on a reserved
+port, drives state through the admin mount, and severs the database through a loopback relay
+to prove the outage path; nothing in the service exists for the tests' sake. The task runs
+the same `compose.yml` as its own project (`go-web-service-integration`, Postgres on 5433), so
+the development stack and its data are never touched, and tears the stack down with its volume
+when the suite ends, so every run starts from an empty database. The harness honors
+`APP_DATABASE_HOST`, `APP_DATABASE_PORT`, and `APP_DATABASE_PASSWORD` for a stack elsewhere.
 
 ## Configuration
 

@@ -19,8 +19,9 @@ Broad and unordered; each layer is detailed only when a session is about to buil
 baseline is running: `cmd/server`, the config files, and the README are authoritative for the
 composition root, configuration bootstrap, logging, lifecycle, HTTP server, probes, and the
 database with its admin service (startup migration and seeding, and the admin mount), all wired
-over the SDKs and sqlate at pinned releases. The layers are the `v1` goals in the workspace
-roadmap:
+over the SDKs and sqlate at pinned releases; the root `integration` package is the integration
+tier that asserts the running service through its API. The layers are the `v1` goals in the
+workspace roadmap:
 
 - **Data composition and CQRS** — the layer in flight: a composed data model over plain SQL and
   a CQRS-oriented interface (`concepts/data-layer.md`).

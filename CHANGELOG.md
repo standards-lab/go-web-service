@@ -9,6 +9,10 @@ accumulate under [Unreleased] until the first cut.
 
 ### Added
 
+- The integration tier: the root `integration` package, a harness that runs the built service as
+  a subprocess against the compose stack and a `//go:build integration` suite asserting the
+  lifecycle, the organization API, the admin mount, and the 503 on a database outage through
+  the API; `mise run integration`; the CI job on merge to main and `workflow_dispatch`.
 - The `data` package: the database infrastructure as the domains see it. The session grouped
   with the pattern catalog and the statements registry, the migration set under
   `data/migrations`, the application's pattern namespace (`app.identity`), the seeder behind the
@@ -33,7 +37,7 @@ accumulate under [Unreleased] until the first cut.
   key, null meaning the root.
 - The composition root is one file per layer under `internal/app`, as go-web-sdk-template
   v0.6.0 ships it.
-- Pins: go-database v0.4.0 with postgres/v0.3.0, go-web-sdk v0.6.0, sqlate v0.1.0 with
+- Pins: go-database v0.4.0 with postgres/v0.3.0, go-web-sdk v0.6.0, sqlate v0.1.1 with
   postgres/v0.1.1.
 
 ### Removed

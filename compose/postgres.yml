@@ -1,7 +1,6 @@
 services:
   postgres:
     image: postgres:18-alpine
-    container_name: go-web-service-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-app}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}

@@ -6,16 +6,29 @@ golangci-lint = "2.13.2"
 APP_ENV = "local"
 
 [tasks.vet]
-description = "Run go vet"
-run = "go vet ./..."
+description = "Run go vet, the integration suite included"
+run = "go vet -tags integration ./..."
 
 [tasks.serve]
 description = "Run the service locally"
 run = "go run ./cmd/server"
 
 [tasks.test]
-description = "Run tests"
+description = "Run the unit tier"
 run = "go test -race ./..."
+
+# The integration tier runs the same compose definition as its own project on
+# its own port, so the developer's stack and data are never touched, and tears
+# it down with its volume when the suite ends, pass or fail.
+[tasks.integration]
+description = "Start an isolated compose stack, run the integration tier against it, and tear it down"
+run = '''
+set -e
+export COMPOSE_PROJECT_NAME=go-web-service-integration POSTGRES_PORT=5433
+trap 'docker compose down -v' EXIT
+docker compose up -d --wait
+APP_DATABASE_PORT=5433 go test -race -count=1 -tags integration ./integration/
+'''
 
 [tasks.fmt]
 description = "Format all Go source"
@@ -26,8 +39,8 @@ description = "Run go mod tidy"
 run = "go mod tidy"
 
 [tasks.lint]
-description = "Run golangci-lint, then sqlint over the SQL files"
-run = "golangci-lint run ./... && go tool sqlint"
+description = "Run golangci-lint, the integration suite included, then sqlint over the SQL files"
+run = "golangci-lint run --build-tags integration ./... && go tool sqlint"
 
 # services
 [tasks.db-up]

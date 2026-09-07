@@ -100,7 +100,7 @@ overlay's loopback, debug, and seeding. Set `APP_ENV=local` yourself when runnin
 | `mise run vet` | `go vet -tags integration ./...` | Compile-check and vet, the integration suite included |
 | `mise run serve` | `go run ./cmd/server` | Run the service locally |
 | `mise run test` | `go test -race ./...` | Run the unit tier |
-| `mise run integration` | `docker compose up -d --wait && go test -race -count=1 -tags integration ./integration/` | Start the local Postgres and run the integration tier |
+| `mise run integration` | an isolated `docker compose up`, `go test -tags integration ./integration/`, `down -v` | Run the integration tier against its own stack |
 | `mise run fmt` | `gofmt -w .` | Format the source |
 | `mise run tidy` | `go mod tidy` | Reconcile module requirements |
 | `mise run lint` | `golangci-lint run --build-tags integration ./... && go tool sqlint` | Lint the Go and the SQL |
@@ -118,11 +118,11 @@ against the compose stack, in CI on every merge to main and on demand from the A
 The suite lives in the `integration` package under the `integration` build tag. Its harness
 builds `cmd/server` once, runs it as a subprocess configured by `APP_*` variables on a reserved
 port, drives state through the admin mount, and severs the database through a loopback relay
-to prove the outage path; nothing in the service exists for the tests' sake. The suite reverts
-and reapplies the schema and reseeds as it goes, so a local run rewrites the development
-database's data; that database is test tooling, and `mise run db-reset` returns it to empty.
-The harness honors `APP_DATABASE_HOST`, `APP_DATABASE_PORT`, and `APP_DATABASE_PASSWORD` for a
-stack off the compose defaults.
+to prove the outage path; nothing in the service exists for the tests' sake. The task runs
+the same `compose.yml` as its own project (`go-web-service-integration`, Postgres on 5433), so
+the development stack and its data are never touched, and tears the stack down with its volume
+when the suite ends, so every run starts from an empty database. The harness honors
+`APP_DATABASE_HOST`, `APP_DATABASE_PORT`, and `APP_DATABASE_PASSWORD` for a stack elsewhere.
 
 ## Configuration
 

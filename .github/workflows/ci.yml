@@ -46,12 +46,15 @@ jobs:
         run: go tool sqlint
 
   # The integration tier: the composed service, black-box, against the same
-  # compose stack a developer runs. On merge to main and on demand, below the
-  # per-PR unit rate by design; a release is cut only from a main whose run
-  # has passed.
+  # compose definition a developer runs, as its own project. On merge to main
+  # and on demand, below the per-PR unit rate by design; a release is cut only
+  # from a main whose run has passed. The task tears the stack down itself.
   integration:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    env:
+      COMPOSE_PROJECT_NAME: go-web-service-integration
+      POSTGRES_PORT: "5433"
     steps:
       - uses: actions/checkout@v6
 
@@ -63,7 +66,7 @@ jobs:
         run: docker compose up -d --wait
 
       - name: go test -tags integration
-        run: go test -race -count=1 -tags integration ./integration/
+        run: APP_DATABASE_PORT=5433 go test -race -count=1 -tags integration ./integration/
 
       - name: docker compose logs
         if: failure()

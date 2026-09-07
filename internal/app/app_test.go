@@ -15,9 +15,9 @@ import (
 // The suite is hermetic: no live database exists, so it proves the cold
 // start and the startup contract: construction performs no I/O, and a
 // failed database ping at stage 0 fails startup before the schema stage
-// runs, instead of serving unready. The serve-probes-drain path is proven
-// against the live compose database; the integration tier
-// (v1.data.sql.tasks.suite) is its home.
+// runs, instead of serving unready. The serve-probes-drain path and every
+// behavior that needs a real engine are the integration tier's, the root
+// integration package.
 
 // failsafe bounds every wait for an event that should occur, so a broken
 // composition fails the test instead of hanging it.

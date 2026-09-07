@@ -57,6 +57,9 @@ contract: construction performs no I/O, a dead database fails `Run` at stage 0 t
 without a ready record, and the coordinator is single-use. Every package that runs SQL proves
 its wiring over sqlate's scripted driver (`sqlate/sqltest`): the compiled text, the bound
 arguments, the transaction shape, and the rejection paths. `internal/config/configtest` is the
-single source of valid test configuration. The serve-probes-drain path and the behaviors that
-need a real engine are proven by hand against the compose stack until the integration tier
-(`v1.data.sql.tasks.suite`) absorbs them.
+single source of valid test configuration. The root `integration` package is the integration
+tier: its harness runs the built `cmd/server` as a subprocess and drives it through its
+production seams, and its tagged suite proves the serve, probe, and drain path, the behaviors
+that need a real engine, and the 503 on a database outage, against the compose definition as
+its own project. The README's serve, probe, and drain step is the one check a composition-root
+change is verified by hand with.

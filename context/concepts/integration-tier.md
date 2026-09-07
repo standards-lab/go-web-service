@@ -15,5 +15,5 @@ and the collection read's paging, sort, and filter 400s. Both are the SDK's and 
 header's own, not the domain's, so a `GuardedCommand` and a `CollectionRead` assertion helper
 belong in go-web-sdk's `webtest` when they are extracted, leaving each domain's file its own
 invariants. The criterion is fit, not a count of consumers (standards-lab
-`design/service-organization.md`); `v1.data.tasks.people` is the session that extracts them
+`design/service-organization.md`); `v1.data.people` is the session that extracts them
 because that is when a second suite file would otherwise repeat them.

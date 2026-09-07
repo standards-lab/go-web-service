@@ -30,12 +30,9 @@ workflow; start from `context/README.md`.
   complete before the next begins (`context/design/documented-layers.md`). The service is
   versionless until its first release: no tags yet; `CHANGELOG.md` accumulates under
   `[Unreleased]` until the first cut, which `release.yml` turns into a GitHub release.
-- **Tests.** Two tiers. The unit tier is hermetic: no live database, a package that runs SQL
-  tests over sqlate's scripted driver (`sqlate/sqltest`), and `internal/config/configtest` as
-  the single source of valid test configuration. The integration tier is the root `integration`
-  package: an untagged harness over the SDKs' toolkit (go-core's `process/processtest` runs the
-  built `cmd/server` as a subprocess and relays the database; go-web-sdk's `webtest` drives it
-  through its API), adding only the service's configuration and admin-mount state control, and
-  the suite under the `integration` build tag, run by `mise run integration` against the
-  compose stack and by CI on merge to main. The runtime carries nothing for the tests' sake.
+- **Tests.** Two tiers, documented in the README: the unit tier hermetic over sqlate's
+  scripted driver, with `internal/config/configtest` the single source of valid test
+  configuration, and the integration tier in the root `integration` package over the SDKs'
+  toolkit, run by `mise run integration` and by CI on merge to main. The runtime carries
+  nothing for the tests' sake.
 - **Public repo.** This repository is public on GitHub.

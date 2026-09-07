@@ -9,11 +9,8 @@ How this repository changes and releases.
   fixed in the same change.
 - Refinements are additive (a new layer) or modifying (a new provider, a CQRS change) — touching
   that layer's code, documentation, tests, and the boundaries it shares with other layers.
-- The service is the repository's only releasable artifact, on simple semantic version tags,
-  versionless until its first release. Each version is a coherent snapshot: code, documentation,
-  and the pinned go-core, go-web-sdk, and go-database versions it was validated against. Dev
-  releases are supported between semantic releases and purged at the next minor-or-above
-  release.
-- A refinement that proves a better pattern promotes outward — into the SDKs
-  (go-core, go-web-sdk, go-database), go-web-sdk-template, and the standard. A library change
-  and the service change that proves it release as a coordinated snapshot.
+- The service is the repository's only releasable artifact, versionless until its first
+  release. The release discipline (coherent snapshots with their pins, prerelease tags, a
+  library change and the service change that proves it releasing together) and the promotion
+  rule are the roadmap's `goals.v1` criteria and the landing zone's release-and-ci and
+  independent-releases principles.

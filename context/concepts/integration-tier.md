@@ -1,24 +1,11 @@
 # The integration tier's next steps
 
 What the integration tier (the root `integration` package, built at `v1.data.sql.tasks.suite`,
-2026-09-07, and thinned to the SDKs' toolkit at `v1.data.sql.tasks.toolkit` the same day) grows
-next. The tier itself is expressed by the code and the README; this note carries the direction
-for the roadmap task that follows it and one later extraction, at claim resolution until each
-session settles it. The decision record for the tier is standards-lab
-`context/design/testing-hierarchy.md`.
-
-## Named database states (`v1.data.sql.tasks.states`)
-
-The suite resets state through the admin mount's schema verbs and the one seed set, and the
-development database is test tooling that should reach any state a scenario needs without a
-sequence of hand steps. The feature generalizes the seeder: named sets declared as data, a
-transition in go-database's admin service that resets the schema and applies a named set,
-exposed through the admin mount and a startup switch, with `mise run db-state <name>` for the
-developer and the suite's `Reset` becoming one call to the same endpoint. The library half is
-go-database's; the sets are the service's.
-
-Assumes the transition composes the existing migrate and seed mechanisms rather than adding a
-third; the session that builds it settles the declaration format.
+2026-09-07, thinned to the SDKs' toolkit at `v1.data.sql.tasks.toolkit` the same day, and given
+named states as its state control at `v1.data.sql.tasks.states`, also the same day) grows next.
+The tier itself is expressed by the code and the README; this note carries one later
+extraction, at claim resolution until a session settles it. The decision record for the tier is
+standards-lab `context/design/testing-hierarchy.md`.
 
 ## Per-domain protocol helpers (at the second domain)
 

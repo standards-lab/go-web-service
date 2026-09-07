@@ -144,4 +144,4 @@ Held here until promoted to the landing zone:
 
 Multi-entity role refinements belong to the first multi-entity layer. Soft delete as the
 standard's convention (`concepts/data-layer.md`) waits for the first domain that needs it. The
-holistic operation pass over the whole architecture is `v1.data.writes.operations`.
+holistic operation pass over the whole architecture is `v1.data.evaluation`.

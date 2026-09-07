@@ -9,9 +9,9 @@
 // root-level package never imports internal/*.
 //
 // The content is the schema (migrations/), the application's pattern
-// namespace (patterns/), and the seed file with its statements (seeds/,
-// statements/), each behind a function the admin service triggers:
-// Migrations, Patterns, and a Seeder. Beside them sit the three pieces
+// namespace (patterns/), and the named states with their seed statements
+// (seeds/, statements/), each behind a function the admin service
+// triggers: Migrations, Patterns, and a Seeder. Beside them sit the three pieces
 // every domain would otherwise copy: the advisory-lock name registry, the
 // lowering from the web SDK's query to the library's directives, and the
 // status matcher over the library's error vocabulary. Domains and the

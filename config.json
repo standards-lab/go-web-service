@@ -19,7 +19,7 @@
     }
   },
   "admin": {
-    "seed": false
+    "seed": ""
   },
   "shutdown_timeout": "10s"
 }

@@ -37,7 +37,7 @@ func newAdmin(
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	db := admin.New(infra.DB, infra.SQL.DB, migrator, infra.SQL.Catalog, admin.Options{
-		Seed:     cfg.Admin.SeedEnabled(),
+		Seed:     cfg.Admin.SeedState(),
 		Seeder:   data.NewSeeder(infra.SQL),
 		Registry: infra.SQL,
 		Logger:   infra.Logger,

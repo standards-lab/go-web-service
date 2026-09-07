@@ -41,7 +41,8 @@ beneath it closes. The stages are the startup contract:
 - Stage 0, the pool: connects and reports live readiness.
 - Stage 1, the schema: the database admin service verifies the migration history, applies a
   pending set under the advisory lock and verifies again, verifies the `data` package's
-  statements against the migrated schema, and seeds when the environment enables it. A state it
+  statements against the migrated schema, and applies the configured seed set when the
+  environment names one. A state it
   cannot correct, a dirty row or a history the set does not carry, fails startup; an operator
   resolves it through the admin mount's verbs.
 - Stage 2, the domains: each verifies its own statements and read contract against the schema,

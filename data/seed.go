@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"path"
+	"strings"
 
 	"github.com/standards-lab/go-database/admin"
 	"github.com/standards-lab/sqlate"
@@ -16,12 +19,14 @@ import (
 //go:embed seeds/*.json
 var seedFiles embed.FS
 
-// Seeder is the seed operation bound to its statements: the seed's insert
-// and lookup, authored files under statements/ (the native tier, ON
-// CONFLICT and RETURNING, declared in their headers; seeds never port),
-// held as handles over the package's compiled inventory. The admin service
-// owns the policy of when it runs; Seeder owns how. Seeder is the admin
-// service's Seeder.
+// Seeder is the seed operation over the named states bound to its
+// statements: the seed's insert and lookup, authored files under
+// statements/ (the native tier, ON CONFLICT and RETURNING, declared in
+// their headers; seeds never port), held as handles over the package's
+// compiled inventory. A state is one file under seeds/, the data a
+// deployment or a scenario starts from, keyed by table. The admin service
+// owns the policy of which set applies and when; Seeder owns how. Seeder
+// is the admin service's Seeder.
 type Seeder struct {
 	db      *Database
 	seedOrg query.Rows[string]
@@ -42,28 +47,49 @@ func (s *Seeder) Verify(ctx context.Context) error {
 	return s.db.Verify(ctx)
 }
 
-// organizationSeed is one row of seeds/organizations.json, the domain's
-// reference data for development and test in the vocabulary of its API:
-// an organization names its parent by code, the empty code being the root.
+// state is one file under seeds/, decoded strictly: one field per table
+// the seeder knows, so a key for a table it does not is a defect in the
+// file, and a domain that joins the seed adds its field here.
+type state struct {
+	Organizations []organizationSeed `json:"organizations"`
+}
+
+// organizationSeed is one row of a state's organizations, in the
+// vocabulary of the domain's API: an organization names its parent by
+// code, the empty code being the root.
 type organizationSeed struct {
 	Parent string `json:"parent"`
 	Code   string `json:"code"`
 	Name   string `json:"name"`
 }
 
-// Seed loads the embedded seed files in one transaction, each table by its
-// own seed function in dependency order. It is idempotent through each
-// table's unique constraint, an existing row being left as it is, so it
-// runs at every startup of an environment that enables it and on demand
-// from the admin mount. The counts are the rows this run inserted, keyed
-// by table; a seeded database reports zeros.
-func (s *Seeder) Seed(ctx context.Context) (admin.Seeded, error) {
-	var orgs []organizationSeed
-	if err := readSeed("organizations", &orgs); err != nil {
+// States lists the embedded state files by name, sorted.
+func (s *Seeder) States() []string {
+	entries, err := fs.ReadDir(seedFiles, "seeds")
+	if err != nil {
+		panic(fmt.Sprintf("seeds: %v", err)) // the directory is embedded
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, strings.TrimSuffix(e.Name(), path.Ext(e.Name())))
+	}
+	return names
+}
+
+// Seed applies the named state's set in one transaction, each table by
+// its own seed function in dependency order. It is idempotent through
+// each table's unique constraint, an existing row being left as it is, so
+// it runs at every startup of an environment that names a set and on
+// demand from the admin mount. The counts are the rows this run inserted,
+// for every table the seeder knows; a table the state does not carry, or
+// a seeded database, reports zero.
+func (s *Seeder) Seed(ctx context.Context, name string) (admin.Seeded, error) {
+	var st state
+	if err := readSeed(name, &st); err != nil {
 		return nil, err
 	}
 	return s.db.Transact(ctx, func(tx *sqlate.Tx) (admin.Seeded, error) {
-		n, err := s.seedOrganizations(ctx, tx, orgs)
+		n, err := s.seedOrganizations(ctx, tx, st.Organizations)
 		return admin.Seeded{"organizations": n}, err
 	})
 }
@@ -117,9 +143,13 @@ func (s *Seeder) seedOrganization(ctx context.Context, tx *sqlate.Tx, parent any
 }
 
 // readSeed decodes seeds/<name>.json strictly: an unknown field is a
-// defect in the file, not data to ignore.
+// defect in the file, not data to ignore. A name with no file is
+// [admin.ErrUnknownState].
 func readSeed(name string, v any) error {
 	f, err := seedFiles.Open("seeds/" + name + ".json")
+	if errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("%w: %q", admin.ErrUnknownState, name)
+	}
 	if err != nil {
 		return fmt.Errorf("seed %s: %w", name, err)
 	}

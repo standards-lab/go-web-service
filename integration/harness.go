@@ -1,7 +1,6 @@
 package integration
 
 import (
-	"fmt"
 	"net"
 	"os"
 	"strconv"
@@ -28,11 +27,16 @@ func Main(m *testing.M) {
 	processtest.Main(m, "./cmd/server")
 }
 
+// Default is the state the suite starts its cases from: the reference
+// tree the data package declares under that name.
+const Default = "default"
+
 // Options shapes one service process. The zero value runs the service with
-// seeding off against the compose database.
+// no seed set against the compose database.
 type Options struct {
-	// Seed turns startup and on-demand seeding on (APP_ADMIN_SEED).
-	Seed bool
+	// Seed names the state whose set applies at startup and on a seed
+	// request naming none (APP_ADMIN_SEED); empty names none.
+	Seed string
 	// Database overrides the database address as host:port, the way a test
 	// routes the service through a processtest.Forwarder. Empty uses the
 	// compose database.
@@ -111,7 +115,7 @@ func environment(opts Options, addr, dbHost, dbPort string) []string {
 		"APP_DATABASE_HOST=" + host,
 		"APP_DATABASE_PORT=" + port,
 		"APP_DATABASE_PASSWORD=" + password,
-		"APP_ADMIN_SEED=" + fmt.Sprint(opts.Seed),
+		"APP_ADMIN_SEED=" + opts.Seed,
 	}
 	return append(env, opts.Env...)
 }

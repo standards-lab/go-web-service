@@ -30,8 +30,9 @@ func (dialect) ServerVersion() string { return "SELECT version()" }
 // the scripted driver: the pool's lifecycle object, started so it answers
 // pings, the session, the migrator over the service's migration set
 // (unlocked, since the test dialect has no lock capability), the catalog,
-// and the data package as seeder and registry.
-func module(t *testing.T, seed bool, responses ...sqltest.Response) (http.Handler, *sqltest.Recorder) {
+// and the data package as seeder and registry; seed names the state whose
+// set the service applies on a seed request naming none.
+func module(t *testing.T, seed string, responses ...sqltest.Response) (http.Handler, *sqltest.Recorder) {
 	t.Helper()
 	pool, rec := sqltest.Open(t, responses...)
 	cfg := godb.Config{Name: "app"}
@@ -85,7 +86,7 @@ func count(n int64) sqltest.Response {
 }
 
 func TestReads_NeedNoDatabase(t *testing.T) {
-	h, _ := module(t, false)
+	h, _ := module(t, "")
 
 	patterns := decode(t, send(t, h, "GET", "/database/patterns", ""), 200)
 	if ns, _ := patterns["namespaces"].([]any); len(ns) != 2 || ns[0] != "app" || ns[1] != "sql" {
@@ -100,7 +101,7 @@ func TestReads_NeedNoDatabase(t *testing.T) {
 
 func TestSchema_ReportsAnEmptyHistoryAsPending(t *testing.T) {
 	// Version: the history table does not exist; Verify: the same.
-	h, rec := module(t, false, count(0), count(0))
+	h, rec := module(t, "", count(0), count(0))
 
 	st := decode(t, send(t, h, "GET", "/database/schema", ""), 200)
 	if st["ready"] != false || st["version"] != float64(0) {
@@ -114,8 +115,19 @@ func TestSchema_ReportsAnEmptyHistoryAsPending(t *testing.T) {
 	}
 }
 
-func TestSeed_IsForbiddenWhenDisabled(t *testing.T) {
-	h, _ := module(t, false)
+func TestStates_ListsTheDataPackages(t *testing.T) {
+	h, rec := module(t, "")
+	res := send(t, h, "GET", "/database/states", "")
+	if res.Code != 200 || strings.TrimSpace(res.Body.String()) != `["default","empty"]` {
+		t.Errorf("states = %d %s; want default and empty", res.Code, res.Body)
+	}
+	if len(rec.Calls()) != 0 {
+		t.Errorf("the states read touched the database: %v", rec.Ops())
+	}
+}
+
+func TestSeed_IsForbiddenWithNoSet(t *testing.T) {
+	h, _ := module(t, "")
 	rec := send(t, h, "POST", "/database/seed", "")
 	body := decode(t, rec, 403)
 	if ct := rec.Header().Get("Content-Type"); ct != web.ProblemMediaType {
@@ -123,6 +135,31 @@ func TestSeed_IsForbiddenWhenDisabled(t *testing.T) {
 	}
 	if detail, _ := body["detail"].(string); !strings.Contains(detail, "disabled") {
 		t.Errorf("detail = %q; want the reason carried on a 403", detail)
+	}
+}
+
+func idRow(id string) sqltest.Response {
+	return sqltest.Response{Columns: []string{"id"}, Rows: [][]driver.Value{{id}}}
+}
+
+// A bodyless seed applies the configured set; a body names another. Both
+// answer with the rows inserted by table.
+func TestSeed_AppliesTheConfiguredOrNamedSet(t *testing.T) {
+	rows := make([]sqltest.Response, 0, 7)
+	for i := range 7 {
+		rows = append(rows, idRow(string(rune('a'+i))))
+	}
+	h, rec := module(t, "default", rows...)
+	seeded := decode(t, send(t, h, "POST", "/database/seed", ""), 200)
+	if seeded["organizations"] != float64(7) {
+		t.Errorf("seeded = %v; want seven organizations", seeded)
+	}
+	seeded = decode(t, send(t, h, "POST", "/database/seed", `{"state":"empty"}`), 200)
+	if seeded["organizations"] != float64(0) {
+		t.Errorf("seeded = %v; want zero organizations from the empty state", seeded)
+	}
+	if rec.Pending() != 0 {
+		t.Errorf("pending responses %d", rec.Pending())
 	}
 }
 
@@ -136,8 +173,12 @@ func TestVerbs_RejectBadArgumentsBeforeIO(t *testing.T) {
 		"down: negative":      {"/database/schema/down", `{"steps":-1}`, "positive"},
 		"force: negative":     {"/database/schema/force", `{"version":-1}`, "negative"},
 		"force: missing body": {"/database/schema/force", "", "empty body"},
+		"seed: unknown state": {"/database/seed", `{"state":"nope"}`, `unknown state: "nope"`},
+		"state: unknown":      {"/database/state", `{"state":"nope"}`, `unknown state: "nope"`},
+		"state: missing body": {"/database/state", "", "empty body"},
+		"state: unknown key":  {"/database/state", `{"name":"empty"}`, "unknown field"},
 	}
-	h, rec := module(t, false)
+	h, rec := module(t, "default")
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			body := decode(t, send(t, h, "POST", c.path, c.body), 400)
@@ -152,7 +193,7 @@ func TestVerbs_RejectBadArgumentsBeforeIO(t *testing.T) {
 }
 
 func TestVerify_OnAnEmptyHistoryIsAConflictWithDetail(t *testing.T) {
-	h, rec := module(t, false, count(0))
+	h, rec := module(t, "", count(0))
 	body := decode(t, send(t, h, "POST", "/database/schema/verify", ""), 409)
 	if detail, _ := body["detail"].(string); !strings.Contains(detail, "pending") {
 		t.Errorf("detail = %q; want the pending versions named on a 409", detail)
@@ -163,7 +204,7 @@ func TestVerify_OnAnEmptyHistoryIsAConflictWithDetail(t *testing.T) {
 }
 
 func TestDiagnostics_PingsAndReadsTheServerVersion(t *testing.T) {
-	h, rec := module(t, false, sqltest.Response{Columns: []string{"version"}, Rows: [][]driver.Value{{"PostgreSQL 18.4"}}})
+	h, rec := module(t, "", sqltest.Response{Columns: []string{"version"}, Rows: [][]driver.Value{{"PostgreSQL 18.4"}}})
 	d := decode(t, send(t, h, "GET", "/database/diagnostics", ""), 200)
 	if d["dialect"] != "test" || d["server_version"] != "PostgreSQL 18.4" {
 		t.Errorf("diagnostics = %v", d)

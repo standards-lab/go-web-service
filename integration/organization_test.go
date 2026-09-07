@@ -71,13 +71,13 @@ func equal(a, b []string) bool {
 }
 
 func TestOrganization(t *testing.T) {
-	s := integration.Start(t, integration.Options{Seed: true})
+	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	c := s.Client()
 
 	// Every case starts from the seeded tree.
 	run := func(name string, fn func(t *testing.T)) {
 		t.Run(name, func(t *testing.T) {
-			integration.Reset(t, c)
+			integration.Reset(t, c, integration.Default)
 			fn(t)
 		})
 	}

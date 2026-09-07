@@ -27,14 +27,14 @@ type page struct {
 
 const organizations = "/api/organizations"
 
-// seededTotal is the organization count seeds/organizations.json carries.
+// seededTotal is the organization count the default state carries.
 const seededTotal = 7
 
 // revert leaves the schema empty through one service, the state a startup
 // applies the migration set from, and stops that service.
 func revert(t *testing.T) {
 	t.Helper()
-	s := integration.Start(t, integration.Options{Seed: true})
+	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	integration.Revert(t, s.Client())
 	if st := integration.Schema(t, s.Client()); st.Version != 0 || st.Ready {
 		t.Fatalf("schema after revert = %+v", st)
@@ -62,7 +62,7 @@ func assertCurrent(t *testing.T, c *webtest.Client) {
 func TestLifecycle_StartupMigratesSeedsAndDrains(t *testing.T) {
 	revert(t)
 
-	s := integration.Start(t, integration.Options{Seed: true})
+	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	c := s.Client()
 
 	live := webtest.Decode[map[string]string](t, c.Get(t, "/healthz"), http.StatusOK)
@@ -87,7 +87,7 @@ func TestLifecycle_StartupMigratesSeedsAndDrains(t *testing.T) {
 	}
 	assertCurrent(t, c)
 
-	if n := integration.Seed(t, c); n["organizations"] != 0 {
+	if n := integration.Seed(t, c, ""); n["organizations"] != 0 {
 		t.Errorf("second seed inserted %v, want zero", n)
 	}
 
@@ -99,20 +99,29 @@ func TestLifecycle_StartupMigratesSeedsAndDrains(t *testing.T) {
 	}
 
 	// A second start against the seeded database inserts nothing.
-	again := integration.Start(t, integration.Options{Seed: true})
+	again := integration.Start(t, integration.Options{Seed: integration.Default})
 	assertCurrent(t, again.Client())
-	if n := integration.Seed(t, again.Client()); n["organizations"] != 0 {
+	if n := integration.Seed(t, again.Client(), ""); n["organizations"] != 0 {
 		t.Errorf("seed after a second start inserted %v, want zero", n)
 	}
 }
 
-// With seeding off the service starts against the schema and refuses the
-// seed verb with a 403 that says why.
-func TestLifecycle_SeedForbiddenWhenOff(t *testing.T) {
-	s := integration.Start(t, integration.Options{Seed: false})
-	p := s.Client().Post(t, "/admin/database/seed", nil).Problem(t, http.StatusForbidden)
+// With no set configured the service starts against the schema and
+// refuses a seed naming none with a 403 that says why; a named state still
+// resets and a named set still seeds, since the policy is the name, not a
+// switch.
+func TestLifecycle_SeedForbiddenWithNoSet(t *testing.T) {
+	s := integration.Start(t, integration.Options{})
+	c := s.Client()
+	p := c.Post(t, "/admin/database/seed", nil).Problem(t, http.StatusForbidden)
 	if p.Detail == "" {
 		t.Error("403 problem carries no detail")
+	}
+	if tr := integration.Reset(t, c, "empty"); tr.State != "empty" || !tr.Schema.Ready || tr.Seeded["organizations"] != 0 {
+		t.Errorf("reset to empty = %+v", tr)
+	}
+	if n := integration.Seed(t, c, integration.Default); n["organizations"] != seededTotal {
+		t.Errorf("seed default over empty inserted %v, want %d", n, seededTotal)
 	}
 }
 
@@ -123,8 +132,8 @@ func TestLifecycle_SeedForbiddenWhenOff(t *testing.T) {
 func TestLifecycle_ConcurrentStarters(t *testing.T) {
 	revert(t)
 
-	a := integration.Launch(t, integration.Options{Seed: true})
-	b := integration.Launch(t, integration.Options{Seed: true})
+	a := integration.Launch(t, integration.Options{Seed: integration.Default})
+	b := integration.Launch(t, integration.Options{Seed: integration.Default})
 	a.Ready(t)
 	b.Ready(t)
 

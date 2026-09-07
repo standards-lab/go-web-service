@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -15,8 +16,8 @@ import (
 	"github.com/standards-lab/go-web-service/data"
 )
 
-// The seed file holds seven organizations in dependency order; the root
-// is first.
+// The default state holds seven organizations in dependency order; the
+// root is first.
 const seedRows = 7
 
 func newDatabase(t *testing.T, responses ...sqltest.Response) (*data.Database, *sqltest.Recorder) {
@@ -46,6 +47,43 @@ func TestSeeder_RegistersAndVerifies(t *testing.T) {
 	}
 }
 
+// The states are the embedded files, by name, sorted.
+func TestSeeder_States_ListsTheFiles(t *testing.T) {
+	db, _ := newDatabase(t)
+	if got := data.NewSeeder(db).States(); !slices.Equal(got, []string{"default", "empty"}) {
+		t.Fatalf("States = %v; want default and empty", got)
+	}
+}
+
+// The empty state seeds nothing and still reports every table, at zero,
+// in one transaction.
+func TestSeeder_Seed_EmptyStateInsertsNothing(t *testing.T) {
+	db, rec := newDatabase(t)
+	n, err := data.NewSeeder(db).Seed(context.Background(), "empty")
+	if err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+	if v, ok := n["organizations"]; !ok || v != 0 {
+		t.Fatalf("Seeded = %v; want organizations at zero", n)
+	}
+	if ops := rec.Ops(); !slices.Equal(ops, []sqltest.Op{sqltest.OpBegin, sqltest.OpCommit}) {
+		t.Fatalf("ops = %v; want an empty transaction", ops)
+	}
+}
+
+// A name with no file is the admin service's unknown-state error, before
+// any I/O.
+func TestSeeder_Seed_UnknownStateIsRefused(t *testing.T) {
+	db, rec := newDatabase(t)
+	_, err := data.NewSeeder(db).Seed(context.Background(), "nope")
+	if !errors.Is(err, admin.ErrUnknownState) || !strings.Contains(err.Error(), `"nope"`) {
+		t.Fatalf("err = %v; want ErrUnknownState naming it", err)
+	}
+	if len(rec.Calls()) != 0 {
+		t.Fatalf("an unknown state reached the database: %v", rec.Ops())
+	}
+}
+
 func TestSeeder_Seed_InsertsEveryRowOnce(t *testing.T) {
 	responses := make([]sqltest.Response, 0, seedRows)
 	for i := range seedRows {
@@ -54,7 +92,7 @@ func TestSeeder_Seed_InsertsEveryRowOnce(t *testing.T) {
 	db, rec := newDatabase(t, responses...)
 	s := data.NewSeeder(db)
 
-	n, err := s.Seed(context.Background())
+	n, err := s.Seed(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("Seed: %v", err)
 	}
@@ -87,7 +125,7 @@ func TestSeeder_Seed_FindsExistingRows(t *testing.T) {
 	db, rec := newDatabase(t, responses...)
 	s := data.NewSeeder(db)
 
-	n, err := s.Seed(context.Background())
+	n, err := s.Seed(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("Seed: %v", err)
 	}
@@ -107,7 +145,7 @@ func TestSeeder_Seed_RollsBackOnFailure(t *testing.T) {
 	db, rec := newDatabase(t, idRow("a"), sqltest.Response{Err: errBoom})
 	s := data.NewSeeder(db)
 
-	if _, err := s.Seed(context.Background()); err == nil || !strings.Contains(err.Error(), "seed organization engineering") {
+	if _, err := s.Seed(context.Background(), "default"); err == nil || !strings.Contains(err.Error(), "seed organization engineering") {
 		t.Fatalf("err = %v; want the failing row named", err)
 	}
 	ops := rec.Ops()

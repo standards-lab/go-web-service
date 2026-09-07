@@ -8,10 +8,11 @@
 //   - admin domain: a package under admin/ named for the infrastructure
 //     service it administers, the database today;
 //   - admin service: the operations, each a trigger over a library
-//     function, with their policy (when the seed runs); for the database it
-//     is go-database's admin.Service over sqlate's migrator, the session,
-//     and the data package's migration set, seeder, catalog, and registry.
-//     Startup calls the same functions its endpoints do;
+//     function, with their policy (which set applies at startup); for the
+//     database it is go-database's admin.Service over sqlate's migrator,
+//     the session, and the data package's migration set, seeder with its
+//     named states, catalog, and registry. Startup calls the same
+//     functions its endpoints do;
 //   - admin handler: the domain's route group, mounted into the admin mount.
 //
 // The composition root constructs the admin service and mounts this

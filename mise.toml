@@ -6,16 +6,20 @@ golangci-lint = "2.13.2"
 APP_ENV = "local"
 
 [tasks.vet]
-description = "Run go vet"
-run = "go vet ./..."
+description = "Run go vet, the integration suite included"
+run = "go vet -tags integration ./..."
 
 [tasks.serve]
 description = "Run the service locally"
 run = "go run ./cmd/server"
 
 [tasks.test]
-description = "Run tests"
+description = "Run the unit tier"
 run = "go test -race ./..."
+
+[tasks.integration]
+description = "Start the compose stack and run the integration tier against it"
+run = "docker compose up -d --wait && go test -race -count=1 -tags integration ./integration/"
 
 [tasks.fmt]
 description = "Format all Go source"
@@ -26,8 +30,8 @@ description = "Run go mod tidy"
 run = "go mod tidy"
 
 [tasks.lint]
-description = "Run golangci-lint, then sqlint over the SQL files"
-run = "golangci-lint run ./... && go tool sqlint"
+description = "Run golangci-lint, the integration suite included, then sqlint over the SQL files"
+run = "golangci-lint run --build-tags integration ./... && go tool sqlint"
 
 # services
 [tasks.db-up]

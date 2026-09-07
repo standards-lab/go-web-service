@@ -78,8 +78,9 @@ surfaces, routes, constraint names, and enum vocabularies are settled per task.
 On record for the cross-board evaluation: the `sdk` package's tenants, `PathID` and `Command`,
 staged at `v1.data.sql.integration.service` for go-web-sdk; the shared status matcher and the
 directives lowering living in the `data` package, which the template cannot scaffold while it
-stays engine-free; and a generic seed helper, waiting under the sufficiency rule for the
-second service that repeats the per-table loop.
+stays engine-free; and a generic seed helper, a fit question for the evaluation: it promotes
+to go-database when its shape is the library's own, not when a second service repeats the
+per-table loop.
 
 ## Prior R&D
 

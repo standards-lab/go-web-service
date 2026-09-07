@@ -18,6 +18,5 @@
 // The composition root constructs the admin service and mounts this
 // package's Routes. The mount's isolation, its own listener, authentication,
 // and audit, is the strategy's production constraint and the
-// v1.data.sql.integration.listener task; until then the group serves on the
-// API listener.
+// v1.admin-listener goal; until then the group serves on the API listener.
 package database

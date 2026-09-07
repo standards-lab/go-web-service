@@ -49,8 +49,8 @@ func newAdmin(
 // mountAdmin builds the admin mount, /admin, with each admin domain's route
 // group mounted into it. In production the mount belongs on its own
 // listener, authenticated and unreachable from the public API's network
-// path; that isolation is the v1.data.sql.integration.listener task, and
-// until then the mount serves on the API listener.
+// path; that isolation is the v1.admin-listener goal, and until then the
+// mount serves on the API listener.
 func mountAdmin(adm *Admin) *web.Group {
 	g := web.NewGroup("/admin")
 	g.Mount(dbadmin.Routes(adm.Database))

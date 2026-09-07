@@ -23,18 +23,16 @@ settles it in plan mode; a section the code comes to express is deleted.
   `docs/` tier once the surfaces stop churning. The README carries only identity,
   getting-started, tasks, and configuration.
 
-## Reads and writes — built, and rewritten onto authored SQL
+## Reads and writes — built
 
-The reads slice (`organization-reads`, 2026-08-26) and the writes slice
-(`organization-commands`, 2026-08-28) landed across the three repositories, and
-`v1.data.sql.integration.service` (2026-09-06) rewrote the service half onto sqlate v0.1.0,
-go-database v0.4.0, and go-web-sdk v0.6.0; the code expresses the layout, and the rules the next
-layer is built by are `design/domain-architecture.md` and `design/composition-root.md`. Both
-native choices settled at the writes slice stand: ids stay database-minted (`uuidv7()`), and
-RETURNING is the application's identity pattern; the port list carries both. Base packages
-outside `internal/` are importable by other modules, accepted for a reference service as a
-deliberate choice, the wiring kept compiler-private under `internal/`. The holistic operation
-pass (`v1.data.writes.operations`) remains.
+The organization domain runs on authored SQL (rewritten at `v1.data.sql.integration.service`,
+2026-09-06); the code expresses the layout, and the rules the next layer is built by are
+`design/domain-architecture.md` and `internal/app/doc.go`. Two settled choices stand: ids are
+database-minted (`uuidv7()`) and RETURNING is the application's identity pattern, both on the
+port list (`design/stack.md`). Base packages outside `internal/` are importable by other
+modules, accepted for a reference service as a deliberate choice, the wiring kept
+compiler-private under `internal/`. The cross-board evaluation (`v1.data.evaluation`)
+remains.
 
 ## Domain direction (candidate until a task settles it)
 

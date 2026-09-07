@@ -55,9 +55,8 @@ No statement, session, or query type crosses out of the translation file. The se
 and the handlers work at the web contract. The read model's header is the read contract's
 single field vocabulary: an unknown sort or filter field, an operator the library does not
 support, or a value the engine cannot cast to the field's declared type is a typed 400 before or
-at the engine, never a 500. On the wire, a problem's detail carries error text on the SDK's
-built-in set (400, 413, 428) and on whatever statuses a layer's writer adds with
-`ErrorWriter.Detail`; any other status sends the bare title.
+at the engine, never a 500. Which statuses carry a problem's detail on the wire is go-web-sdk's
+`ErrorWriter.Detail`, plus whatever statuses a layer's writer adds.
 
 ## The command side
 
@@ -90,14 +89,16 @@ Settled at `v1.data.writes.organization` and restated on go-web-sdk v0.6.0:
 The term is **handler**. A handler builds a route **group**, not a module: the module layer is
 the API itself. `internal/app/domain.go` composes the one `/api` module; each domain mounts its
 group into it at a plural-resource root (`/organizations`) and may nest sub-paths beneath it.
-Health stays router-level, outside the module. The list read takes `page`, `size`, and `sort`,
-and every other parameter as a filter: a plain parameter is equality, a repeated plain parameter
-is membership, and `field[op]=value` names an operator; the lowering is `data.Directives`.
+Health stays router-level, outside the module. The list read's grammar is go-web-sdk's read
+contract (`ParseQuery`); the lowering to the read model's header is `data.Directives`.
 
 ## Composition wiring
 
 `internal/app/domain.go` constructs each layer's service from the `data` package and registers
 it on the coordinator at the domains' stage, never handing the `Infrastructure` struct down.
+The base layers (`data`, `domain/<layer>`, `admin/<service>`) are root-level packages because
+the domain packages import `data` and the topology-and-naming principle forbids a root-level
+package importing `internal/*`.
 `mountAPI` mounts each layer's group and hands policy at the construction site: the
 service-owned reads configuration yields the `web.Limits` each handler constructor receives.
 Per-layer policy variation is different values at different construction sites.
@@ -143,4 +144,4 @@ Held here until promoted to the landing zone:
 
 Multi-entity role refinements belong to the first multi-entity layer. Soft delete as the
 standard's convention (`concepts/data-layer.md`) waits for the first domain that needs it. The
-holistic operation pass over the whole architecture is `v1.data.writes.operations`.
+holistic operation pass over the whole architecture is `v1.data.evaluation`.

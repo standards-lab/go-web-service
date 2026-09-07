@@ -3,20 +3,13 @@ package integration
 import (
 	"fmt"
 	"net"
-	"net/http"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
-	"sync"
-	"syscall"
+	"strconv"
 	"testing"
-	"time"
-)
 
-// Failsafe bounds every wait for an event that should occur, so a broken
-// composition fails a test instead of hanging the run.
-const Failsafe = 15 * time.Second
+	"github.com/standards-lab/go-core/process/processtest"
+	"github.com/standards-lab/go-web-sdk/webtest"
+)
 
 // The compose stack's defaults, the values config.json and
 // secrets.example.json pair with. The harness reads the same APP_DATABASE_*
@@ -28,55 +21,11 @@ const (
 	defaultDatabasePassword = "app"
 )
 
-// The build Main produced for the run: the binary's path and the module
-// root, the working directory the service loads its configuration files
-// from.
-var (
-	binary string
-	root   string
-)
-
 // Main is the suite's TestMain: it builds cmd/server once, with the race
 // detector so the service runs under it too, runs the tests, and removes
 // the build. A build failure ends the run before any test starts.
 func Main(m *testing.M) {
-	code, err := run(m)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "integration:", err)
-		code = 1
-	}
-	os.Exit(code)
-}
-
-func run(m *testing.M) (int, error) {
-	var err error
-	if root, err = moduleRoot(); err != nil {
-		return 0, err
-	}
-	dir, err := os.MkdirTemp("", "go-web-service-integration-")
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = os.RemoveAll(dir) }()
-
-	binary = filepath.Join(dir, "server")
-	build := exec.Command("go", "build", "-race", "-o", binary, "./cmd/server")
-	build.Dir = root
-	build.Stdout, build.Stderr = os.Stderr, os.Stderr
-	if err := build.Run(); err != nil {
-		return 0, fmt.Errorf("build cmd/server: %w", err)
-	}
-	return m.Run(), nil
-}
-
-// moduleRoot resolves the module directory, the working directory the
-// service loads its configuration files from.
-func moduleRoot() (string, error) {
-	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}").Output()
-	if err != nil {
-		return "", fmt.Errorf("locate module root: %w", err)
-	}
-	return strings.TrimSpace(string(out)), nil
+	processtest.Main(m, "./cmd/server")
 }
 
 // Options shapes one service process. The zero value runs the service with
@@ -85,8 +34,8 @@ type Options struct {
 	// Seed turns startup and on-demand seeding on (APP_ADMIN_SEED).
 	Seed bool
 	// Database overrides the database address as host:port, the way a test
-	// routes the service through a Forwarder. Empty uses the compose
-	// database.
+	// routes the service through a processtest.Forwarder. Empty uses the
+	// compose database.
 	Database string
 	// Env appends further KEY=VALUE overrides, applied last.
 	Env []string
@@ -95,12 +44,9 @@ type Options struct {
 // Service is one running service process: its address, its captured
 // output, and its exit.
 type Service struct {
-	cmd    *exec.Cmd
+	*processtest.Process
 	addr   string
-	out    *output
-	exited chan struct{}
-	code   int
-	client *Client
+	client *webtest.Client
 }
 
 // Start runs the service with opts and returns once it is live: Launch
@@ -112,104 +58,33 @@ func Start(t testing.TB, opts Options) *Service {
 
 // Launch runs the service with opts on a reserved loopback port and returns
 // without waiting, so a test can start several processes at once; Ready
-// waits for one. A process still running at test cleanup is interrupted,
-// and killed if it does not exit within Failsafe.
+// waits for one.
 func Launch(t testing.TB, opts Options) *Service {
 	t.Helper()
-	if binary == "" {
-		t.Fatal("integration: no service binary; the suite's TestMain must call Main")
-	}
-	host, port, err := splitHostPort(opts.Database)
+	host, port, err := net.SplitHostPort(opts.Database)
 	if opts.Database != "" && err != nil {
 		t.Fatalf("Options.Database: %v", err)
 	}
-	addr := fmt.Sprintf("127.0.0.1:%d", FreePort(t))
-
-	cmd := exec.Command(binary)
-	cmd.Dir = root
-	cmd.Env = environment(opts, addr, host, port)
-	out := &output{}
-	cmd.Stdout, cmd.Stderr = out, out
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start service: %v", err)
-	}
-
-	s := &Service{cmd: cmd, addr: addr, out: out, exited: make(chan struct{})}
-	s.client = NewClient(s.URL())
-	go func() {
-		defer close(s.exited)
-		err := cmd.Wait()
-		s.code = cmd.ProcessState.ExitCode()
-		if err != nil && s.code < 0 {
-			s.code = -1
-		}
-	}()
-	t.Cleanup(func() {
-		if s.Exited() {
-			return
-		}
-		// Interrupt first, so the process drains its connections the way
-		// it would in service; kill only a process that does not.
-		_ = cmd.Process.Signal(syscall.SIGINT)
-		select {
-		case <-s.exited:
-		case <-time.After(Failsafe):
-			_ = cmd.Process.Kill()
-			<-s.exited
-		}
-	})
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(processtest.FreePort(t)))
+	s := &Service{addr: addr, client: webtest.NewClient("http://" + addr)}
+	s.Process = processtest.Launch(t, environment(opts, addr, host, port)...)
 	return s
 }
 
 // Ready waits until the service's liveness probe answers, failing the test
-// with the captured output if the process exits or Failsafe elapses first.
-// The server is the root lifecycle stage, so a live probe means every
-// stage beneath it started.
+// with the captured output if the process exits or the failsafe elapses
+// first. The server is the root lifecycle stage, so a live probe means
+// every stage beneath it started.
 func (s *Service) Ready(t testing.TB) *Service {
 	t.Helper()
-	probe := newHTTPClient(time.Second)
-	deadline := time.Now().Add(Failsafe)
-	for time.Now().Before(deadline) {
-		if s.Exited() {
-			t.Fatalf("service exited with %d before ready:\n%s", s.code, s.out.String())
-		}
-		if res, err := probe.Get(s.URL() + "/healthz"); err == nil {
-			_ = res.Body.Close()
-			if res.StatusCode == http.StatusOK {
-				return s
-			}
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("service not live within %s:\n%s", Failsafe, s.out.String())
-	return nil
+	s.Await(t, "liveness", func() bool { return webtest.Live(s.URL()) })
+	return s
 }
 
-// FreePort reserves an ephemeral loopback port and releases it for the
-// service to bind. The window between release and bind is the usual one of
-// a port-based harness; a lost race fails the bind, and Start reports the
-// exit with the output.
-func FreePort(t testing.TB) int {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("reserve port: %v", err)
-	}
-	port := l.Addr().(*net.TCPAddr).Port
-	if err := l.Close(); err != nil {
-		t.Fatalf("release port: %v", err)
-	}
-	return port
-}
-
-// environment composes the process environment: the parent's, with the
-// service's own variables set for the run. APP_ENV is cleared so no overlay
-// applies: the base file and these variables are the whole configuration.
-// The database address is the override when given, else the parent's
-// APP_DATABASE_* variables, else the compose defaults. GORACE drops the
-// race runtime's one-second sleep at exit, which exists to catch a report
-// from a goroutine still running then; races during the run are reported
-// as they happen, and every Stop would otherwise cost the second.
+// environment composes the service's own variables for the run. APP_ENV is
+// cleared so no overlay applies: the base file and these variables are the
+// whole configuration. The database address is the override when given,
+// else the parent's APP_DATABASE_* variables, else the compose defaults.
 func environment(opts Options, addr, dbHost, dbPort string) []string {
 	host, port := defaultDatabaseHost, defaultDatabasePort
 	if v := os.Getenv("APP_DATABASE_HOST"); v != "" {
@@ -221,14 +96,13 @@ func environment(opts Options, addr, dbHost, dbPort string) []string {
 	if opts.Database != "" {
 		host, port = dbHost, dbPort
 	}
-	serverHost, serverPort, _ := splitHostPort(addr)
+	serverHost, serverPort, _ := net.SplitHostPort(addr)
 	password := defaultDatabasePassword
 	if v := os.Getenv("APP_DATABASE_PASSWORD"); v != "" {
 		password = v
 	}
 
 	env := []string{
-		"GORACE=atexit_sleep_ms=0",
 		"APP_ENV=",
 		"APP_LOG_LEVEL=debug",
 		"APP_LOG_FORMAT=text",
@@ -239,16 +113,7 @@ func environment(opts Options, addr, dbHost, dbPort string) []string {
 		"APP_DATABASE_PASSWORD=" + password,
 		"APP_ADMIN_SEED=" + fmt.Sprint(opts.Seed),
 	}
-	env = append(env, opts.Env...)
-	return append(os.Environ(), env...)
-}
-
-func splitHostPort(addr string) (string, string, error) {
-	i := strings.LastIndex(addr, ":")
-	if i <= 0 || i == len(addr)-1 {
-		return "", "", fmt.Errorf("%q is not host:port", addr)
-	}
-	return addr[:i], addr[i+1:], nil
+	return append(env, opts.Env...)
 }
 
 // Addr is the service's address, host:port.
@@ -259,78 +124,4 @@ func (s *Service) URL() string { return "http://" + s.addr }
 
 // Client returns the client bound to the service, one per process so its
 // connection is reused across calls.
-func (s *Service) Client() *Client { return s.client }
-
-// Output is everything the service has written so far.
-func (s *Service) Output() string { return s.out.String() }
-
-// Stop interrupts the service, the signal a terminal or an orchestrator
-// sends, waits for it to exit, and returns its exit code; a process still
-// running after Failsafe is killed and the test fails.
-func (s *Service) Stop(t testing.TB) int {
-	t.Helper()
-	if s.Exited() {
-		return s.code
-	}
-	if err := s.cmd.Process.Signal(syscall.SIGINT); err != nil {
-		t.Fatalf("interrupt service: %v", err)
-	}
-	return s.Wait(t)
-}
-
-// Wait blocks until the service exits and returns its exit code, failing
-// the test if Failsafe elapses first.
-func (s *Service) Wait(t testing.TB) int {
-	t.Helper()
-	select {
-	case <-s.exited:
-		return s.code
-	case <-time.After(Failsafe):
-		_ = s.cmd.Process.Kill()
-		<-s.exited
-		t.Fatalf("service did not exit within %s:\n%s", Failsafe, s.Output())
-		return -1
-	}
-}
-
-// Exited reports whether the process has ended.
-func (s *Service) Exited() bool {
-	select {
-	case <-s.exited:
-		return true
-	default:
-		return false
-	}
-}
-
-// output is the process's captured writes, read whole on a failure.
-type output struct {
-	mu  sync.Mutex
-	buf strings.Builder
-}
-
-func (o *output) Write(p []byte) (int, error) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.buf.Write(p)
-}
-
-func (o *output) String() string {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.buf.String()
-}
-
-// WaitFor polls fn until it returns true or Failsafe elapses, failing the
-// test with what.
-func WaitFor(t testing.TB, what string, fn func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(Failsafe)
-	for time.Now().Before(deadline) {
-		if fn() {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", what)
-}
+func (s *Service) Client() *webtest.Client { return s.client }

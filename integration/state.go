@@ -3,6 +3,8 @@ package integration
 import (
 	"net/http"
 	"testing"
+
+	"github.com/standards-lab/go-web-sdk/webtest"
 )
 
 // The admin mount's paths the harness drives state through.
@@ -29,7 +31,7 @@ type Seeded map[string]int
 // through the operations an operator runs on the admin mount: every
 // migration reverted, the set applied, the reference data seeded. The
 // service c is bound to must run with seeding on.
-func Reset(t testing.TB, c *Client) {
+func Reset(t testing.TB, c *webtest.Client) {
 	t.Helper()
 	Revert(t, c)
 	c.Post(t, pathSchemaUp, nil).Expect(t, http.StatusOK)
@@ -38,22 +40,22 @@ func Reset(t testing.TB, c *Client) {
 
 // Revert reverts every applied migration, leaving the schema empty and the
 // set pending, the state a startup applies from.
-func Revert(t testing.TB, c *Client) {
+func Revert(t testing.TB, c *webtest.Client) {
 	t.Helper()
 	st := Schema(t, c)
 	for st.Version > 0 {
-		st = Decode[SchemaStatus](t, c.Post(t, pathSchemaDown, nil), http.StatusOK)
+		st = webtest.Decode[SchemaStatus](t, c.Post(t, pathSchemaDown, nil), http.StatusOK)
 	}
 }
 
 // Schema reads the schema status.
-func Schema(t testing.TB, c *Client) SchemaStatus {
+func Schema(t testing.TB, c *webtest.Client) SchemaStatus {
 	t.Helper()
-	return Decode[SchemaStatus](t, c.Get(t, pathSchema), http.StatusOK)
+	return webtest.Decode[SchemaStatus](t, c.Get(t, pathSchema), http.StatusOK)
 }
 
 // Seed runs the seed and returns what it inserted.
-func Seed(t testing.TB, c *Client) Seeded {
+func Seed(t testing.TB, c *webtest.Client) Seeded {
 	t.Helper()
-	return Decode[Seeded](t, c.Post(t, pathSeed, nil), http.StatusOK)
+	return webtest.Decode[Seeded](t, c.Post(t, pathSeed, nil), http.StatusOK)
 }

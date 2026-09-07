@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/standards-lab/go-web-sdk/webtest"
+
 	"github.com/standards-lab/go-web-service/integration"
 )
 
@@ -58,9 +60,9 @@ func TestAdmin(t *testing.T) {
 	c := s.Client()
 	integration.Reset(t, c)
 
-	schema := func(t *testing.T, res *integration.Response) schemaStatus {
+	schema := func(t *testing.T, res *webtest.Response) schemaStatus {
 		t.Helper()
-		return integration.Decode[schemaStatus](t, res, http.StatusOK)
+		return webtest.Decode[schemaStatus](t, res, http.StatusOK)
 	}
 	assertCurrentSchema := func(t *testing.T, st schemaStatus) {
 		t.Helper()
@@ -76,7 +78,7 @@ func TestAdmin(t *testing.T) {
 	}
 
 	t.Run("diagnostics", func(t *testing.T) {
-		d := integration.Decode[diagnostics](t, c.Get(t, admin+"/diagnostics"), http.StatusOK)
+		d := webtest.Decode[diagnostics](t, c.Get(t, admin+"/diagnostics"), http.StatusOK)
 		if d.Dialect != "postgres" || d.Ping <= 0 || !strings.HasPrefix(d.ServerVersion, "PostgreSQL 18") || d.Pool.Open < 1 {
 			t.Errorf("diagnostics = %+v", d)
 		}
@@ -94,7 +96,7 @@ func TestAdmin(t *testing.T) {
 	})
 
 	t.Run("patterns", func(t *testing.T) {
-		cat := integration.Decode[catalog](t, c.Get(t, admin+"/patterns"), http.StatusOK)
+		cat := webtest.Decode[catalog](t, c.Get(t, admin+"/patterns"), http.StatusOK)
 		if !equal(cat.Namespaces, []string{"app", "sql"}) {
 			t.Errorf("namespaces = %v", cat.Namespaces)
 		}
@@ -113,7 +115,7 @@ func TestAdmin(t *testing.T) {
 	})
 
 	t.Run("statements", func(t *testing.T) {
-		inv := integration.Decode[inventory](t, c.Get(t, admin+"/statements"), http.StatusOK)
+		inv := webtest.Decode[inventory](t, c.Get(t, admin+"/statements"), http.StatusOK)
 		names := make([]string, len(inv.Domains))
 		for i, d := range inv.Domains {
 			names[i] = d.Name

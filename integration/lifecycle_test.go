@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/standards-lab/go-web-sdk/webtest"
+
 	"github.com/standards-lab/go-web-service/integration"
 )
 
@@ -42,13 +44,13 @@ func revert(t *testing.T) {
 
 // assertCurrent asserts the service reports a migrated, seeded database:
 // the schema at the head of the set and the seed tree present.
-func assertCurrent(t *testing.T, c *integration.Client) {
+func assertCurrent(t *testing.T, c *webtest.Client) {
 	t.Helper()
 	st := integration.Schema(t, c)
 	if st.Version != 1 || st.Dirty || len(st.Pending) != 0 || !st.Ready {
 		t.Errorf("schema = %+v, want version 1, clean, nothing pending, ready", st)
 	}
-	if p := integration.Decode[page](t, c.Get(t, organizations), http.StatusOK); p.Total != seededTotal {
+	if p := webtest.Decode[page](t, c.Get(t, organizations), http.StatusOK); p.Total != seededTotal {
 		t.Errorf("organizations total = %d, want %d", p.Total, seededTotal)
 	}
 }
@@ -63,11 +65,11 @@ func TestLifecycle_StartupMigratesSeedsAndDrains(t *testing.T) {
 	s := integration.Start(t, integration.Options{Seed: true})
 	c := s.Client()
 
-	live := integration.Decode[map[string]string](t, c.Get(t, "/healthz"), http.StatusOK)
+	live := webtest.Decode[map[string]string](t, c.Get(t, "/healthz"), http.StatusOK)
 	if live["status"] != "ok" {
 		t.Errorf("healthz = %v", live)
 	}
-	ready := integration.Decode[readiness](t, c.Get(t, "/readyz"), http.StatusOK)
+	ready := webtest.Decode[readiness](t, c.Get(t, "/readyz"), http.StatusOK)
 	if ready.Status != "ready" {
 		t.Errorf("readyz status = %q", ready.Status)
 	}

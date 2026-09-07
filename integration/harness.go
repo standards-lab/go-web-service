@@ -100,13 +100,21 @@ type Service struct {
 	out    *output
 	exited chan struct{}
 	code   int
+	client *Client
 }
 
-// Start runs the service with opts on a reserved loopback port and returns
-// once its liveness probe answers, failing the test with the captured output
-// if the process exits or Failsafe elapses first. The process is killed at
-// test cleanup if it is still running.
+// Start runs the service with opts and returns once it is live: Launch
+// then Ready.
 func Start(t testing.TB, opts Options) *Service {
+	t.Helper()
+	return Launch(t, opts).Ready(t)
+}
+
+// Launch runs the service with opts on a reserved loopback port and returns
+// without waiting, so a test can start several processes at once; Ready
+// waits for one. A process still running at test cleanup is interrupted,
+// and killed if it does not exit within Failsafe.
+func Launch(t testing.TB, opts Options) *Service {
 	t.Helper()
 	if binary == "" {
 		t.Fatal("integration: no service binary; the suite's TestMain must call Main")
@@ -127,6 +135,7 @@ func Start(t testing.TB, opts Options) *Service {
 	}
 
 	s := &Service{cmd: cmd, addr: addr, out: out, exited: make(chan struct{})}
+	s.client = NewClient(s.URL())
 	go func() {
 		defer close(s.exited)
 		err := cmd.Wait()
@@ -136,19 +145,33 @@ func Start(t testing.TB, opts Options) *Service {
 		}
 	}()
 	t.Cleanup(func() {
+		if s.Exited() {
+			return
+		}
+		// Interrupt first, so the process drains its connections the way
+		// it would in service; kill only a process that does not.
+		_ = cmd.Process.Signal(syscall.SIGINT)
 		select {
 		case <-s.exited:
-		default:
+		case <-time.After(Failsafe):
 			_ = cmd.Process.Kill()
 			<-s.exited
 		}
 	})
+	return s
+}
 
-	probe := &http.Client{Timeout: time.Second}
+// Ready waits until the service's liveness probe answers, failing the test
+// with the captured output if the process exits or Failsafe elapses first.
+// The server is the root lifecycle stage, so a live probe means every
+// stage beneath it started.
+func (s *Service) Ready(t testing.TB) *Service {
+	t.Helper()
+	probe := newHTTPClient(time.Second)
 	deadline := time.Now().Add(Failsafe)
 	for time.Now().Before(deadline) {
 		if s.Exited() {
-			t.Fatalf("service exited with %d before ready:\n%s", s.code, out.String())
+			t.Fatalf("service exited with %d before ready:\n%s", s.code, s.out.String())
 		}
 		if res, err := probe.Get(s.URL() + "/healthz"); err == nil {
 			_ = res.Body.Close()
@@ -158,7 +181,7 @@ func Start(t testing.TB, opts Options) *Service {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("service not live within %s:\n%s", Failsafe, out.String())
+	t.Fatalf("service not live within %s:\n%s", Failsafe, s.out.String())
 	return nil
 }
 
@@ -183,7 +206,10 @@ func FreePort(t testing.TB) int {
 // service's own variables set for the run. APP_ENV is cleared so no overlay
 // applies: the base file and these variables are the whole configuration.
 // The database address is the override when given, else the parent's
-// APP_DATABASE_* variables, else the compose defaults.
+// APP_DATABASE_* variables, else the compose defaults. GORACE drops the
+// race runtime's one-second sleep at exit, which exists to catch a report
+// from a goroutine still running then; races during the run are reported
+// as they happen, and every Stop would otherwise cost the second.
 func environment(opts Options, addr, dbHost, dbPort string) []string {
 	host, port := defaultDatabaseHost, defaultDatabasePort
 	if v := os.Getenv("APP_DATABASE_HOST"); v != "" {
@@ -202,6 +228,7 @@ func environment(opts Options, addr, dbHost, dbPort string) []string {
 	}
 
 	env := []string{
+		"GORACE=atexit_sleep_ms=0",
 		"APP_ENV=",
 		"APP_LOG_LEVEL=debug",
 		"APP_LOG_FORMAT=text",
@@ -230,8 +257,9 @@ func (s *Service) Addr() string { return s.addr }
 // URL is the service's base URL.
 func (s *Service) URL() string { return "http://" + s.addr }
 
-// Client returns a client bound to the service.
-func (s *Service) Client() *Client { return NewClient(s.URL()) }
+// Client returns the client bound to the service, one per process so its
+// connection is reused across calls.
+func (s *Service) Client() *Client { return s.client }
 
 // Output is everything the service has written so far.
 func (s *Service) Output() string { return s.out.String() }

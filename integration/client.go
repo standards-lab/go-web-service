@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/standards-lab/go-web-sdk"
 )
@@ -20,9 +21,20 @@ type Client struct {
 	http *http.Client
 }
 
-// NewClient binds a client to base, the service's URL.
+// NewClient binds a client to base, the service's URL. The transport holds
+// one connection per host: the default transport can dial a second
+// connection while an idle one is being returned and leave it unused, and
+// the server's graceful shutdown waits five seconds for a connection that
+// never sent a request, which every Stop would then pay.
 func NewClient(base string) *Client {
-	return &Client{base: strings.TrimRight(base, "/"), http: &http.Client{Timeout: Failsafe}}
+	return &Client{base: strings.TrimRight(base, "/"), http: newHTTPClient(Failsafe)}
+}
+
+func newHTTPClient(timeout time.Duration) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.MaxConnsPerHost = 1
+	transport.MaxIdleConnsPerHost = 1
+	return &http.Client{Timeout: timeout, Transport: transport}
 }
 
 // Header is one request header.

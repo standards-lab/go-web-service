@@ -33,8 +33,9 @@ workflow; start from `context/README.md`.
 - **Tests.** Two tiers. The unit tier is hermetic: no live database, a package that runs SQL
   tests over sqlate's scripted driver (`sqlate/sqltest`), and `internal/config/configtest` as
   the single source of valid test configuration. The integration tier is the root `integration`
-  package: an untagged harness that runs the built `cmd/server` as a subprocess and drives it
-  through its production seams (configuration, the API and admin mount, the network, signals),
-  and the suite under the `integration` build tag, run by `mise run integration` against the
+  package: an untagged harness over the SDKs' toolkit (go-core's `process/processtest` runs the
+  built `cmd/server` as a subprocess and relays the database; go-web-sdk's `webtest` drives it
+  through its API), adding only the service's configuration and admin-mount state control, and
+  the suite under the `integration` build tag, run by `mise run integration` against the
   compose stack and by CI on merge to main. The runtime carries nothing for the tests' sake.
 - **Public repo.** This repository is public on GitHub.

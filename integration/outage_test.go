@@ -7,6 +7,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/standards-lab/go-core/process/processtest"
+	"github.com/standards-lab/go-web-sdk/webtest"
+
 	"github.com/standards-lab/go-web-service/integration"
 )
 
@@ -28,7 +31,7 @@ func databaseAddr() string {
 // each answer 503, and when it returns the service recovers without a
 // restart.
 func TestOutage(t *testing.T) {
-	f := integration.Forward(t, databaseAddr())
+	f := processtest.Forward(t, databaseAddr())
 	s := integration.Start(t, integration.Options{Seed: true, Database: f.Addr()})
 	c := s.Client()
 	integration.Reset(t, c)
@@ -44,18 +47,18 @@ func TestOutage(t *testing.T) {
 	}
 	c.Get(t, organizations).Problem(t, http.StatusServiceUnavailable)
 	c.Get(t, organizations+"/"+fin.ID).Problem(t, http.StatusServiceUnavailable)
-	c.Put(t, organizations+"/"+fin.ID, edit, integration.IfMatch(fin.Version)).Problem(t, http.StatusServiceUnavailable)
+	c.Put(t, organizations+"/"+fin.ID, edit, webtest.IfMatch(fin.Version)).Problem(t, http.StatusServiceUnavailable)
 	c.Get(t, "/healthz").Expect(t, http.StatusOK) // the process is up; only the dependency is down
 
 	f.Restore(t)
 
-	integration.WaitFor(t, "readiness after the database returns", func() bool {
+	processtest.WaitFor(t, "readiness after the database returns", func() bool {
 		return c.Get(t, "/readyz").Status == http.StatusOK
 	})
-	if p := integration.Decode[organizationPage](t, c.Get(t, organizations), http.StatusOK); p.Total != seededTotal {
+	if p := webtest.Decode[organizationPage](t, c.Get(t, organizations), http.StatusOK); p.Total != seededTotal {
 		t.Errorf("total after recovery = %d", p.Total)
 	}
-	ident := integration.Decode[identity](t, c.Put(t, organizations+"/"+fin.ID, edit, integration.IfMatch(fin.Version)), http.StatusOK)
+	ident := webtest.Decode[identity](t, c.Put(t, organizations+"/"+fin.ID, edit, webtest.IfMatch(fin.Version)), http.StatusOK)
 	if ident.Version != fin.Version+1 {
 		t.Errorf("edit after recovery = %+v", ident)
 	}

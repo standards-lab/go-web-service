@@ -115,10 +115,12 @@ network, or disk: a package that runs SQL proves it over sqlate's scripted drive
 integration tier, `mise run integration`, runs the composed service black-box through its API
 against the compose stack, in CI on every merge to main and on demand from the Actions tab.
 
-The suite lives in the `integration` package under the `integration` build tag. Its harness
-builds `cmd/server` once, runs it as a subprocess configured by `APP_*` variables on a reserved
-port, drives state through the admin mount, and severs the database through a loopback relay
-to prove the outage path; nothing in the service exists for the tests' sake. The task runs
+The suite lives in the `integration` package under the `integration` build tag. Its harness is
+the toolkit the SDKs ship beside what it exercises: go-core's `process/processtest` builds
+`cmd/server` once, runs it as a subprocess configured by `APP_*` variables on a reserved port,
+and relays the database through a loopback forwarder the outage test severs; go-web-sdk's
+`webtest` drives it through its API. The service adds only its configuration and state control
+through the admin mount; nothing in the service exists for the tests' sake. The task runs
 the same `compose.yml` as its own project (`go-web-service-integration`, Postgres on 5433), so
 the development stack and its data are never touched, and tears the stack down with its volume
 when the suite ends, so every run starts from an empty database. The harness honors

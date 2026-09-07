@@ -51,7 +51,7 @@ accumulate under [Unreleased] until the first cut.
   key, null meaning the root.
 - The composition root is one file per layer under `internal/app`, as go-web-sdk-template
   v0.6.0 ships it.
-- Pins: go-core v0.4.0, go-database v0.5.0 with postgres/v0.3.0, go-web-sdk v0.7.0, sqlate
+- Pins: go-core v0.4.1, go-database v0.5.0 with postgres/v0.3.0, go-web-sdk v0.7.0, sqlate
   v0.1.1 with postgres/v0.1.1.
 
 ### Removed

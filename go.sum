@@ -13,8 +13,8 @@ github.com/jackc/puddle/v2 v2.2.2 h1:PR8nw+E/1w0GLuRFSmiioY6UooMp6KJv0/61nB7icHo
 github.com/jackc/puddle/v2 v2.2.2/go.mod h1:vriiEXHvEE654aYKXXjOvZM39qJ0q+azkZFrfEOc3H4=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/standards-lab/go-core v0.4.0 h1:2VmrMvyoGL7r3YnDjtu74vfkiZJW46AuZ693cPpNPP4=
-github.com/standards-lab/go-core v0.4.0/go.mod h1:Yl/R+gM9YWczsePBCKXdPGh3FSdZ/5i8SapLIh3BDHU=
+github.com/standards-lab/go-core v0.4.1 h1:6gjZ62FEvk0R99BsrwlvycZZ10tgWqex0IIz2uxhSj8=
+github.com/standards-lab/go-core v0.4.1/go.mod h1:Yl/R+gM9YWczsePBCKXdPGh3FSdZ/5i8SapLIh3BDHU=
 github.com/standards-lab/go-database v0.5.0 h1:aMhQXuPnawbvRcufakiMPRg745CA31U0FgmsVKR6Mz8=
 github.com/standards-lab/go-database v0.5.0/go.mod h1:oRA5ZXtJT/p6hEGHnj+lESkCy+rswS9vdW3WybQM44c=
 github.com/standards-lab/go-database/postgres v0.3.0 h1:XpKayZ0Xv2fCyMjxCguqUmAYrIemyvxTfFeeUYpuoF4=

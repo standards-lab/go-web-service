@@ -129,7 +129,7 @@ the operation through exported API; an inelegant-but-expressible shape stages in
 
 ## Elemental Architecture implications
 
-Held here until promoted to the landing zone:
+Held here until promoted to the architecture repository:
 
 - The domain layer as a compositional grouping, one package, one Domain Service, one handler, is
   a Go Elemental expression candidate.
@@ -138,7 +138,8 @@ Held here until promoted to the landing zone:
 - Resolved (2026-09-03): EA's element definition said a Domain Service "anchors exactly one
   Entity". The `v1.data.sql.prototype` review amended it: a Domain Service anchors a domain, a
   composition of one or more Entities, and "exactly one" was the single-entity special case. The
-  docs pass lands the amendment in the landing zone.
+  architecture's definition carries the amendment since 2026-09-08, with the anchor named the
+  root Entity.
 
 ## Deferred by design
 

@@ -12,10 +12,10 @@ settles it in plan mode; a section the code comes to express is deleted.
   in authored files throughout, and native Postgres features where they earn it, each in a
   file that declares it in its header and so enters the port list (`design/stack.md`).
   Standard SQL is preferred where it costs nothing; a native choice is a choice, named as such.
-- Library-bound infrastructure is prototyped natively in the SDK repository that owns it —
-  go-database for the persistence surface, go-web-sdk for the web surface — linked into this
-  repository through the local gitignored `go.work` during development. Nothing is staged under
-  a `pkg/` tree here.
+- Library-bound infrastructure is prototyped natively in the SDK repository that owns it:
+  go-database for the persistence surface, go-web-sdk for the web surface. It's linked into
+  this repository through the local gitignored `go.work` during development. Nothing is staged
+  under a `pkg/` tree here.
 - The layer spans the SDKs and this service. The reads and writes slices are coordinated
   sessions — a library slice and the service slice that proves it, planned together, each
   repository on its own branch with its own pull request. The domain slices are service-only.
@@ -58,9 +58,9 @@ catalog templates with owned instances, and category branches composed over a ge
 - Soft delete as the standard's convention, recommended by the prototype's review and
   deferred at `v1.data.sql.integration.service` to the first domain that needs it: `delete`
   moves a record to the recycle bin, `restore` returns it, and `purge` removes it physically and
-  is administrative; a `deleted_at` column, a read model that excludes deleted rows with a
-  recycle view beside it, partial unique indexes over live rows, and the delete pattern as an
-  update, a pattern pair for the catalog.
+  is administrative. The pattern pair for the catalog adds a `deleted_at` column, a read model
+  that excludes deleted rows with a recycle view beside it, partial unique indexes over live
+  rows, and the delete pattern as an update.
 - Cross-domain invariants are enforced two ways: an SQL check inside the transaction where the
   dependency runs downward (custody checks person status), and an interface declared by the
   consuming domain and injected at the composition root where the check would otherwise run
@@ -73,17 +73,17 @@ surfaces, routes, constraint names, and enum vocabularies are settled per task.
 
 ## Evaluation evidence (`v1.data.evaluation`)
 
-On record for the cross-board evaluation: the `sdk` package's tenants, `PathID` and `Command`,
-staged at `v1.data.sql.integration.service` for go-web-sdk; the shared status matcher and the
-directives lowering living in the `data` package, which the template cannot scaffold while it
-stays engine-free; and a generic seed helper, a fit question for the evaluation: it promotes
-to go-database when its shape is the library's own, not when a second service repeats the
+On record for the cross-board evaluation: the `sdk` package stages two tenants, `PathID` and
+`Command`, at `v1.data.sql.integration.service` for go-web-sdk. The `data` package holds the
+shared status matcher and the directives lowering, which the template cannot scaffold while it
+stays engine-free. A generic seed helper is a fit question for the evaluation: it promotes to
+go-database when its shape is the library's own, not when a second service repeats the
 per-table loop.
 
 ## Prior R&D
 
 `personnel-service-demo` (catalogued at the coordinator; local checkout
-`~/code/_s2va/personnel-service-demo`) is the input for the CQRS shape, the four-tier
+`~/s2va/personnel-service-demo`) is the input for the CQRS shape, the four-tier
 business-logic placement, the error model, and the projection-driven data layer. It is input to
 re-derive from, not a baseline to inherit. This reference stays in volatile context; the design
 notes and the README justify every convention on its own merit.

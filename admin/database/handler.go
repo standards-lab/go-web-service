@@ -19,16 +19,23 @@ type handler struct {
 
 // Routes builds the admin domain's route group, rooted at /database. Reads:
 // diagnostics, the schema status, the pattern catalog, the statements
-// registry, and the named states. Operations: verify, up, down, steps, and
-// force, each a POST whose response is the resulting status; seed, which
-// applies the configured set or the one its body names and answers with
-// the rows it inserted by table; and state, which resets the database to
-// the state its body names and answers with the transition. force sets
-// the history without running any file, the operator's override for dirty
-// state after the schema has been repaired by hand. Every rejection is an
-// RFC 9457 problem; a schema-state conflict and a disabled seed carry
-// their reason as the detail, since an operator needs to know which
-// version is dirty or pending, or that this environment names no set. The
+// registry, and the named states.
+//
+// Operations, registered below:
+//
+//   - verify, up, down, steps, and force: each a POST whose response is the
+//     resulting status
+//   - seed: applies the configured set or the one its body names, and
+//     answers with the rows it inserted by table
+//   - state: resets the database to the state its body names, and answers
+//     with the transition
+//
+// force sets the history without running any file, the operator's override
+// for dirty state after the schema has been repaired by hand. Every
+// rejection is an RFC 9457 problem. A schema-state conflict and a disabled
+// seed carry their reason as the detail, since an operator needs to know
+// which version is dirty or pending, or that this environment names no
+// set. The
 // composition root mounts the group into the admin mount. The confirmation
 // token the strategy requires for down, force, and state arrives with the
 // management listener.

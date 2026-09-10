@@ -19,11 +19,12 @@ import (
 //go:embed seeds/*.json
 var seedFiles embed.FS
 
-// Seeder is the seed operation over the named states bound to its
-// statements: the seed's insert and lookup, authored files under
-// statements/ (the native tier, ON CONFLICT and RETURNING, declared in
-// their headers; seeds never port), held as handles over the package's
-// compiled inventory. A state is one file under seeds/, the data a
+// Seeder is the seed operation over the named states, bound to its
+// statements: the seed's insert and lookup. Those statements are authored
+// files under statements/, declaring the native tier (ON CONFLICT and
+// RETURNING) in their headers since seeds never port, and are held as
+// handles over the package's compiled inventory. A state is one file under
+// seeds/, the data a
 // deployment or a scenario starts from, keyed by table. The admin service
 // owns the policy of which set applies and when; Seeder owns how. Seeder
 // is the admin service's Seeder.

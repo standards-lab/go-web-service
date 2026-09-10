@@ -11,12 +11,13 @@ workflow; start from `context/README.md`.
   one binary, `cmd/server`, composing on go-core's `process` package for the pre-infrastructure
   main sequence. The composition root is `internal/app`, one file per layer (infrastructure,
   admin, domain, reactors) with `routes.go` the list of mounts. The base layers are root-level
-  packages: `data` (the database infrastructure as the domains see it: the session with the
-  pattern catalog and the statements registry, the migration set, the application's patterns,
-  the seeder, the lock-name registry, the directives lowering, and the shared status matcher),
-  `domain/<layer>` (one package per domain, its SQL under `statements/`), `admin/<service>` (the
-  HTTP half of an admin service, mounted under `/admin`), and `sdk` (promotion candidates
-  staged for the libraries).
+  packages:
+  - `data` — the database infrastructure as the domains see it: the session with the pattern
+    catalog and the statements registry, the migration set, the application's patterns, the
+    seeder, the lock-name registry, the directives lowering, and the shared status matcher
+  - `domain/<layer>` — one package per domain, its SQL under `statements/`
+  - `admin/<service>` — the HTTP half of an admin service, mounted under `/admin`
+  - `sdk` — promotion candidates staged for the libraries
 - **Dependencies.** go-core, go-web-sdk, go-database with go-database/postgres, and sqlate with
   sqlate/postgres at pinned releases, on Go 1.27; sqlate's `sqlint` is a `tool` directive. The
   pins are the committed steady state; a gitignored local `go.work` serves sibling development.
@@ -26,7 +27,7 @@ workflow; start from `context/README.md`.
   service; `sqlint.toml` at the root names the sources and roles the lint checks.
 - **Stack.** Postgres is the declared SQL engine, run locally through `compose.yml`. A provider
   variant is never a switch inside this service; it would be a separate focused reference.
-- **Documented layers.** The documented layer is the unit of change — each capability lands
+- **Documented layers.** The documented layer is the unit of change: each capability lands
   complete before the next begins (`context/design/documented-layers.md`). The service is
   versionless until its first release: no tags yet; `CHANGELOG.md` accumulates under
   `[Unreleased]` until the first cut, which `release.yml` turns into a GitHub release.

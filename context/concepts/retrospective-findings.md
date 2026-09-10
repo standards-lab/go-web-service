@@ -15,18 +15,18 @@ implementation is correct as written; the findings are headroom.
 
 ## For the auth layer (`goals.v1.auth`)
 
-Seams that do not exist yet, better cut deliberately than mid-auth-session:
+Gaps not yet closed, better closed deliberately than mid-auth-session:
 
 - **No home for infrastructure-backed middleware.** `routes(dom, adm, cfg)` does not receive
-  `infra`, and the only middleware build point is `router.Use` — which wraps the entire
-  dispatch including the probes (`/healthz`, `/readyz`), the one place tokens must not be
-  required. The stated rule ("a middleware that has to reach a domain service is domain
-  logic", `internal/app/middleware.go`) conflates domain middleware with infrastructure-backed
+  `infra`, and the only middleware build point is `router.Use`. It wraps the entire dispatch,
+  including the probes (`/healthz`, `/readyz`) — the one place tokens must not be required. The
+  stated rule ("a middleware that has to reach a domain service is domain logic",
+  `internal/app/middleware.go`) conflates domain middleware with infrastructure-backed
   middleware. Either `routes` receives `infra` or a third, group-scoped build point.
 - **No request-identity carrier.** No context key package, no subject/claims accessor;
   service methods have no subject parameter — when authorization lands, every domain method
   signature changes at once, so the carrier design precedes the fourth domain.
-- **The single-row path has no authorization seam.** The list path can AND an extra predicate
+- **The single-row path has no authorization hook.** The list path can AND an extra predicate
   into both count and page, but the one-row read accepts one equality and nothing else — a
   row-level grant filter on `GET /{id}` is not expressible. A requirement on `sqlate`'s
   projection to settle before auth, not mid-auth.

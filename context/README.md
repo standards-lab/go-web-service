@@ -4,10 +4,10 @@ The reference web service of the Standards Lab reference architecture: a single 
 that composes go-core, go-web-sdk, go-database, and sqlate, and demonstrates each capability in
 place. It
 grows in documented layers on the go-web-sdk-template baseline it was generated from, consuming
-the SDKs at pinned releases. This is the service level — where patterns are proven in a running
-composition before they promote outward into the SDKs, the template, and the standard.
+the SDKs at pinned releases. This is the service level: patterns are proven here, in a running
+composition, before they promote outward into the SDKs, the template, and the standard.
 
-The service runs on one declared stack — Postgres for SQL — and uses each capability at the
+The service runs on one declared stack (Postgres for SQL), and uses each capability at the
 resolution its purpose requires: the library's standard tier by default, and the provider's
 native features where they earn it, contained and listed (`design/stack.md`). What version 1.0
 is and the path to it live in the workspace roadmap at the coordinator (standards-lab

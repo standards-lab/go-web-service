@@ -74,12 +74,16 @@ Settled at `v1.data.writes.organization` and restated on go-web-sdk v0.6.0:
   and body errors), the command's `Validate` owns what it can know from its own fields (rules
   mirroring the schema's checks), the store owns existence and uniqueness as constraint
   violations and any check that needs SQL (the transfer cycle walk). The database's check and
-  not-null constraints stay unmatched backstops: a breach is a 500, not a client error.
-- The group's error writer composes three vocabularies, first match winning: the SDK maps its
-  own request errors (400, 413, 428); the layer's matcher maps only its own errors (`ErrValidation`
-  and `sdk.PathError` to 400, `ErrCycle` to 409); `data.Status` maps the library's (directives
-  400, the missing row 404, unique and foreign-key violations 409, the stale version 412, an
-  outage 503). A layer contributes only its own errors and never copies the shared switch.
+  not-null constraints stay unmatched backstops: a breach on either one is a server fault,
+  reported as a 500.
+- The group's error writer composes three vocabularies, first match winning:
+  - the SDK maps its own request errors (400, 413, 428)
+  - the layer's matcher maps only its own errors (`ErrValidation` and `sdk.PathError` to 400,
+    `ErrCycle` to 409)
+  - `data.Status` maps the library's (directives 400, the missing row 404, unique and
+    foreign-key violations 409, the stale version 412, an outage 503)
+
+  A layer contributes only its own errors and never copies the shared switch.
 - A transaction that must not interleave with another on the same structure takes the
   structure's advisory lock first through `data.Database.Lock`, by the name the `data` package's
   registry declares; a domain declares no lock of its own.

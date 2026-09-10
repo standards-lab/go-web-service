@@ -12,7 +12,7 @@ compose file locally; Azure Database for PostgreSQL or Amazon RDS when managed, 
 pointed elsewhere by configuration). The auth layer will add Keycloak; the observability layer an
 OpenTelemetry collector. Each is one provider of its capability, and the service never carries a
 second provider of the same capability behind a switch: a variant of this service on another
-engine or identity provider would be a separate repository, not a configuration option here.
+engine or identity provider would be a separate repository.
 
 ## Two tiers, and where each is used
 
@@ -42,11 +42,14 @@ outside the composition root) was deliberately deferred at the first domain pack
 ## What a provider swap changes
 
 SQL is schema-bearing: the service owns a schema and domain SQL written for Postgres, so moving
-to another engine is a port, not a configuration change. What changes on a swap is exactly the
-port list below, plus the two provider imports at the composition root; never the configuration
-or the code around the statements. HTTP has no provider. The auth and observability layers
-declare their class when they land: token verification is a configuration change; what a
-token's claims contain needs a review; OpenTelemetry exporters are a configuration change.
+to another engine is a port. What changes on a swap is exactly the port list below, plus the two
+provider imports at the composition root; never the configuration or the code around the
+statements. HTTP has no provider. The auth and observability layers declare their class when
+they land:
+
+  - token verification is a configuration change
+  - what a token's claims contain needs a review
+  - OpenTelemetry exporters are a configuration change
 
 ## The port list
 

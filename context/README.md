@@ -27,9 +27,10 @@ named here with the concept that carries its direction:
 
 - **Data composition and CQRS** — the organization domain runs on authored SQL; the remaining
   domains and the CQRS contract are `concepts/data-layer.md`.
-- **Auth** — authentication over OAuth 2.0 and OIDC, and an authorization model the strategy
-  session chooses by analysis rather than assumes (`concepts/identity-linking.md`,
-  `concepts/retrospective-findings.md`).
+- **Auth** — authentication over OAuth 2.0 and OIDC, and an authorization model evaluated as SQL
+  against the service's own grant data; the full strategy is standards-lab's
+  `context/design/auth-strategy.md`, and the data-layer anchor it builds on is
+  `concepts/identity-linking.md`.
 - **The management listener** — the admin mount on its own listener, a composition-root
   reshape here and in the template; the exploration is the coordinator's
   `concepts/admin-listener.md`.

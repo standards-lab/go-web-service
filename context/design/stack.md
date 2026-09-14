@@ -53,6 +53,10 @@ they land:
 
 ## The port list
 
+What a provider swap changes, one subsection per standard layer as each lands.
+
+### SQL
+
 The port list is the set of files declaring `--| tier: native`, each naming its port in its
 header, plus the migrations, which are engine DDL by nature:
 
@@ -70,3 +74,12 @@ header, plus the migrations, which are engine DDL by nature:
 
 The read path, the lineage CTE, and the guarded commands (`CURRENT_TIMESTAMP`, the version
 predicate) stay within the standard tier. Domain packages as they land add their native files.
+
+### OpenTelemetry
+
+Nothing is on the port list for this layer. The service instruments and exports through the
+OpenTelemetry API, SDK, and OTLP alone, and the collector forwards to the target integrations —
+Loki, Tempo, and Mimir — as OTLP-conformant backends the service reaches without any
+vendor-specific extension. This layer is currently projected to stay pure standard tier for as
+long as that holds; a native deviation would earn an entry here the day one is adopted, the same
+way SQL's did. See `standards-lab/context/design/observability-strategy.md`.

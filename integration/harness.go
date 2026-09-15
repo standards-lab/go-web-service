@@ -12,12 +12,13 @@ import (
 
 // The compose stack's defaults, the values config.json and
 // secrets.example.json pair with. The harness reads the same APP_DATABASE_*
-// variables the service does, so a stack moved off the defaults follows one
-// setting.
+// and APP_OBSERVABILITY_ENDPOINT variables the service does, so a stack
+// moved off the defaults follows one setting.
 const (
-	defaultDatabaseHost     = "127.0.0.1"
-	defaultDatabasePort     = "5432"
-	defaultDatabasePassword = "app"
+	defaultDatabaseHost          = "127.0.0.1"
+	defaultDatabasePort          = "5432"
+	defaultDatabasePassword      = "app"
+	defaultObservabilityEndpoint = "127.0.0.1:4317"
 )
 
 // Main is the suite's TestMain: it builds cmd/server once, with the race
@@ -105,16 +106,21 @@ func environment(opts Options, addr, dbHost, dbPort string) []string {
 	if v := os.Getenv("APP_DATABASE_PASSWORD"); v != "" {
 		password = v
 	}
+	endpoint := defaultObservabilityEndpoint
+	if v := os.Getenv("APP_OBSERVABILITY_ENDPOINT"); v != "" {
+		endpoint = v
+	}
 
 	env := []string{
 		"APP_ENV=",
 		"APP_LOG_LEVEL=debug",
-		"APP_LOG_FORMAT=text",
+		"APP_LOG_FORMAT=json",
 		"APP_SERVER_HOST=" + serverHost,
 		"APP_SERVER_PORT=" + serverPort,
 		"APP_DATABASE_HOST=" + host,
 		"APP_DATABASE_PORT=" + port,
 		"APP_DATABASE_PASSWORD=" + password,
+		"APP_OBSERVABILITY_ENDPOINT=" + endpoint,
 		"APP_ADMIN_SEED=" + opts.Seed,
 	}
 	return append(env, opts.Env...)

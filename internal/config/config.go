@@ -8,6 +8,7 @@ import (
 	libconfig "github.com/standards-lab/go-core/config"
 	"github.com/standards-lab/go-core/logging"
 	"github.com/standards-lab/go-database"
+	"github.com/standards-lab/go-observability"
 	"github.com/standards-lab/go-web-sdk"
 )
 
@@ -21,12 +22,13 @@ const defaultShutdownTimeout = 10 * time.Second
 // plus the service-owned reads policy, the admin switches, and the shutdown
 // timeout.
 type Config struct {
-	Log             logging.Config     `json:"log"`
-	Server          web.Config         `json:"server"`
-	Database        database.Config    `json:"database"`
-	Reads           ReadsConfig        `json:"reads"`
-	Admin           AdminConfig        `json:"admin"`
-	ShutdownTimeout libconfig.Duration `json:"shutdown_timeout"`
+	Log             logging.Config       `json:"log"`
+	Server          web.Config           `json:"server"`
+	Database        database.Config      `json:"database"`
+	Observability   observability.Config `json:"observability"`
+	Reads           ReadsConfig          `json:"reads"`
+	Admin           AdminConfig          `json:"admin"`
+	ShutdownTimeout libconfig.Duration   `json:"shutdown_timeout"`
 }
 
 // Merge overlays src's set fields onto the receiver, delegating each block
@@ -41,6 +43,7 @@ func (c *Config) Merge(src *Config) {
 	c.Log.Merge(&src.Log)
 	c.Server.Merge(&src.Server)
 	c.Database.Merge(&src.Database)
+	c.Observability.Merge(&src.Observability)
 	c.Reads.Merge(&src.Reads)
 	c.Admin.Merge(&src.Admin)
 }
@@ -75,6 +78,9 @@ func (c *Config) Finalize(envPrefix string) error {
 	}
 	if err := c.Database.Finalize(envPrefix); err != nil {
 		return fmt.Errorf("database: %w", err)
+	}
+	if err := c.Observability.Finalize(envPrefix); err != nil {
+		return fmt.Errorf("observability: %w", err)
 	}
 	if err := c.Reads.Finalize(envPrefix); err != nil {
 		return fmt.Errorf("reads: %w", err)

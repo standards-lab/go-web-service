@@ -5,13 +5,27 @@ distributor:
   receivers:
     otlp:
       protocols:
+        # Tempo 3 binds receivers to localhost by default; the collector reaches
+        # this one over the compose network.
         grpc:
+          endpoint: 0.0.0.0:4317
         http:
+          endpoint: 0.0.0.0:4318
 
-ingester:
-  max_block_duration: 5m
+# Tempo 3 replaced the ingester with the live-store, which the single-binary
+# target feeds directly (no Kafka). Its defaults cut blocks every 30s and hold
+# them for 20m, so nothing here overrides them.
 
-compactor:
+# Block retention is a compaction setting; the single-binary target runs both
+# the scheduler that plans compaction jobs and the worker that executes them,
+# and each reads its own copy.
+backend_scheduler:
+  provider:
+    compaction:
+      compaction:
+        block_retention: 24h
+
+backend_worker:
   compaction:
     block_retention: 24h
 

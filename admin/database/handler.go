@@ -161,25 +161,25 @@ func respond(w http.ResponseWriter) func(admin.Status, error) error {
 	}
 }
 
-// status is the domain's error vocabulary as one web.StatusMatcher: a
+// status is the domain's error vocabulary as one web.ProblemMatcher: a
 // rejected verb argument (400), a version outside the set (400), a state
 // the seeder does not declare (400), a seed the environment cannot serve
 // (403), and the schema states an operation cannot proceed from, dirty,
 // pending, a history the set does not carry, a migration with no down, as
 // conflicts (409). A dialect without the lock capability stays unmatched:
 // it is a wiring defect (500).
-func status(err error) (int, bool) {
+func status(err error) (web.Problem, bool) {
 	switch {
 	case errors.Is(err, admin.ErrValidation), errors.Is(err, migrate.ErrVersionNotFound),
 		errors.Is(err, admin.ErrUnknownState):
-		return http.StatusBadRequest, true
+		return web.Problem{Status: http.StatusBadRequest}, true
 	case errors.Is(err, admin.ErrSeedDisabled):
-		return http.StatusForbidden, true
+		return web.Problem{Status: http.StatusForbidden}, true
 	case errors.Is(err, migrate.ErrDirty),
 		errors.Is(err, migrate.ErrPending),
 		errors.Is(err, migrate.ErrUnknownVersion),
 		errors.Is(err, migrate.ErrNoDown):
-		return http.StatusConflict, true
+		return web.Problem{Status: http.StatusConflict}, true
 	}
-	return 0, false
+	return web.Problem{}, false
 }

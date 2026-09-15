@@ -130,18 +130,18 @@ func (h *handler) delete(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// status is the layer's own error vocabulary as one web.StatusMatcher: a
+// status is the layer's own error vocabulary as one web.ProblemMatcher: a
 // validation rejection or a malformed path id (400) and the cycle (409).
 // The SDK's request errors map themselves, and the library's vocabulary
 // (directives, the missing row, constraint violations, the stale version,
 // the outage) is data.Status, composed after this one.
-func status(err error) (int, bool) {
+func status(err error) (web.Problem, bool) {
 	var path *sdk.PathError
 	switch {
 	case errors.Is(err, ErrValidation), errors.As(err, &path):
-		return http.StatusBadRequest, true
+		return web.Problem{Status: http.StatusBadRequest}, true
 	case errors.Is(err, ErrCycle):
-		return http.StatusConflict, true
+		return web.Problem{Status: http.StatusConflict}, true
 	}
-	return 0, false
+	return web.Problem{}, false
 }

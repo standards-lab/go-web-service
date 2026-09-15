@@ -37,8 +37,8 @@ func TestStatus(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, ok := data.Status(tc.err)
-			if got != tc.want || ok != tc.ok {
-				t.Fatalf("Status(%v) = %d, %t; want %d, %t", tc.err, got, ok, tc.want, tc.ok)
+			if got.Status != tc.want || ok != tc.ok {
+				t.Fatalf("Status(%v) = %d, %t; want %d, %t", tc.err, got.Status, ok, tc.want, tc.ok)
 			}
 		})
 	}

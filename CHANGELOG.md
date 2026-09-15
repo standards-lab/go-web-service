@@ -51,8 +51,18 @@ accumulate under [Unreleased] until the first cut.
   key, null meaning the root.
 - The composition root is one file per layer under `internal/app`, as go-web-sdk-template
   v0.6.0 ships it.
-- Pins: go-core v0.4.1, go-database v0.5.0 with postgres/v0.3.0, go-web-sdk v0.7.0, sqlate
+- Pins: go-core v0.4.1, go-database v0.5.0 with postgres/v0.3.0, go-web-sdk v0.8.0, sqlate
   v0.1.1 with postgres/v0.1.1.
+- The error matchers return a `web.Problem`: `data.Status`, the database admin mount's
+  matcher, and the organization domain's matcher are `web.ProblemMatcher`s, each answering a
+  `Problem` carrying only the status, where they answered a bare status before.
+- `RegisterHealth` takes the not-ready problem and is called with the zero `Problem`: the
+  readiness answer keeps the SDK's defaults (type `about:blank`, status 503 with its status
+  text as the title, the generic detail, the `checks` member) because the service names no
+  problem type of its own yet.
+- On the wire, an unmatched path and a wrong method answer as RFC 9457 problem documents
+  instead of `net/http.ServeMux`'s plain text. go-web-sdk v0.8.0 changed the router's
+  fallbacks; this service's code does not control it.
 
 ### Removed
 

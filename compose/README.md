@@ -22,6 +22,12 @@ does not also stop Postgres (`docker compose down` is project-wide otherwise). D
 named volumes (`go-web-service-loki`, `-tempo`, `-mimir`, `-grafana`) across a plain `down`;
 `mise run otel-reset` also drops them.
 
+Mimir's HTTP endpoint answers ready a few seconds before its querier ring finishes joining, so a
+query or datasource health check run immediately after `mise run otel-up` returns can hit a
+transient `500` ("could not get all queriers from the ring: empty ring"). It clears on its own
+within about ten seconds; nothing in the compose file gates on it, since Mimir carries no
+healthcheck to begin with (below).
+
 The service itself, `go-web-service`, runs on the host through `mise run serve`
 (`go run ./cmd/server`), not as a compose service — it has not been fitted into a container
 image. Everything it sends to the stack crosses the loopback ports the collector publishes.

@@ -142,7 +142,7 @@ func TestReporter_ColorOnWrapsEveryChannel(t *testing.T) {
 	if !strings.Contains(got, ansiCyan+"http://grafana/x"+ansiReset) {
 		t.Error("Link is not styled")
 	}
-	if strip(got) != "\n[1/2] do a thing\n  the statement\n    SELECT 1\n  the trace\n    http://grafana/x\n    or: Explore, Tempo, paste the id\n    · tick 1\n" {
+	if strip(got) != "\n[1/2] do a thing\n\n  the statement\n    SELECT 1\n\n  the trace\n    http://grafana/x\n    or: Explore, Tempo, paste the id\n    · tick 1\n" {
 		t.Errorf("text under the escapes:\n%q", strip(got))
 	}
 }

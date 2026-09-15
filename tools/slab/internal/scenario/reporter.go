@@ -15,8 +15,9 @@ import (
 // method writes one block to the reporter's writer, colored when the
 // reporter was built with color on.
 type Reporter struct {
-	w  io.Writer
-	st style
+	w       io.Writer
+	st      style
+	atBlank bool // whether the line just written was blank
 }
 
 // NewReporter returns a Reporter writing to w, with ANSI color on or off.
@@ -32,7 +33,8 @@ const indent = "  "
 
 // Intent prints step i of n's intent sentence as a heading.
 func (r *Reporter) Intent(i, n int, intent string) {
-	r.printf("\n%s %s\n", r.st.dim(fmt.Sprintf("[%d/%d]", i, n)), r.st.heading(intent))
+	r.blank()
+	r.printf("%s %s\n", r.st.dim(fmt.Sprintf("[%d/%d]", i, n)), r.st.heading(intent))
 }
 
 // Note prints one line of prose.
@@ -40,10 +42,14 @@ func (r *Reporter) Note(format string, args ...any) {
 	r.printf(indent+format+"\n", args...)
 }
 
-// SQL prints a captioned SQL block with its keywords in bold.
+// SQL prints a captioned SQL block with its keywords in bold, set off by a
+// blank line above and below so the block reads apart from the narration
+// around it.
 func (r *Reporter) SQL(caption, text string) {
+	r.blank()
 	r.caption(caption)
 	r.block(r.st.sql(strings.TrimRight(text, "\n")))
+	r.blank()
 }
 
 // Table prints captioned name/value pairs with the names aligned.
@@ -100,9 +106,21 @@ func (r *Reporter) Tick(format string, args ...any) {
 }
 
 // printf is the one write every channel goes through; a reporter has no way
-// to act on a failed write, so the result is discarded here.
+// to act on a failed write, so the result is discarded here. Only blank's own
+// call ever passes the bare "\n" format, so that is what atBlank tracks.
 func (r *Reporter) printf(format string, args ...any) {
 	_, _ = fmt.Fprintf(r.w, format, args...)
+	r.atBlank = format == "\n"
+}
+
+// blank prints one blank line, unless the reporter already sits on one: two
+// blocks back to back (SQL, in particular) each open and close with a blank
+// line, and without this guard a pair of them would print two.
+func (r *Reporter) blank() {
+	if r.atBlank {
+		return
+	}
+	r.printf("\n")
 }
 
 func (r *Reporter) caption(text string) {

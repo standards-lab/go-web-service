@@ -42,8 +42,16 @@ accumulate under [Unreleased] until the first cut.
   them) and a first dashboard of the collector's own pipeline health. `mise run serve` streams
   its stdout to the collector's log receiver over TCP whenever the profile is running, a hard
   dependency accepted as a known limitation and documented in `compose/README.md`, which also
-  covers the full stack's wiring. The service itself exports nothing yet; that is
-  `v1.observability.tasks.instrumentation`, a separate step.
+  covers the full stack's wiring.
+- The observability configuration block and a composition-root telemetry layer wiring the
+  service to `go-observability`: a startup hook installs the tracer and meter providers ahead of
+  every lifecycle stage and a shutdown hook flushes them, bounded to a short timeout, after the
+  last one drains; the resource carries `service.name` (a literal, matching the collector's own
+  configuration) and `service.version` from the build's VCS revision. The middleware chain gains
+  tracing outermost and a request-id source drawn from the request's trace id, so the id in a
+  problem document's `request_id` extension, the request logger's record, and the correlating
+  log handler's `trace_id`/`span_id` attributes are all the same value. `log.format` defaults to
+  `json`, which the collector's log pipeline needed all along.
 
 ### Changed
 

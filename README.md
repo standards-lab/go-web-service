@@ -13,8 +13,9 @@ Initialized from the [go-web-sdk-template](https://github.com/standards-lab/go-w
   SQL.
 - Observability: OpenTelemetry, reached through a `docker compose` profile (`mise run otel-up`)
   that runs the collector and a local Loki, Tempo, Mimir, and Grafana stack — see
-  [`compose/README.md`](compose/README.md). The service does not export telemetry yet; wiring it
-  in is `v1.observability.tasks.instrumentation`, a separate step.
+  [`compose/README.md`](compose/README.md). The service exports traces and metrics over OTLP and
+  structured JSON logs correlated to them by trace id, all through
+  [go-observability](https://github.com/standards-lab/go-observability).
 
 ## Getting started
 
@@ -36,11 +37,14 @@ mise run serve      # run the service
 run first — see [`compose/README.md`](compose/README.md) for the mechanism and its one accepted
 limitation.
 
-Startup does the database work itself, in lifecycle stages: the pool connects, the schema is
-verified and any pending migration applied, the configured seed set is applied (the `local`
-overlay names `default`, the reference tree), and each domain verifies its statements against
-the migrated schema. The service then logs `server ready` on `localhost:8080` (the `local` overlay
-binds loopback and runs debug logging). From a second shell:
+Telemetry starts first, ahead of every lifecycle stage: a startup hook installs the tracer and
+meter providers before the pool connects, and a shutdown hook flushes them after the last stage
+drains, so it brackets the numbered stages rather than holding one of its own. Startup then does
+the database work itself, in lifecycle stages: the pool connects, the schema is verified and any
+pending migration applied, the configured seed set is applied (the `local` overlay names
+`default`, the reference tree), and each domain verifies its statements against the migrated
+schema. The service then logs `server ready` on `localhost:8080` (the `local` overlay binds
+loopback and runs debug logging). From a second shell:
 
 ```sh
 curl localhost:8080/healthz   # 200 {"status":"ok"}
@@ -162,8 +166,9 @@ Configuration layers in a fixed precedence, later sources winning:
 4. `APP_*` environment variables, the final override: the log, server, and shutdown variables,
    the `APP_DATABASE_*` family (`APP_DATABASE_HOST`, `APP_DATABASE_NAME`,
    `APP_DATABASE_USER`, `APP_DATABASE_PASSWORD`, `APP_DATABASE_PORT`, and the pool settings),
-   the reads paging policy (`APP_READS_DEFAULT_SIZE`, `APP_READS_MAX_SIZE`), and the admin
-   seed set (`APP_ADMIN_SEED`, a state name).
+   `APP_OBSERVABILITY_ENDPOINT` and `APP_OBSERVABILITY_SAMPLE_RATIO`, the reads paging policy
+   (`APP_READS_DEFAULT_SIZE`, `APP_READS_MAX_SIZE`), and the admin seed set (`APP_ADMIN_SEED`, a
+   state name).
 
 Every file is optional: a deployment can run on the base file and environment variables alone,
 or on environment variables only.

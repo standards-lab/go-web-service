@@ -43,28 +43,30 @@ connection to the collector's `tcp_log` receiver (port 4319 by default, `OTEL_LO
 it) — the mechanism is below. The receiver's `json_parser` operator reads each line's keys into
 attributes, then promotes the standard ones onto the record itself: `time` becomes the record's
 timestamp, `level` its severity, and `trace_id`/`span_id` — hex strings `go-observability`'s
-`NewTraceHandler` will stamp on once `v1.observability.tasks.instrumentation` wires it in —
-become the record's own trace and span id fields, OpenTelemetry's native home for them rather
-than another attribute. `msg` becomes the record body; the promoted fields are then removed from
-attributes so each reaches Loki exactly once. Every record also carries
-`resource.service.name = go-web-service`, since the receiver has no resource of its own. From
-there the `otlp_http` exporter posts to Loki's native OTLP endpoint. Loki turns the resource's
-`service.name` into the indexed stream label `service_name`, and the record's own trace and span
-ids and any remaining attributes into structured metadata attached to each line.
+`NewTraceHandler` stamps on every record whose context carries a live span — become the record's
+own trace and span id fields, OpenTelemetry's native home for them rather than another attribute.
+`msg` becomes the record body; the promoted fields are then removed from attributes so each
+reaches Loki exactly once. Every record also carries `resource.service.name = go-web-service`,
+since the receiver has no resource of its own. From there the `otlp_http` exporter posts to
+Loki's native OTLP endpoint. Loki turns the resource's `service.name` into the indexed stream
+label `service_name`, and the record's own trace and span ids and any remaining attributes into
+structured metadata attached to each line.
 
-**Traces.** The collector's `otlp` receiver listens on 4317 (grpc) and 4318 (http) for the
-service's future export — nothing sends there yet. From there the `otlp_grpc` exporter forwards
-to Tempo's own OTLP receiver (`tempo:4317`, a different container's port, not the collector's).
-Tempo 3 batches incoming spans directly through its live-store (no separate ingester), cutting
-blocks every 30 seconds by default and retaining them 24 hours
+**Traces.** The collector's `otlp` receiver listens on 4317 (grpc) and 4318 (http); the service's
+tracing middleware starts a span on every request and the `otlp` sub-module's gRPC exporter sends
+it here, batched, on the service's own shutdown-bounded flush. From there the `otlp_grpc`
+exporter forwards to Tempo's own OTLP receiver (`tempo:4317`, a different container's port, not
+the collector's). Tempo 3 batches incoming spans directly through its live-store (no separate
+ingester), cutting blocks every 30 seconds by default and retaining them 24 hours
 (`compose/observability/tempo.yaml`), on local filesystem storage.
 
-**Metrics.** Two sources feed this pipeline: the same `otlp` receiver, for the service once it
-exports metrics, and a `prometheus/self` scrape of the collector's own internal telemetry every
-15 seconds — added so the pipeline, and the dashboard below, have a real signal before the
-service exports anything. The `prometheus_remote_write` exporter pushes to Mimir
-(`http://mimir:9009/api/v1/push`), which ingests through its single-binary target
-(`-target=all`) and stores blocks on local filesystem storage.
+**Metrics.** Two sources feed this pipeline: the same `otlp` receiver, now carrying the service's
+own metrics (otelhttp's request-duration histogram, exported through a periodic reader), and a
+`prometheus/self` scrape of the collector's own internal telemetry every 15 seconds — added so
+the pipeline, and the dashboard below, have a real signal independent of the service. The
+`prometheus_remote_write` exporter pushes to Mimir (`http://mimir:9009/api/v1/push`), which
+ingests through its single-binary target (`-target=all`) and stores blocks on local filesystem
+storage.
 
 ### Streaming logs from `mise run serve`
 
@@ -75,15 +77,14 @@ substitution, to that connection, so a developer still sees their own logs direc
 collector goes away while `serve` is running — a restart of the observability profile, most
 commonly — the connection breaks, and Go's runtime raises `SIGPIPE` on the next write to the now
 broken pipe, killing the service outright. This is a deliberate, accepted limitation, not an
-oversight: restart the observability profile only while `serve` is stopped. The service owning a
-configurable log destination itself, instead of a shell redirect reaching in from outside it, is
-the better long-term shape and is tracked as a concept for
-`v1.observability.tasks.instrumentation` to design once the service actually exports telemetry.
+oversight: restart the observability profile only while `serve` is stopped. A service-owned
+configurable log destination was considered as the fix and rejected: a socket the service writes
+to directly loses a line whenever that socket is down, with none of OTLP's batching or retry, for
+a failure confined to local development and scheduled to disappear once `v1.deployment`
+containerizes the service and its own runtime captures stdout.
 
-Today's service logs in text format, not JSON (`log.format` still defaults to text), so the
-`json_parser` operator rejects every line — harmlessly: `stanza`'s default error handling still
-forwards the raw line to Loki as the record body, so nothing breaks, but no structured fields
-reach it yet. Flipping `log.format` to `json` is instrumentation-task scope.
+`log.format` is `json`, so the `json_parser` operator reads every line's structured fields —
+`trace_id` and `span_id` included, once the service is instrumented enough to have one live.
 
 ### Correlation in Grafana
 
@@ -132,11 +133,3 @@ compose/observability/
   grafana/provisioning/datasources/…       the three datasources and their cross-links
   grafana/provisioning/dashboards/…        the dashboard provider and observability-stack.json
 ```
-
-### What the observability profile does not do yet
-
-Nothing on the `go-web-service` side exports telemetry: no OTLP client, and `log.format` still
-defaults to text, so the collector's `json_parser` rejects every line today, harmlessly, as
-described above. Wiring the service to the `go-observability` library, flipping `log.format` to
-`json`, and building the composition-root telemetry layer are
-`v1.observability.tasks.instrumentation`, the step that follows this one.

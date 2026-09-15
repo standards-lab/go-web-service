@@ -18,12 +18,14 @@ change and release discipline is described in `design/documented-layers.md`.
 
 Broad and unordered; each layer is detailed only when a session is about to build it. The
 baseline is running: `cmd/server`, the config files, and the README are authoritative for the
-composition root, configuration bootstrap, logging, lifecycle, HTTP server, probes, and the
-database with its admin service (startup migration, the configured seed set, the named states,
-and the admin mount), all wired over the SDKs and sqlate at pinned releases; the root
-`integration` package is the integration tier that asserts the running service through its
-API. The layers are the `v1` goals in the workspace roadmap, which sequences them; each is
-named here with the concept that carries its direction:
+composition root, configuration bootstrap, logging, lifecycle, HTTP server, probes, the database
+with its admin service (startup migration, the configured seed set, the named states, and the
+admin mount), and observability (a telemetry layer bracketing the lifecycle stages, tracing and
+metrics over OTLP, and structured logs correlated to them by trace id), all wired over the SDKs,
+go-observability, and sqlate at pinned releases; the root `integration` package is the
+integration tier that asserts the running service through its API. The remaining layers are the
+`v1` goals in the workspace roadmap, which sequences them; each is named here with the concept
+that carries its direction:
 
 - **Data composition and CQRS** — the organization domain runs on authored SQL; the remaining
   domains and the CQRS contract are `concepts/data-layer.md`.
@@ -34,7 +36,6 @@ named here with the concept that carries its direction:
 - **The management listener** — the admin mount on its own listener, a composition-root
   reshape here and in the template; the exploration is the coordinator's
   `concepts/admin-listener.md`.
-- **Observability** — logging, metrics, and tracing through OpenTelemetry across the stack.
 - **Object storage** — the go-storage capability demonstrated in a documented layer.
 - **Messaging and reactor services** — NATS through go-messaging, and the reactor layer it
   makes real.

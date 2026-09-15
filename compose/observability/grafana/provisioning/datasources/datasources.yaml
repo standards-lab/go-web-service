@@ -1,0 +1,98 @@
+# Grafana datasources for the observability profile: one per backend, reached
+# by compose service name. The uids are explicit because the three reference
+# each other (Loki -> Tempo, Tempo -> Loki and Mimir, Mimir -> Tempo); Grafana
+# would otherwise generate opaque ones.
+#
+# A literal `$` is written `$$`: Grafana's provisioning reader expands `$VAR`
+# from the environment, and `$$` is its escape for the template variables
+# Grafana itself interpolates at link time.
+
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      derivedFields:
+        # The collector's tcp_log receiver promotes trace_id into the OTel log
+        # record's own TraceId field (not the body, not an attribute), and
+        # Loki's native OTLP ingestion stores that as structured metadata named
+        # trace_id on each entry. Grafana merges structured metadata into a
+        # row's labels, so the derived field matches the label key directly
+        # (matcherType: label; matcherRegex is tested against label keys)
+        # rather than regex-parsing the log line, which never contains the id.
+        - name: TraceID
+          matcherType: label
+          matcherRegex: '^trace_id$'
+          datasourceUid: tempo
+          # For an internal link this is the target datasource's query: the
+          # trace id itself.
+          url: '$${__value.raw}'
+          urlDisplayLabel: View trace
+
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    jsonData:
+      # Trace -> logs. The tags map a span's resource attribute to the Loki
+      # stream label Loki's OTLP ingestion derives from it (service.name ->
+      # service_name; the tcp_log receiver sets the same resource attribute).
+      # With filterByTraceID Grafana 13 appends
+      #   | label_format log_line_contains_trace_id=`{{ contains "<id>" __line__ }}`
+      #   | log_line_contains_trace_id="true" or trace_id="<id>"
+      # so the structured-metadata trace_id matches without a custom query.
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: '-5m'
+        spanEndTimeShift: '5m'
+        tags: [{ key: service.name, value: service_name }]
+        filterByTraceID: true
+        filterBySpanID: false
+        customQuery: false
+      # Trace -> metrics. The prometheusremotewrite exporter maps the
+      # service.name resource attribute to the job label, so a span's
+      # service.name selects that service's series in Mimir. The query names
+      # the OpenTelemetry HTTP server duration histogram as the instrumentation
+      # task is expected to export it; nothing exports it yet.
+      tracesToMetrics:
+        datasourceUid: mimir
+        spanStartTimeShift: '-5m'
+        spanEndTimeShift: '5m'
+        tags: [{ key: service.name, value: job }]
+        queries:
+          - name: Request rate
+            query: 'sum(rate(http_server_request_duration_seconds_count{$$__tags}[5m]))'
+      nodeGraph:
+        enabled: true
+
+  - name: Mimir
+    uid: mimir
+    # Mimir serves the Prometheus query API under /prometheus
+    # (-http.prometheus-http-prefix); Grafana's Prometheus datasource type
+    # speaks it directly.
+    type: prometheus
+    access: proxy
+    url: http://mimir:9009/prometheus
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+      prometheusType: Mimir
+      # The highest value Grafana's Mimir list offers ("> 2.9.x"); it selects
+      # the modern label-matching endpoints, which Mimir 3 serves.
+      prometheusVersion: 2.9.1
+      # The collector's self-scrape interval, the only metrics source today.
+      timeInterval: 15s
+      # Exemplars arrive with the trace id as a `trace_id` exemplar label (the
+      # prometheusremotewrite exporter's name for the OTLP exemplar's TraceId);
+      # this turns it into a link to the Tempo datasource. The SDK's default
+      # exemplar filter attaches one to any measurement recorded inside a
+      # sampled span, so nothing on the service side needs configuring once it
+      # exports metrics.
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo

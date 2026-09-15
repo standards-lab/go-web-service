@@ -71,6 +71,9 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
     volumes:
+      # The image sets GF_PATHS_PROVISIONING=/etc/grafana/provisioning; Grafana
+      # reads datasources/ (and, later, dashboards/) beneath it at startup.
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - go-web-service-grafana:/var/lib/grafana
     ports:
       - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"

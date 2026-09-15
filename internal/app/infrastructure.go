@@ -9,6 +9,7 @@ import (
 	"github.com/standards-lab/go-core/logging"
 	"github.com/standards-lab/go-database"
 	"github.com/standards-lab/go-database/postgres"
+	"github.com/standards-lab/go-observability"
 	"github.com/standards-lab/sqlate"
 	pgdialect "github.com/standards-lab/sqlate/postgres"
 	"github.com/standards-lab/sqlate/query"
@@ -45,7 +46,9 @@ func newInfrastructure(
 	cfg *config.Config,
 	lc *lifecycle.Coordinator,
 ) (*Infrastructure, error) {
-	logger := logging.New(w, cfg.Log)
+	// The trace handler passes records through unchanged outside a span, so
+	// the wrap is unconditional and costs nothing when no trace is live.
+	logger := slog.New(observability.NewTraceHandler(logging.New(w, cfg.Log).Handler()))
 
 	db, err := postgres.New(cfg.Database)
 	if err != nil {

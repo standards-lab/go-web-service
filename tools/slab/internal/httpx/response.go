@@ -1,6 +1,6 @@
-// Package httpx is the HTTP client the scenarios call the service through.
-// This stage defines only the Response type the reporter renders; the client
-// that produces one arrives with the first scenario that needs it.
+// Package httpx is the HTTP client the scenarios call the service through:
+// the Client that sends a request, the Response the reporter renders, and
+// the Live probe a scenario's Need checks the service with.
 package httpx
 
 import "net/http"

@@ -1,7 +1,7 @@
 {
   "log": {
     "level": "info",
-    "format": "text"
+    "format": "json"
   },
   "server": {
     "host": "0.0.0.0",
@@ -17,6 +17,9 @@
     "options": {
       "sslmode": "disable"
     }
+  },
+  "observability": {
+    "endpoint": "127.0.0.1:4317"
   },
   "admin": {
     "seed": ""

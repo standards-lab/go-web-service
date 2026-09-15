@@ -31,6 +31,10 @@ func New(cfg *config.Config, w io.Writer) (*App, error) {
 		return nil, err
 	}
 
+	if err := newTelemetry(infra, cfg, lc); err != nil {
+		return nil, err
+	}
+
 	adm, err := newAdmin(infra, cfg, lc)
 	if err != nil {
 		return nil, err
@@ -43,7 +47,7 @@ func New(cfg *config.Config, w io.Writer) (*App, error) {
 	}
 
 	router := web.NewRouter()
-	router.Use(middleware(infra)...)
+	router.Use(middleware(infra, cfg)...)
 	for _, m := range routes(dom, adm, cfg) {
 		router.Mount(m)
 	}

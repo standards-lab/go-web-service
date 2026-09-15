@@ -5,6 +5,7 @@
 package configtest
 
 import (
+	"fmt"
 	"net"
 	"testing"
 
@@ -18,6 +19,7 @@ import (
 func Minimal() *config.Config {
 	cfg := &config.Config{}
 	cfg.Database.Name = "app"
+	cfg.Observability.Endpoint = "127.0.0.1:4317"
 	return cfg
 }
 
@@ -36,6 +38,7 @@ func Config(t *testing.T) *config.Config {
 	cfg.Database.Host = "127.0.0.1"
 	port := ClosedPort(t)
 	cfg.Database.Port = &port
+	cfg.Observability.Endpoint = fmt.Sprintf("127.0.0.1:%d", ClosedPort(t))
 	if err := cfg.Finalize(""); err != nil {
 		t.Fatalf("finalize hermetic config: %v", err)
 	}

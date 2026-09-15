@@ -1,0 +1,25 @@
+# Grafana dashboard provisioning for the observability profile: one file
+# provider that loads every *.json dashboard beneath this directory. The
+# provider YAML itself is read once at startup; the JSON files it points at
+# are re-read every updateIntervalSeconds, so editing a dashboard file takes
+# effect without a container restart.
+#
+# The dashboards are tracked config, not stack state: allowUiUpdates is off so
+# an edit in the UI cannot diverge from the file, and the file stays the
+# single source of truth.
+
+apiVersion: 1
+
+providers:
+  - name: go-web-service
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      # The mount point of compose/observability/grafana/provisioning in
+      # compose/observability.yml, plus this directory. Grafana only treats
+      # *.json here as dashboards, so this provider file is not mistaken for
+      # one.
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

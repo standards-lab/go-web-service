@@ -126,7 +126,7 @@ mise. `serve`'s full command also needs a shell that understands `/dev/tcp` (bas
 | `mise run db-up` | `docker compose up -d --wait` | Start the local Postgres |
 | `mise run db-down` | `docker compose down` | Stop the local Postgres (keep data) |
 | `mise run db-reset` | `docker compose down -v` | Stop the local Postgres and drop its data |
-| `mise run otel-up` | `docker compose --profile observability up -d --wait` | Start the collector, Loki, Tempo, Mimir, and Grafana |
+| `mise run otel-up` | `docker compose ... up -d --wait`, then polls Mimir until it can query | Start the collector, Loki, Tempo, Mimir, and Grafana |
 | `mise run otel-down` | `docker compose --profile observability down …` | Stop the observability profile (keep data) |
 | `mise run otel-reset` | `docker compose --profile observability down -v …` | Stop the observability profile and drop its data |
 | `mise run db-state <state>` | `curl -d '{"state":"<state>"}' localhost:8080/admin/database/state` | Reset the running service's database to a named state |

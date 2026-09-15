@@ -66,9 +66,21 @@ run = "docker compose down"
 description = "Stop the local postgres and drop its data"
 run = "docker compose down -v"
 
+# Mimir's HTTP endpoint answers ready before its querier ring finishes joining
+# (compose/README.md), and it has no shell for a real compose healthcheck, so
+# --wait alone does not cover it. Poll a synthetic query (no series to read,
+# just the query path itself) until it succeeds instead of trusting /ready.
 [tasks.otel-up]
 description = "Start the observability profile (collector, Loki, Tempo, Mimir, Grafana) and wait for health"
-run = "docker compose --profile observability up -d --wait"
+run = '''
+docker compose --profile observability up -d --wait
+for i in $(seq 1 30); do
+  curl -sf "http://127.0.0.1:${MIMIR_PORT:-9009}/prometheus/api/v1/query?query=vector(1)" >/dev/null && exit 0
+  sleep 1
+done
+echo "mimir did not become queryable within 30s" >&2
+exit 1
+'''
 
 # `down` is project-wide by default; naming the five services here keeps it
 # from also stopping the postgres db-up started.

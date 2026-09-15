@@ -6,8 +6,8 @@ golangci-lint = "2.13.2"
 APP_ENV = "local"
 
 [tasks.vet]
-description = "Run go vet, the integration suite included"
-run = "go vet -tags integration ./..."
+description = "Run go vet, the integration suite and the slab module included"
+run = "go vet -tags integration ./... && cd tools/slab && go vet ./..."
 
 # Start the observability profile first (`mise run otel-up`): the task opens a
 # TCP connection to the collector's log port before it builds anything and
@@ -25,8 +25,8 @@ go run ./cmd/server | tee >(cat >&3)
 '''
 
 [tasks.test]
-description = "Run the unit tier"
-run = "go test -race ./..."
+description = "Run the unit tier, the slab module included"
+run = "go test -race ./... && cd tools/slab && go test -race ./..."
 
 # The integration tier runs the same compose definition as its own project on
 # its own port, so the developer's stack and data are never touched, and tears
@@ -50,8 +50,17 @@ description = "Run go mod tidy"
 run = "go mod tidy"
 
 [tasks.lint]
-description = "Run golangci-lint, the integration suite included, then sqlint over the SQL files"
-run = "golangci-lint run --build-tags integration ./... && go tool sqlint"
+description = "Run golangci-lint, the integration suite and the slab module included, then sqlint over the SQL files"
+run = "golangci-lint run --build-tags integration ./... && go tool sqlint && cd tools/slab && golangci-lint run ./..."
+
+# slab is its own module under tools/ so cobra never enters cmd/server's
+# dependency graph. Running from that directory, rather than passing through
+# at the root, means a clone without a go.work still resolves slab's
+# dependencies against the published releases.
+[tasks.slab]
+description = "Run slab, the narrated-scenario runner (`mise run slab -- list`)"
+dir = "tools/slab"
+run = "go run ./cmd/slab"
 
 # services
 [tasks.db-up]

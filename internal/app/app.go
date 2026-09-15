@@ -47,7 +47,7 @@ func New(cfg *config.Config, w io.Writer) (*App, error) {
 	}
 
 	router := web.NewRouter()
-	router.Use(middleware(infra)...)
+	router.Use(middleware(infra, cfg)...)
 	for _, m := range routes(dom, adm, cfg) {
 		router.Mount(m)
 	}

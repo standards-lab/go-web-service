@@ -6,11 +6,12 @@ import (
 	"net/http"
 
 	"github.com/standards-lab/go-database"
+	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/query"
 )
 
-// Status is the status matcher over the vocabulary every domain's store
+// Status is the web.ProblemMatcher over the vocabulary every domain's store
 // returns:
 //
 //   - a rejected directive is the request's fault
@@ -23,20 +24,20 @@ import (
 // precedence. Check and not-null violations stay unmatched on purpose: a
 // command's validation owns those rules, so a breach is an invariant
 // failure, reported as a server fault.
-func Status(err error) (int, bool) {
+func Status(err error) (web.Problem, bool) {
 	switch {
 	case errors.Is(err, query.ErrDirectives):
-		return http.StatusBadRequest, true
+		return web.Problem{Status: http.StatusBadRequest}, true
 	case errors.Is(err, sql.ErrNoRows):
-		return http.StatusNotFound, true
+		return web.Problem{Status: http.StatusNotFound}, true
 	case errors.Is(err, sqlate.ErrUniqueViolation), errors.Is(err, sqlate.ErrForeignKeyViolation):
-		return http.StatusConflict, true
+		return web.Problem{Status: http.StatusConflict}, true
 	case errors.Is(err, query.ErrVersionMismatch):
-		return http.StatusPreconditionFailed, true
+		return web.Problem{Status: http.StatusPreconditionFailed}, true
 	case errors.Is(err, database.ErrNotReady),
 		errors.Is(err, database.ErrConnectionFailed),
 		errors.Is(err, sqlate.ErrConnectionFailed):
-		return http.StatusServiceUnavailable, true
+		return web.Problem{Status: http.StatusServiceUnavailable}, true
 	}
-	return 0, false
+	return web.Problem{}, false
 }

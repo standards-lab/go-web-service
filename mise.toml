@@ -9,9 +9,20 @@ APP_ENV = "local"
 description = "Run go vet, the integration suite included"
 run = "go vet -tags integration ./..."
 
+# Start the observability profile first (`mise run otel-up`): the task opens a
+# TCP connection to the collector's log port before it builds anything and
+# exits when nothing answers. tee then copies every stdout line to the terminal
+# and to that socket. If the collector goes away while the service runs, the
+# chain breaks on a later log write and SIGPIPE kills the service, so restart
+# the profile only while serve is stopped. The shell is bash, not sh, because
+# /dev/tcp is a bash pseudo-device.
 [tasks.serve]
-description = "Run the service locally"
-run = "go run ./cmd/server"
+description = "Run the service locally, streaming its logs to the observability collector"
+shell = "bash -c"
+run = '''
+exec 3>/dev/tcp/127.0.0.1/${OTEL_LOG_PORT:-4319} || exit
+go run ./cmd/server | tee >(cat >&3)
+'''
 
 [tasks.test]
 description = "Run the unit tier"
@@ -54,6 +65,20 @@ run = "docker compose down"
 [tasks.db-reset]
 description = "Stop the local postgres and drop its data"
 run = "docker compose down -v"
+
+[tasks.otel-up]
+description = "Start the observability profile (collector, Loki, Tempo, Mimir, Grafana) and wait for health"
+run = "docker compose --profile observability up -d --wait"
+
+# `down` is project-wide by default; naming the five services here keeps it
+# from also stopping the postgres db-up started.
+[tasks.otel-down]
+description = "Stop the observability profile (keep data)"
+run = "docker compose --profile observability down otel-collector loki tempo mimir grafana"
+
+[tasks.otel-reset]
+description = "Stop the observability profile and drop its data"
+run = "docker compose --profile observability down -v otel-collector loki tempo mimir grafana"
 
 # The running service does the work through its admin mount: every applied
 # migration reverted, the set applied, the named state's set seeded.

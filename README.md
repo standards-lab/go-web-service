@@ -11,6 +11,10 @@ Initialized from the [go-web-sdk-template](https://github.com/standards-lab/go-w
 - SQL: Postgres, through [go-database](https://github.com/standards-lab/go-database) for the pool
   and its administration and [sqlate](https://github.com/standards-lab/sqlate) for the authored
   SQL.
+- Observability: OpenTelemetry, reached through a `docker compose` profile (`mise run otel-up`)
+  that runs the collector and a local Loki, Tempo, Mimir, and Grafana stack — see
+  [`compose/README.md`](compose/README.md). The service does not export telemetry yet; wiring it
+  in is `v1.observability.tasks.instrumentation`, a separate step.
 
 ## Getting started
 
@@ -24,8 +28,13 @@ mise trust && mise install
 cp secrets.example.json secrets.json
 
 mise run db-up      # start the local Postgres and wait for health
+mise run otel-up    # start the observability collector and stack
 mise run serve      # run the service
 ```
+
+`serve` streams its stdout to the collector over TCP and exits immediately if `otel-up` has not
+run first — see [`compose/README.md`](compose/README.md) for the mechanism and its one accepted
+limitation.
 
 Startup does the database work itself, in lifecycle stages: the pool connects, the schema is
 verified and any pending migration applied, the configured seed set is applied (the `local`
@@ -98,16 +107,17 @@ public deployment as it stands.
 
 ## Tasks
 
-Each task wraps a plain command, so the repository works without mise, with one caveat:
+Each task wraps a plain command, so the repository works without mise, with two caveats:
 `mise.toml` sets `APP_ENV=local`, so a bare `go run ./cmd/server` outside mise loads the base
 configuration alone and binds `0.0.0.0` at info logging, with no seed set, instead of the local
-overlay's loopback, debug, and `default` set. Set `APP_ENV=local` yourself when running without
-mise.
+overlay's loopback, debug, and `default` set — set `APP_ENV=local` yourself when running without
+mise. `serve`'s full command also needs a shell that understands `/dev/tcp` (bash, not `sh`); see
+[`compose/README.md`](compose/README.md).
 
 | Task | Command | What it does |
 |------|---------|--------------|
 | `mise run vet` | `go vet -tags integration ./...` | Compile-check and vet, the integration suite included |
-| `mise run serve` | `go run ./cmd/server` | Run the service locally |
+| `mise run serve` | `go run ./cmd/server`, tee'd to the observability collector | Run the service locally |
 | `mise run test` | `go test -race ./...` | Run the unit tier |
 | `mise run integration` | an isolated `docker compose up`, `go test -tags integration ./integration/`, `down -v` | Run the integration tier against its own stack |
 | `mise run fmt` | `gofmt -w .` | Format the source |
@@ -116,6 +126,9 @@ mise.
 | `mise run db-up` | `docker compose up -d --wait` | Start the local Postgres |
 | `mise run db-down` | `docker compose down` | Stop the local Postgres (keep data) |
 | `mise run db-reset` | `docker compose down -v` | Stop the local Postgres and drop its data |
+| `mise run otel-up` | `docker compose --profile observability up -d --wait` | Start the collector, Loki, Tempo, Mimir, and Grafana |
+| `mise run otel-down` | `docker compose --profile observability down …` | Stop the observability profile (keep data) |
+| `mise run otel-reset` | `docker compose --profile observability down -v …` | Stop the observability profile and drop its data |
 | `mise run db-state <state>` | `curl -d '{"state":"<state>"}' localhost:8080/admin/database/state` | Reset the running service's database to a named state |
 
 ## Tests

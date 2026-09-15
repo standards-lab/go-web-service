@@ -1,0 +1,145 @@
+# The OpenTelemetry Collector for the observability profile. It receives OTLP
+# traces and metrics from the service, receives the service's stdout JSON log
+# stream over TCP, and exports to Tempo, Mimir, and Loki by service name on the
+# compose network.
+
+extensions:
+  # Liveness endpoint. Nothing in compose consumes it (the contrib image has no
+  # shell to run a probe with), but `curl http://127.0.0.1:13133` from the
+  # host answers whether the collector is up.
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  # The service's OTLP export, once the instrumentation task wires it up. The
+  # endpoints bind all interfaces because the default (localhost) is not
+  # reachable through the container's published ports.
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # The collector's own metrics, scraped from its Prometheus endpoint (see
+  # service.telemetry below), so the metrics pipeline carries a signal before
+  # the service exports any.
+  prometheus/self:
+    config:
+      scrape_configs:
+        - job_name: otel-collector
+          scrape_interval: 15s
+          static_configs:
+            - targets: ["localhost:8888"]
+
+  # go-web-service runs on the host, not in compose, and streams its stdout
+  # over a TCP connection to this listener (published as 127.0.0.1:4319 by
+  # compose/observability.yml). Each line is slog's JSONHandler shape: time,
+  # level, msg, then the record's attributes, with trace_id and span_id as
+  # top-level hex strings whenever the record was logged under an active span
+  # (go-observability's NewTraceHandler).
+  #
+  # Framing: with no `multiline` block the receiver splits the byte stream at
+  # newlines (pkg/stanza/split's NewlineSplitFunc), trims surrounding
+  # whitespace, and flushes an unterminated final line when the connection
+  # closes (the tcp input builds its split func with flushAtEOF=true). slog
+  # ends every record with "\n", so the defaults frame it correctly; a
+  # redirect that batches several lines into one TCP segment is fine because
+  # one_log_per_packet stays false.
+  #
+  # Wiring the service is the observability instrumentation task's job: `mise
+  # run serve` must send its stdout to this port. The mechanism already agreed
+  # is a plain shell redirect to bash's /dev/tcp/127.0.0.1/4319 pseudo-device,
+  # which needs no extra binary but only exists under bash (not sh/dash), so
+  # the mise task may need its shell set explicitly. The redirect fails to
+  # connect when the profile is not running, which is the intended posture:
+  # the collector is a hard dependency, started before the service, with no
+  # graceful fallback.
+  tcp_log:
+    listen_address: 0.0.0.0:4319
+    # The tcp_log receiver has no resource of its own. service.name must match
+    # the value the service's own telemetry reports so Loki indexes the logs
+    # under the same service_name Tempo's trace-to-logs link searches by.
+    resource:
+      service.name: go-web-service
+    operators:
+      # json_parser lands every top-level key in the record's attributes
+      # (parse_to defaults to attributes), then the embedded parsers promote
+      # the standard fields onto the record itself: time to Timestamp, level
+      # to Severity, and trace_id/span_id to the record's own TraceID and
+      # SpanID fields, decoded from hex. A line without trace_id/span_id
+      # (any record outside a request) parses cleanly with those unset.
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.time
+          layout_type: gotime
+          layout: "2006-01-02T15:04:05.999999999Z07:00"
+        severity:
+          parse_from: attributes.level
+        trace:
+          trace_id:
+            parse_from: attributes.trace_id
+          span_id:
+            parse_from: attributes.span_id
+      # The message becomes the record body (the log line Loki stores), and
+      # the promoted fields leave attributes so each reaches the backend once.
+      # move and remove fail on a missing field, hence the guards: a line the
+      # parser rejected has none of these attributes.
+      - type: move
+        if: 'attributes.msg != nil'
+        from: attributes.msg
+        to: body
+      - type: remove
+        if: 'attributes.time != nil'
+        field: attributes.time
+      - type: remove
+        if: 'attributes.level != nil'
+        field: attributes.level
+      - type: remove
+        if: 'attributes.trace_id != nil'
+        field: attributes.trace_id
+      - type: remove
+        if: 'attributes.span_id != nil'
+        field: attributes.span_id
+
+processors:
+  batch: {}
+
+exporters:
+  # Tempo's OTLP gRPC receiver; plaintext inside the compose network.
+  otlp_grpc/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+  # Mimir's Prometheus remote-write ingestion.
+  prometheus_remote_write/mimir:
+    endpoint: http://mimir:9009/api/v1/push
+  # Loki's native OTLP ingestion; the exporter appends /v1/logs itself.
+  otlp_http/loki:
+    endpoint: http://loki:3100/otlp
+
+service:
+  extensions: [health_check]
+  telemetry:
+    metrics:
+      # The endpoint prometheus/self scrapes. Loopback only: it never needs to
+      # leave the container.
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: localhost
+                port: 8888
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp_grpc/tempo]
+    metrics:
+      receivers: [otlp, prometheus/self]
+      processors: [batch]
+      exporters: [prometheus_remote_write/mimir]
+    logs:
+      receivers: [tcp_log]
+      processors: [batch]
+      exporters: [otlp_http/loki]

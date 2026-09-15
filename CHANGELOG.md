@@ -36,6 +36,14 @@ accumulate under [Unreleased] until the first cut.
 - Filter operators on the collection read, `field[op]=value`, and membership from a repeated
   parameter; a malformed filter value answers 400.
 - `sqlint.toml` and the `sqlint` tool: `mise run lint` and CI lint the SQL files.
+- The observability compose profile (`mise run otel-up`/`otel-down`): an OpenTelemetry Collector
+  alongside a local Loki, Tempo, and Mimir stack and Grafana, provisioned with cross-linked
+  datasources (log-to-trace, trace-to-logs, trace-to-metrics, and exemplars once something emits
+  them) and a first dashboard of the collector's own pipeline health. `mise run serve` streams
+  its stdout to the collector's log receiver over TCP whenever the profile is running, a hard
+  dependency accepted as a known limitation and documented in `compose/README.md`, which also
+  covers the full stack's wiring. The service itself exports nothing yet; that is
+  `v1.observability.tasks.instrumentation`, a separate step.
 
 ### Changed
 

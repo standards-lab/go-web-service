@@ -1,0 +1,97 @@
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.160.0
+    profiles: ["observability"]
+    command: ["--config=/etc/otelcol-contrib/otel-collector.yaml"]
+    volumes:
+      - ./observability/otel-collector.yaml:/etc/otelcol-contrib/otel-collector.yaml:ro
+    ports:
+      - "127.0.0.1:${OTEL_GRPC_PORT:-4317}:4317"
+      - "127.0.0.1:${OTEL_HTTP_PORT:-4318}:4318"
+      # The tcp_log receiver: the service on the host streams its stdout JSON
+      # log lines here. 4319 sits beside the OTLP pair so the collector's
+      # three ingest ports read as one block.
+      - "127.0.0.1:${OTEL_LOG_PORT:-4319}:4319"
+      - "127.0.0.1:${OTEL_HEALTH_PORT:-13133}:13133"
+    depends_on:
+      loki:
+        condition: service_started
+      tempo:
+        condition: service_started
+      mimir:
+        condition: service_started
+    # No healthcheck: the contrib image ships no shell, so a CMD-SHELL probe against the
+    # collector's own health_check extension has nothing to run it with. The exporters
+    # retry with backoff, so a backend that is still starting costs nothing but delay.
+
+  loki:
+    image: grafana/loki:3.7.7
+    profiles: ["observability"]
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./observability/loki.yaml:/etc/loki/loki.yaml:ro
+      - go-web-service-loki:/loki
+    ports:
+      - "127.0.0.1:${LOKI_PORT:-3100}:3100"
+    # No healthcheck: since 3.5.8 the image is only /usr/bin/loki (busybox was
+    # removed), so there is no wget or shell to probe /ready with. Dependents
+    # wait on service_started.
+
+  tempo:
+    image: grafana/tempo:3.0.3
+    profiles: ["observability"]
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./observability/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - go-web-service-tempo:/var/tempo
+    ports:
+      - "127.0.0.1:${TEMPO_PORT:-3200}:3200"
+    # No healthcheck: since 2.10 the image is only /tempo (busybox was removed),
+    # so there is no wget or shell to probe /ready with. Dependents wait on
+    # service_started.
+
+  mimir:
+    image: grafana/mimir:3.2.1
+    profiles: ["observability"]
+    command: ["-config.file=/etc/mimir/mimir.yaml", "-target=all"]
+    volumes:
+      - ./observability/mimir.yaml:/etc/mimir/mimir.yaml:ro
+      - go-web-service-mimir:/data
+    ports:
+      - "127.0.0.1:${MIMIR_PORT:-9009}:9009"
+    # No healthcheck: the Mimir image is distroless (only /bin/mimir), so there
+    # is no wget or shell to probe /ready with. Dependents wait on
+    # service_started; mimir.yaml's single-binary ring settings make it ready
+    # within a couple of seconds of that.
+
+  grafana:
+    image: grafana/grafana:13.2.2
+    profiles: ["observability"]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      # The image sets GF_PATHS_PROVISIONING=/etc/grafana/provisioning; Grafana
+      # reads datasources/ (and, later, dashboards/) beneath it at startup.
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - go-web-service-grafana:/var/lib/grafana
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      loki:
+        condition: service_started
+      tempo:
+        condition: service_started
+      mimir:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  go-web-service-loki:
+  go-web-service-tempo:
+  go-web-service-mimir:
+  go-web-service-grafana:

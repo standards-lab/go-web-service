@@ -9,6 +9,14 @@ accumulate under [Unreleased] until the first cut.
 
 ### Added
 
+- `tools/slab`, a narrated-scenario CLI in its own module (`mise run slab -- list`/
+  `demo <scenario>`; see [`tools/slab/README.md`](tools/slab/README.md)): `sqlate` runs the
+  library's compile pipeline in process over the repository's own sources; `domain` drives the
+  organization domain's full CRUD surface against the running service, reseeded from the known
+  reference tree each run, with the create request's trace located in Grafana; `problems` tours
+  the service's RFC 9457 problem-response contract, one request per real error condition, each
+  with its own trace pointer, resetting first so a run never drifts the seed data. Not a v1
+  layer — the architect's own instrument for demos and self-serve exploration.
 - Named database states: one file per state under `data/seeds/`, keyed by table (`default`, the
   reference tree; `empty`, no rows). `GET /admin/database/states` lists them;
   `POST /admin/database/state` resets the database to one, every migration reverted, the set

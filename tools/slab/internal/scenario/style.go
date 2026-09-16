@@ -45,7 +45,6 @@ func (s style) caption(text string) string { return s.wrap(ansiMagenta, text) }
 func (s style) key(text string) string     { return s.wrap(ansiBlue, text) }
 func (s style) value(text string) string   { return s.wrap(ansiGreen, text) }
 func (s style) status(text string) string  { return s.wrap(ansiBold+ansiYellow, text) }
-func (s style) link(text string) string    { return s.wrap(ansiCyan, text) }
 
 // sqlKeywords is the hand-maintained list SQL bolds. Match is exact: the
 // repository's statements write keywords in upper case.

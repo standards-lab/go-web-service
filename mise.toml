@@ -16,12 +16,19 @@ run = "go vet -tags integration ./... && cd tools/slab && go vet ./..."
 # chain breaks on a later log write and SIGPIPE kills the service, so restart
 # the profile only while serve is stopped. The shell is bash, not sh, because
 # /dev/tcp is a bash pseudo-device.
+#
+# Ctrl-C reaches every process in the pipeline at once. The server drains and
+# logs "server stopped" a moment later, so tee has to outlive the signal
+# (-i ignores it) or that last write hits a dead pipe and SIGPIPE kills the
+# server instead. A socket cannot be opened by path, so it takes tee's stdout
+# through a dup, and the terminal, saved on fd 4, is the path argument.
 [tasks.serve]
 description = "Run the service locally, streaming its logs to the observability collector"
 shell = "bash -c"
 run = '''
 exec 3>/dev/tcp/127.0.0.1/${OTEL_LOG_PORT:-4319} || exit
-go run ./cmd/server | tee >(cat >&3)
+exec 4>&1
+go run ./cmd/server | tee -i /dev/fd/4 >&3
 '''
 
 [tasks.test]
@@ -75,6 +82,8 @@ run = "docker compose down"
 description = "Stop the local postgres and drop its data"
 run = "docker compose down -v"
 
+# `up` always starts the unprofiled services alongside an activated profile,
+# so naming the five services here keeps it from also starting postgres.
 # Mimir's HTTP endpoint answers ready before its querier ring finishes joining
 # (compose/README.md), and it has no shell for a real compose healthcheck, so
 # --wait alone does not cover it. Poll a synthetic query (no series to read,
@@ -82,7 +91,7 @@ run = "docker compose down -v"
 [tasks.otel-up]
 description = "Start the observability profile (collector, Loki, Tempo, Mimir, Grafana) and wait for health"
 run = '''
-docker compose --profile observability up -d --wait
+docker compose --profile observability up -d --wait otel-collector loki tempo mimir grafana
 for i in $(seq 1 30); do
   curl -sf "http://127.0.0.1:${MIMIR_PORT:-9009}/prometheus/api/v1/query?query=vector(1)" >/dev/null && exit 0
   sleep 1
@@ -100,6 +109,20 @@ run = "docker compose --profile observability down otel-collector loki tempo mim
 [tasks.otel-reset]
 description = "Stop the observability profile and drop its data"
 run = "docker compose --profile observability down -v otel-collector loki tempo mimir grafana"
+
+# The whole local stack, postgres and the observability profile together.
+# Neither half depends on the other, so mise runs each pair in parallel.
+[tasks.stack-up]
+description = "Start postgres and the observability profile and wait for health"
+depends = ["db-up", "otel-up"]
+
+[tasks.stack-down]
+description = "Stop postgres and the observability profile (keep data)"
+depends = ["db-down", "otel-down"]
+
+[tasks.stack-reset]
+description = "Stop postgres and the observability profile and drop their data"
+depends = ["db-reset", "otel-reset"]
 
 # The running service does the work through its admin mount: every applied
 # migration reverted, the set applied, the named state's set seeded.

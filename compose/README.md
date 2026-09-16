@@ -72,12 +72,15 @@ storage.
 
 The `serve` task (`mise.toml`) opens a TCP connection to the collector's log port before it
 builds anything, and exits immediately if nothing answers — `mise run otel-up` has to run first.
-It then runs the service with its stdout `tee`'d to the terminal and, through a process
-substitution, to that connection, so a developer still sees their own logs directly. If the
-collector goes away while `serve` is running — a restart of the observability profile, most
-commonly — the connection breaks, and Go's runtime raises `SIGPIPE` on the next write to the now
-broken pipe, killing the service outright. This is a deliberate, accepted limitation, not an
-oversight: restart the observability profile only while `serve` is stopped. A service-owned
+It then runs the service with its stdout `tee`'d to that connection and, through a duplicated
+file descriptor, to the terminal, so a developer still sees their own logs directly. `tee -i`
+ignores Ctrl-C's SIGINT so it outlives the signal and only exits once the server's own graceful
+shutdown closes its stdout at ordinary EOF, rather than dying mid-drain and losing the server's
+last log line. If the collector goes away while `serve` is running — a restart of the
+observability profile, most commonly — the connection breaks, and Go's runtime raises `SIGPIPE`
+on the next write to the now broken pipe, killing the service outright. This is a deliberate,
+accepted limitation, not an oversight: restart the observability profile only while `serve` is
+stopped. A service-owned
 configurable log destination was considered as the fix and rejected: a socket the service writes
 to directly loses a line whenever that socket is down, with none of OTLP's batching or retry, for
 a failure confined to local development and scheduled to disappear once `v1.deployment`

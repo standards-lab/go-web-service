@@ -100,7 +100,7 @@ func TestRoot_PrintsHelpAndTheListing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("root: %v", err)
 	}
-	for _, want := range []string{"Available Commands:", "list", "run", "stub:one  the first stub"} {
+	for _, want := range []string{"Available Commands:", "list", "demo", "stub:one  the first stub"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("root output lacks %q:\n%s", want, out)
 		}
@@ -108,7 +108,7 @@ func TestRoot_PrintsHelpAndTheListing(t *testing.T) {
 }
 
 func TestRun_DispatchesToTheNamedScenario(t *testing.T) {
-	out, err := execute(t, "run", "stub:two")
+	out, err := execute(t, "demo", "stub:two")
 	if err != nil {
 		t.Fatalf("run stub:two: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestRun_DispatchesToTheNamedScenario(t *testing.T) {
 }
 
 func TestRun_CarriesTheRootFlagsToTheScenario(t *testing.T) {
-	out, err := execute(t, "--base", "http://example.test:1", "run", "stub:one")
+	out, err := execute(t, "--base", "http://example.test:1", "demo", "stub:one")
 	if err != nil {
 		t.Fatalf("run stub:one: %v", err)
 	}
@@ -131,16 +131,16 @@ func TestRun_CarriesTheRootFlagsToTheScenario(t *testing.T) {
 }
 
 func TestRun_AcceptsTheScenarioOwnFlags(t *testing.T) {
-	if _, err := execute(t, "run", "stub:two", "--greeting", "hi"); err != nil {
+	if _, err := execute(t, "demo", "stub:two", "--greeting", "hi"); err != nil {
 		t.Errorf("run stub:two --greeting: %v", err)
 	}
-	if _, err := execute(t, "run", "stub:one", "--greeting", "hi"); err == nil {
+	if _, err := execute(t, "demo", "stub:one", "--greeting", "hi"); err == nil {
 		t.Error("stub:one accepted stub:two's flag")
 	}
 }
 
 func TestRun_RejectsAnUnknownScenario(t *testing.T) {
-	if _, err := execute(t, "run", "stub:none"); err == nil {
+	if _, err := execute(t, "demo", "stub:none"); err == nil {
 		t.Error("run stub:none succeeded")
 	}
 }

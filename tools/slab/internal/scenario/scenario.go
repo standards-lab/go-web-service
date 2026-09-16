@@ -12,7 +12,7 @@ import (
 // Scenario is one narrated capability: what it shows, what must already be
 // running, and the ordered steps that show it.
 type Scenario struct {
-	Name    string               // "<capability>:<scenario>"
+	Name    string               // the word after "slab demo"
 	Summary string               // the line slab list prints
 	Needs   []Need               // preconditions, checked before the first step
 	Flags   func(*pflag.FlagSet) // the scenario's own flags; nil for none

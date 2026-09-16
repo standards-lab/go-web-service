@@ -1,5 +1,8 @@
-// Package demo holds the scenarios that narrate a library's mechanism in
-// process, over the service's own sources on disk, with nothing running.
+// Package demo holds the narrated scenarios: sqlate, which runs a library's
+// mechanism in process over the service's own sources on disk with nothing
+// running, and domain, which runs the organization domain's full CRUD
+// surface against the running service, reseeded from a known fixture each
+// run.
 package demo
 
 import (
@@ -43,12 +46,12 @@ type state struct {
 func compileScenario() scenario.Scenario {
 	s := &state{}
 	return scenario.Scenario{
-		Name:    "sqlate:compile",
+		Name:    "sqlate",
 		Summary: "One pattern, one statement that includes it, the two calls that register them, and the compiled result (no compose stack needed)",
 		Steps: []scenario.Step{
 			{Intent: "Write a pattern", Action: s.writePattern},
-			{Intent: "Write a statement that includes it, with parameters", Action: s.writeStatement},
-			{Intent: "Register both, one line each", Action: s.register},
+			{Intent: "Write a statement", Action: s.writeStatement},
+			{Intent: "Catalog registration", Action: s.register},
 			{Intent: "Show the compiled output", Action: s.showCompiled},
 		},
 	}
@@ -65,9 +68,7 @@ func (s *state) writePattern(ctx context.Context, r *scenario.Reporter) error {
 	if err != nil {
 		return err
 	}
-	r.SQL(file+", as authored", string(text))
-	r.Note("This is the application's own pattern namespace, %s: protocol SQL authored once and included", appNamespace)
-	r.Note("by name from any statement that needs it, the same way the library's own patterns work.")
+	r.SQL(file, string(text))
 	return nil
 }
 
@@ -77,28 +78,26 @@ func (s *state) writeStatement(_ context.Context, r *scenario.Reporter) error {
 	if err != nil {
 		return err
 	}
-	r.SQL(file+", as authored", string(text))
-	r.Note("It includes exactly one pattern, {{> %s.%s}}, and declares three parameters of its own:", appNamespace, pattern)
-	r.Note("{{parent_id:uuid}}, {{code}}, and {{name}}.")
+	r.SQL(file, string(text))
+	r.Note("The statement reuses the %s pattern above, and declares three parameters of its own: {{parent_id:uuid}}, {{code}}, {{name}}.", pattern)
 	return nil
 }
 
 func (s *state) register(_ context.Context, r *scenario.Reporter) error {
-	r.SQL("The pattern namespace, registered in one call",
+	r.SQL(fmt.Sprintf("The pattern registered under the %q namespace", appNamespace),
 		fmt.Sprintf("query.NewCatalog(query.Patterns(), query.Publish(%q, fsys, %q))", appNamespace, patternsDir))
 	catalog, err := query.NewCatalog(query.Patterns(), query.Publish(appNamespace, s.fsys, patternsDir))
 	if err != nil {
 		return err
 	}
-	r.SQL("The statements directory, compiled against a dialect in one call",
+	r.SQL("A directory of statements, compiled against the postgres dialect",
 		fmt.Sprintf("catalog.Compile(fsys, %q, postgres.Dialect{})", statementsDir))
 	stmts, err := catalog.Compile(s.fsys, statementsDir, postgres.Dialect{})
 	if err != nil {
 		return err
 	}
 	s.stmts = stmts
-	r.Note("Publish names the directory a namespace's patterns are read from; NewCatalog reads them beside the")
-	r.Note("library's own. Compile reads every .sql file in the directory and resolves each against that catalog.")
+	r.Note("fsys and the directory path indicate where the .sql files are sourced from. You can register multiple pattern and statement sources. Patterns are encapsulated under their specified namespace.")
 	return nil
 }
 
@@ -111,11 +110,9 @@ func (s *state) showCompiled(_ context.Context, r *scenario.Reporter) error {
 	if strings.Contains(text, "{{") {
 		return fmt.Errorf("%s: a {{ marker survived compilation:\n%s", statement, text)
 	}
-	r.SQL(statement+", as postgres receives it", text)
+	r.SQL(statement+", compiled for execution by postgres", text)
 	r.Table("Placeholders, in position order", placeholderRows(postgres.Dialect{}.Placeholder, st.Params()))
-	r.Note("Compile splices the include in: RETURNING id, version now sits in the text, and no {{> }} marker remains.")
-	r.Note("Compile also rewrites each parameter to postgres's $n placeholder, numbered in first-occurrence order;")
-	r.Note("the :uuid on parent_id became the CAST around its placeholder.")
+	r.Note("Compile splices the included pattern and rewrites each parameter to postgres's $n placeholder, numbered in first-occurrence order. The :uuid on parent_id became the CAST around its placeholder.")
 	return nil
 }
 

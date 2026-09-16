@@ -6,12 +6,11 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/internal/scenario"
 )
 
-// runCommand builds run with one subcommand per registered scenario, named
-// for the scenario. cobra matches command names literally, so a name such as
-// sqlate:compile is one word to it.
-func runCommand(opts *options) *cobra.Command {
-	run := &cobra.Command{
-		Use:   "run <scenario>",
+// demoCommand builds demo with one subcommand per registered scenario, named
+// for the scenario.
+func demoCommand(opts *options) *cobra.Command {
+	demo := &cobra.Command{
+		Use:   "demo <scenario>",
 		Short: "Run one scenario",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -19,9 +18,9 @@ func runCommand(opts *options) *cobra.Command {
 		},
 	}
 	for _, s := range scenario.All() {
-		run.AddCommand(scenarioCommand(opts, s))
+		demo.AddCommand(scenarioCommand(opts, s))
 	}
-	return run
+	return demo
 }
 
 func scenarioCommand(opts *options, s scenario.Scenario) *cobra.Command {

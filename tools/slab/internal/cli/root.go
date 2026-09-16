@@ -1,5 +1,5 @@
 // Package cli is slab's command tree: the root with its persistent flags,
-// list, and one run subcommand per registered scenario.
+// list, and one demo subcommand per registered scenario.
 package cli
 
 import (
@@ -53,7 +53,7 @@ func Root() *cobra.Command {
 	f.StringVar(&opts.repo, "repo", "", "the repository root, when slab is not run from inside it")
 	f.BoolVar(&opts.noColor, "no-color", false, "print without ANSI color even on a terminal")
 
-	root.AddCommand(listCommand(), runCommand(opts))
+	root.AddCommand(listCommand(), demoCommand(opts))
 	return root
 }
 

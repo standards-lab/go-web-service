@@ -3,6 +3,7 @@ package demo
 import (
 	"bytes"
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -12,9 +13,9 @@ import (
 
 func run(t *testing.T, ctx context.Context) (string, error) {
 	t.Helper()
-	s, ok := scenario.Lookup("sqlate:compile")
+	s, ok := scenario.Lookup("sqlate")
 	if !ok {
-		t.Fatal("sqlate:compile is not registered")
+		t.Fatal("sqlate is not registered")
 	}
 	var out bytes.Buffer
 	err := scenario.Run(ctx, s, scenario.NewReporter(&out, false))
@@ -28,14 +29,14 @@ func TestScenario_NarratesFourStepsOverTheCheckout(t *testing.T) {
 	}
 	for _, want := range []string{
 		"[1/4]", "[4/4]",
-		"data/patterns/identity.sql, as authored",
+		"data/patterns/identity.sql",
 		"RETURNING id, version",
-		"domain/organization/statements/create.sql, as authored",
+		"domain/organization/statements/create.sql",
 		"VALUES ({{parent_id:uuid}}, {{code}}, {{name}})",
 		"{{> app.identity}}",
 		`query.NewCatalog(query.Patterns(), query.Publish("app", fsys, "data/patterns"))`,
 		`catalog.Compile(fsys, "domain/organization/statements", postgres.Dialect{})`,
-		"create, as postgres receives it",
+		"create, compiled for execution by postgres",
 		"VALUES (CAST($1 AS uuid), $2, $3)",
 		"$1  parent_id",
 		"$2  code",
@@ -49,8 +50,9 @@ func TestScenario_NarratesFourStepsOverTheCheckout(t *testing.T) {
 		t.Errorf("the scenario narrates more than four steps:\n%s", out)
 	}
 	// The compiled SQL block runs from its caption to the next caption; the
-	// notes after it mention the {{> }} marker by name and are not checked.
-	start := strings.Index(out, "create, as postgres receives it")
+	// authored statement and the note under it name the {{ }} markers and
+	// are not checked.
+	start := strings.Index(out, "create, compiled for execution by postgres")
 	end := start + strings.Index(out[start:], "Placeholders, in position order")
 	if compiled := out[start:end]; strings.Contains(compiled, "{{") {
 		t.Errorf("a {{ marker survived into the compiled text:\n%s", compiled)
@@ -77,10 +79,16 @@ func TestList_ShowsTheScenarioWithNoNeeds(t *testing.T) {
 	if err := root.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if !strings.Contains(out.String(), "sqlate:compile  One pattern, one statement that includes it, the two calls that register them, and the compiled result (no compose stack needed)") {
-		t.Errorf("list lacks the scenario and its summary:\n%s", out.String())
+	summary := "sqlate  One pattern, one statement that includes it, the two calls that register them, and the compiled result (no compose stack needed)"
+	lines := strings.Split(out.String(), "\n")
+	at := slices.IndexFunc(lines, func(line string) bool { return strings.Contains(line, summary) })
+	if at < 0 {
+		t.Fatalf("list lacks the scenario and its summary:\n%s", out.String())
 	}
-	if strings.Contains(out.String(), "needs ") {
+	// The listing prints a scenario's needs on the lines under its summary,
+	// each starting with "needs", so the line after this one belongs to the
+	// next scenario when there are none.
+	if next := strings.TrimSpace(lines[at+1]); strings.HasPrefix(next, "needs ") {
 		t.Errorf("list shows a need for a scenario that has none:\n%s", out.String())
 	}
 }

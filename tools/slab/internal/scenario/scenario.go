@@ -35,29 +35,6 @@ type Step struct {
 	Action func(context.Context, *Reporter) error
 }
 
-// Env is what the root command's flags resolved to. Scenarios and their
-// checks read it from the context, since a Need's probe receives nothing
-// else.
-type Env struct {
-	Base    string // the service's base URL
-	Grafana string // Grafana's base URL
-	Tempo   string // Tempo's HTTP API base URL
-	Repo    string // the repository root override; empty when not given
-}
-
-type envKey struct{}
-
-// WithEnv returns a context carrying env.
-func WithEnv(ctx context.Context, env Env) context.Context {
-	return context.WithValue(ctx, envKey{}, env)
-}
-
-// EnvFrom returns the Env carried by ctx, or the zero Env when none is.
-func EnvFrom(ctx context.Context) Env {
-	env, _ := ctx.Value(envKey{}).(Env)
-	return env
-}
-
 // Run checks every need of s, then runs its steps in order, narrating each
 // intent through r before its action. It stops at the first need that fails
 // or the first action that returns an error.

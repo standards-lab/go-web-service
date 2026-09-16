@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/standards-lab/go-web-service/tools/slab/internal/cli"
+	"github.com/standards-lab/go-web-service/tools/slab/internal/env"
 	"github.com/standards-lab/go-web-service/tools/slab/internal/scenario"
 )
 
@@ -27,7 +28,7 @@ func init() {
 		Steps: []scenario.Step{{
 			Intent: "say which one ran",
 			Action: func(ctx context.Context, r *scenario.Reporter) error {
-				r.Note("ran one against %s", scenario.EnvFrom(ctx).Base)
+				r.Note("ran one against %s", env.FromContext(ctx).Base)
 				return nil
 			},
 		}},

@@ -12,7 +12,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/standards-lab/go-web-service/tools/slab/internal/api"
 	"github.com/standards-lab/go-web-service/tools/slab/internal/cli"
+	"github.com/standards-lab/go-web-service/tools/slab/internal/env"
 	"github.com/standards-lab/go-web-service/tools/slab/internal/scenario"
 )
 
@@ -20,48 +22,9 @@ import (
 // repeated here so the test pins the created code to the rule it must pass.
 var codePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
-func TestCreateBody_IsAValidOrganizationUnderItsParent(t *testing.T) {
-	parent := "00000000-0000-0000-0000-000000000001"
-	body := createOrganization{ParentID: &parent, Code: createdCode, Name: createdName}
-	if !codePattern.MatchString(body.Code) {
-		t.Errorf("code %q does not match %s", body.Code, codePattern)
-	}
-	raw, err := json.Marshal(body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := `{"parent_id":"` + parent + `","code":"sales","name":"Sales"}`; string(raw) != want {
-		t.Errorf("body = %s, want %s", raw, want)
-	}
-}
-
-func TestRawQuery_EscapesValuesAndLeavesNamesAsWritten(t *testing.T) {
-	got := rawQuery([2]string{"code[like]", "%o%"}, [2]string{"size", "2"}, [2]string{"page", "1"})
-	if want := "code[like]=%25o%25&size=2&page=1"; got != want {
-		t.Errorf("rawQuery = %q, want %q", got, want)
-	}
-}
-
-func TestIfMatch_QuotesTheVersion(t *testing.T) {
-	h := ifMatch(3)
-	if h.Name != "If-Match" || h.Value != `"3"` {
-		t.Errorf("ifMatch(3) = %+v, want If-Match: \"3\"", h)
-	}
-}
-
-func TestIsTraceID(t *testing.T) {
-	for id, want := range map[string]bool{
-		"4bf92f3577b34da6a3ce929d0e0e4736":  true,
-		"":                                  false,
-		"4bf92f3577b34da6a3ce929d0e0e473":   false, // 31
-		"4bf92f3577b34da6a3ce929d0e0e47366": false, // 33
-		"4BF92F3577B34DA6A3CE929D0E0E4736":  false, // uppercase
-		"4bf92f3577b34da6a3ce929d0e0e473g":  false, // not hex
-		"req-4bf92f3577b34da6a3ce929d0e0e":  false, // a generated request id
-	} {
-		if got := isTraceID(id); got != want {
-			t.Errorf("isTraceID(%q) = %v, want %v", id, got, want)
-		}
+func TestCreatedCode_IsAValidOrganizationCode(t *testing.T) {
+	if !codePattern.MatchString(createdCode) {
+		t.Errorf("code %q does not match %s", createdCode, codePattern)
 	}
 }
 
@@ -72,7 +35,7 @@ func TestIsTraceID(t *testing.T) {
 // precondition so the test can check what the steps sent.
 type fakeService struct {
 	mu       sync.Mutex
-	rows     []*organization
+	rows     []*api.Organization
 	trace    string
 	requests []string
 	err      error
@@ -101,7 +64,7 @@ func newFakeService() *fakeService {
 func (f *fakeService) reseed() {
 	f.rows = nil
 	for i, row := range seededTree {
-		o := &organization{ID: fakeID(i + 1), Code: row[1], Name: row[2], Version: 1}
+		o := &api.Organization{ID: fakeID(i + 1), Code: row[1], Name: row[2], Version: 1}
 		if row[0] != "" {
 			id := f.byCode(row[0]).ID
 			o.ParentID = &id
@@ -112,7 +75,7 @@ func (f *fakeService) reseed() {
 
 func fakeID(n int) string { return fmt.Sprintf("00000000-0000-0000-0000-%012d", n) }
 
-func (f *fakeService) byCode(code string) *organization {
+func (f *fakeService) byCode(code string) *api.Organization {
 	for _, o := range f.rows {
 		if o.Code == code {
 			return o
@@ -121,7 +84,7 @@ func (f *fakeService) byCode(code string) *organization {
 	return nil
 }
 
-func (f *fakeService) byID(id string) *organization {
+func (f *fakeService) byID(id string) *api.Organization {
 	for _, o := range f.rows {
 		if o.ID == id {
 			return o
@@ -130,7 +93,7 @@ func (f *fakeService) byID(id string) *organization {
 	return nil
 }
 
-func (f *fakeService) pathOf(o *organization) string {
+func (f *fakeService) pathOf(o *api.Organization) string {
 	if o.ParentID == nil {
 		return "/" + o.Code
 	}
@@ -138,7 +101,7 @@ func (f *fakeService) pathOf(o *organization) string {
 }
 
 // view is o as the read model presents it, its path composed.
-func (f *fakeService) view(o *organization) organization {
+func (f *fakeService) view(o *api.Organization) api.Organization {
 	v := *o
 	v.Path = f.pathOf(o)
 	return v
@@ -155,7 +118,7 @@ func (f *fakeService) fail(w http.ResponseWriter, format string, args ...any) {
 
 // command checks a command's If-Match against the row's version and
 // returns the row, or nil after answering the mismatch.
-func (f *fakeService) command(w http.ResponseWriter, r *http.Request, id string) *organization {
+func (f *fakeService) command(w http.ResponseWriter, r *http.Request, id string) *api.Organization {
 	o := f.byID(id)
 	if o == nil {
 		f.fail(w, "%s %s: no row %s", r.Method, r.URL.Path, id)
@@ -188,48 +151,48 @@ func (f *fakeService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	case r.Method == http.MethodGet && r.URL.Path == "/api/traces/"+f.trace:
 		w.WriteHeader(http.StatusOK)
-	case r.Method == http.MethodPost && r.URL.Path == statePath:
+	case r.Method == http.MethodPost && r.URL.Path == api.State:
 		f.reseed()
-		writeJSON(w, http.StatusOK, map[string]string{"state": seedState})
-	case r.Method == http.MethodGet && r.URL.Path == organizationsPath:
-		items := make([]organization, 0, len(f.rows))
+		writeJSON(w, http.StatusOK, map[string]string{"state": api.SeedState})
+	case r.Method == http.MethodGet && r.URL.Path == api.Organizations:
+		items := make([]api.Organization, 0, len(f.rows))
 		for _, o := range f.rows {
 			items = append(items, f.view(o))
 		}
-		size := 20
+		size := api.DefaultPageSize
 		if r.URL.Query().Get("size") == "2" {
 			size = 2
 			items = items[:2]
 		}
-		writeJSON(w, http.StatusOK, page{Items: items, Page: 1, Size: size, Total: len(f.rows)})
-	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, organizationsPath+"/path/"):
+		writeJSON(w, http.StatusOK, api.Page{Items: items, Page: 1, Size: size, Total: len(f.rows)})
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, api.Organizations+"/path/"):
 		for _, o := range f.rows {
-			if "/"+strings.TrimPrefix(r.URL.Path, organizationsPath+"/path/") == f.pathOf(o) {
+			if "/"+strings.TrimPrefix(r.URL.Path, api.Organizations+"/path/") == f.pathOf(o) {
 				writeJSON(w, http.StatusOK, f.view(o))
 				return
 			}
 		}
 		w.WriteHeader(http.StatusNotFound)
-	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, organizationsPath+"/"):
-		o := f.byID(strings.TrimPrefix(r.URL.Path, organizationsPath+"/"))
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, api.Organizations+"/"):
+		o := f.byID(strings.TrimPrefix(r.URL.Path, api.Organizations+"/"))
 		if o == nil {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		writeJSON(w, http.StatusOK, f.view(o))
-	case r.Method == http.MethodPost && r.URL.Path == organizationsPath:
-		var body createOrganization
+	case r.Method == http.MethodPost && r.URL.Path == api.Organizations:
+		var body api.CreateOrganization
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			f.fail(w, "create: %v", err)
 			return
 		}
-		o := &organization{ID: fakeID(len(f.rows) + 1), ParentID: body.ParentID, Code: body.Code, Name: body.Name, Version: 1}
+		o := &api.Organization{ID: fakeID(len(f.rows) + 1), ParentID: body.ParentID, Code: body.Code, Name: body.Name, Version: 1}
 		f.rows = append(f.rows, o)
 		w.Header().Set("X-Request-Id", f.trace)
-		w.Header().Set("Location", organizationsPath+"/"+o.ID)
-		writeJSON(w, http.StatusCreated, identity{ID: o.ID, Version: o.Version})
+		w.Header().Set("Location", api.Organizations+"/"+o.ID)
+		writeJSON(w, http.StatusCreated, api.Identity{ID: o.ID, Version: o.Version})
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/transfer"):
-		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, organizationsPath+"/"), "/transfer")
+		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, api.Organizations+"/"), "/transfer")
 		o := f.command(w, r, id)
 		if o == nil {
 			return
@@ -243,22 +206,22 @@ func (f *fakeService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		o.ParentID = body.ParentID
 		o.Version++
-		writeJSON(w, http.StatusOK, identity{ID: o.ID, Version: o.Version})
-	case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, organizationsPath+"/"):
-		o := f.command(w, r, strings.TrimPrefix(r.URL.Path, organizationsPath+"/"))
+		writeJSON(w, http.StatusOK, api.Identity{ID: o.ID, Version: o.Version})
+	case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, api.Organizations+"/"):
+		o := f.command(w, r, strings.TrimPrefix(r.URL.Path, api.Organizations+"/"))
 		if o == nil {
 			return
 		}
-		var body editOrganization
+		var body api.EditOrganization
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			f.fail(w, "edit: %v", err)
 			return
 		}
 		o.Code, o.Name = body.Code, body.Name
 		o.Version++
-		writeJSON(w, http.StatusOK, identity{ID: o.ID, Version: o.Version})
-	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, organizationsPath+"/"):
-		o := f.command(w, r, strings.TrimPrefix(r.URL.Path, organizationsPath+"/"))
+		writeJSON(w, http.StatusOK, api.Identity{ID: o.ID, Version: o.Version})
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, api.Organizations+"/"):
+		o := f.command(w, r, strings.TrimPrefix(r.URL.Path, api.Organizations+"/"))
 		if o == nil {
 			return
 		}
@@ -269,7 +232,7 @@ func (f *fakeService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (f *fakeService) index(o *organization) int {
+func (f *fakeService) index(o *api.Organization) int {
 	for i, row := range f.rows {
 		if row == o {
 			return i
@@ -290,7 +253,7 @@ func runDomain(t *testing.T) (*fakeService, string) {
 	fake := newFakeService()
 	srv := httptest.NewServer(fake)
 	t.Cleanup(srv.Close)
-	ctx := scenario.WithEnv(context.Background(), scenario.Env{Base: srv.URL, Grafana: srv.URL, Tempo: srv.URL})
+	ctx := env.WithContext(context.Background(), env.Env{Base: srv.URL, Grafana: srv.URL, Tempo: srv.URL})
 	var out bytes.Buffer
 	err := scenario.Run(ctx, s, scenario.NewReporter(&out, false))
 	// Close waits for every handler to return, so the fake's state is read
@@ -469,7 +432,7 @@ func TestScenario_StopsAtTheServiceNeedWhenNothingListens(t *testing.T) {
 	}
 	srv := httptest.NewServer(http.NotFoundHandler())
 	srv.Close()
-	ctx := scenario.WithEnv(context.Background(), scenario.Env{Base: srv.URL, Grafana: srv.URL, Tempo: srv.URL})
+	ctx := env.WithContext(context.Background(), env.Env{Base: srv.URL, Grafana: srv.URL, Tempo: srv.URL})
 	var out bytes.Buffer
 	err := scenario.Run(ctx, s, scenario.NewReporter(&out, false))
 	if err == nil {
@@ -494,7 +457,7 @@ func TestScenario_StopsAtTheGrafanaNeedWhenOnlyTheServiceAnswers(t *testing.T) {
 	t.Cleanup(service.Close)
 	grafana := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }))
 	t.Cleanup(grafana.Close)
-	ctx := scenario.WithEnv(context.Background(), scenario.Env{Base: service.URL, Grafana: grafana.URL, Tempo: grafana.URL})
+	ctx := env.WithContext(context.Background(), env.Env{Base: service.URL, Grafana: grafana.URL, Tempo: grafana.URL})
 	var out bytes.Buffer
 	err := scenario.Run(ctx, s, scenario.NewReporter(&out, false))
 	if err == nil || !strings.Contains(err.Error(), `need "Grafana"`) {

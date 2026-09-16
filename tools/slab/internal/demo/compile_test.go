@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/standards-lab/go-web-service/tools/slab/internal/cli"
+	"github.com/standards-lab/go-web-service/tools/slab/internal/env"
 	"github.com/standards-lab/go-web-service/tools/slab/internal/scenario"
 )
 
@@ -60,7 +61,7 @@ func TestScenario_NarratesFourStepsOverTheCheckout(t *testing.T) {
 }
 
 func TestScenario_StopsAtTheFirstStepWhenTheRepoIsNotARoot(t *testing.T) {
-	ctx := scenario.WithEnv(context.Background(), scenario.Env{Repo: t.TempDir()})
+	ctx := env.WithContext(context.Background(), env.Env{Repo: t.TempDir()})
 	out, err := run(t, ctx)
 	if err == nil {
 		t.Fatalf("run succeeded with a --repo that is no repository:\n%s", out)

@@ -3,6 +3,7 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
+	"github.com/standards-lab/go-web-service/tools/slab/internal/env"
 	"github.com/standards-lab/go-web-service/tools/slab/internal/scenario"
 )
 
@@ -29,7 +30,7 @@ func scenarioCommand(opts *options, s scenario.Scenario) *cobra.Command {
 		Short: s.Summary,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := scenario.WithEnv(cmd.Context(), opts.env())
+			ctx := env.WithContext(cmd.Context(), opts.runEnv())
 			r := scenario.NewReporter(cmd.OutOrStdout(), scenario.ColorEnabled(opts.noColor))
 			return scenario.Run(ctx, s, r)
 		},

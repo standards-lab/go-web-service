@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/standards-lab/go-web-service/tools/slab/internal/scenario"
+	"github.com/standards-lab/go-web-service/tools/slab/internal/env"
 )
 
 // options are the root command's persistent flags after parsing.
@@ -20,8 +20,8 @@ type options struct {
 	noColor bool
 }
 
-func (o *options) env() scenario.Env {
-	return scenario.Env{Base: o.base, Grafana: o.grafana, Tempo: o.tempo, Repo: o.repo}
+func (o *options) runEnv() env.Env {
+	return env.Env{Base: o.base, Grafana: o.grafana, Tempo: o.tempo, Repo: o.repo}
 }
 
 // Root builds the command tree. Each call builds a fresh tree over the

@@ -7,11 +7,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/standards-lab/go-web-service/tools/slab/internal/scenario"
+	"github.com/standards-lab/go-web-service/tools/slab/internal/env"
 )
 
 // Module is the module path the repository root's go.mod declares. slab is
@@ -26,7 +27,7 @@ var ErrNotFound = errors.New("repo: no go.mod declaring " + Module)
 // when one was given, checked to be a root, or else the nearest ancestor of
 // the working directory whose go.mod declares Module.
 func Root(ctx context.Context) (string, error) {
-	if override := scenario.EnvFrom(ctx).Repo; override != "" {
+	if override := env.FromContext(ctx).Repo; override != "" {
 		dir, err := filepath.Abs(override)
 		if err != nil {
 			return "", fmt.Errorf("repo: --repo %q: %w", override, err)
@@ -45,6 +46,16 @@ func Root(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("repo: %w", err)
 	}
 	return Find(wd)
+}
+
+// FS returns the repository root Root resolves as a filesystem, the form a
+// scenario reads the service's sources and seeds through.
+func FS(ctx context.Context) (fs.FS, error) {
+	root, err := Root(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return os.DirFS(root), nil
 }
 
 // Find walks up from dir to the filesystem root and returns the first

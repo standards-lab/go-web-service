@@ -9,8 +9,15 @@ import (
 
 	"github.com/standards-lab/go-web-sdk"
 
+	"github.com/standards-lab/go-web-service/tools/slab/internal/env"
 	"github.com/standards-lab/go-web-service/tools/slab/internal/httpx"
 )
+
+// withBase returns a context carrying base as the env's service base URL,
+// the only field Live reads.
+func withBase(ctx context.Context, base string) context.Context {
+	return env.WithContext(ctx, env.Env{Base: base})
+}
 
 func TestLive(t *testing.T) {
 	ctx := context.Background()
@@ -22,7 +29,7 @@ func TestLive(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		}))
 		t.Cleanup(srv.Close)
-		if err := httpx.Live(ctx, srv.URL); err != nil {
+		if err := httpx.Live(withBase(ctx, srv.URL)); err != nil {
 			t.Fatalf("Live = %v, want nil", err)
 		}
 		if gotPath != web.HealthPath {
@@ -35,7 +42,7 @@ func TestLive(t *testing.T) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}))
 		t.Cleanup(srv.Close)
-		err := httpx.Live(ctx, srv.URL)
+		err := httpx.Live(withBase(ctx, srv.URL))
 		if err == nil || !strings.Contains(err.Error(), "503") {
 			t.Fatalf("Live = %v, want a 503 error", err)
 		}
@@ -44,7 +51,7 @@ func TestLive(t *testing.T) {
 	t.Run("nothing listening is not live", func(t *testing.T) {
 		srv := httptest.NewServer(http.NotFoundHandler())
 		srv.Close()
-		if err := httpx.Live(ctx, srv.URL); err == nil {
+		if err := httpx.Live(withBase(ctx, srv.URL)); err == nil {
 			t.Fatal("Live = nil, want a transport error")
 		}
 	})
@@ -54,9 +61,9 @@ func TestLive(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		}))
 		t.Cleanup(srv.Close)
-		cancelled, cancel := context.WithCancel(ctx)
+		cancelled, cancel := context.WithCancel(withBase(ctx, srv.URL))
 		cancel()
-		if err := httpx.Live(cancelled, srv.URL); err == nil {
+		if err := httpx.Live(cancelled); err == nil {
 			t.Fatal("Live = nil, want a context error")
 		}
 	})

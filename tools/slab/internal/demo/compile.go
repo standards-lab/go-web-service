@@ -2,14 +2,14 @@
 // mechanism in process over the service's own sources on disk with nothing
 // running, and domain, which runs the organization domain's full CRUD
 // surface against the running service, reseeded from a known fixture each
-// run.
+// run. Each file is one scenario: its literal and the step methods that run
+// it. What two scenarios share lives in the packages under internal.
 package demo
 
 import (
 	"context"
 	"fmt"
 	"io/fs"
-	"os"
 	"path"
 	"strings"
 
@@ -18,6 +18,7 @@ import (
 
 	"github.com/standards-lab/go-web-service/tools/slab/internal/repo"
 	"github.com/standards-lab/go-web-service/tools/slab/internal/scenario"
+	"github.com/standards-lab/go-web-service/tools/slab/internal/statement"
 )
 
 // The sources the scenario reads, relative to the repository root, are one
@@ -28,7 +29,7 @@ const (
 	patternsDir   = "data/patterns"
 	pattern       = "identity"
 	statementsDir = "domain/organization/statements"
-	statement     = "create"
+	statementName = "create"
 )
 
 func init() {
@@ -51,18 +52,18 @@ func compileScenario() scenario.Scenario {
 		Steps: []scenario.Step{
 			{Intent: "Write a pattern", Action: s.writePattern},
 			{Intent: "Write a statement", Action: s.writeStatement},
-			{Intent: "Catalog registration", Action: s.register},
+			{Intent: "Catalog registration", Action: s.registerCatalog},
 			{Intent: "Show the compiled output", Action: s.showCompiled},
 		},
 	}
 }
 
 func (s *state) writePattern(ctx context.Context, r *scenario.Reporter) error {
-	root, err := repo.Root(ctx)
+	fsys, err := repo.FS(ctx)
 	if err != nil {
 		return err
 	}
-	s.fsys = os.DirFS(root)
+	s.fsys = fsys
 	file := path.Join(patternsDir, pattern+".sql")
 	text, err := fs.ReadFile(s.fsys, file)
 	if err != nil {
@@ -73,7 +74,7 @@ func (s *state) writePattern(ctx context.Context, r *scenario.Reporter) error {
 }
 
 func (s *state) writeStatement(_ context.Context, r *scenario.Reporter) error {
-	file := path.Join(statementsDir, statement+".sql")
+	file := path.Join(statementsDir, statementName+".sql")
 	text, err := fs.ReadFile(s.fsys, file)
 	if err != nil {
 		return err
@@ -83,7 +84,7 @@ func (s *state) writeStatement(_ context.Context, r *scenario.Reporter) error {
 	return nil
 }
 
-func (s *state) register(_ context.Context, r *scenario.Reporter) error {
+func (s *state) registerCatalog(_ context.Context, r *scenario.Reporter) error {
 	r.SQL(fmt.Sprintf("The pattern registered under the %q namespace", appNamespace),
 		fmt.Sprintf("query.NewCatalog(query.Patterns(), query.Publish(%q, fsys, %q))", appNamespace, patternsDir))
 	catalog, err := query.NewCatalog(query.Patterns(), query.Publish(appNamespace, s.fsys, patternsDir))
@@ -102,36 +103,16 @@ func (s *state) register(_ context.Context, r *scenario.Reporter) error {
 }
 
 func (s *state) showCompiled(_ context.Context, r *scenario.Reporter) error {
-	st, err := find(s.stmts, statement)
+	st, err := statement.Find(s.stmts, statementName)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w from %s", err, statementsDir)
 	}
 	text := st.Text()
 	if strings.Contains(text, "{{") {
-		return fmt.Errorf("%s: a {{ marker survived compilation:\n%s", statement, text)
+		return fmt.Errorf("%s: a {{ marker survived compilation:\n%s", statementName, text)
 	}
-	r.SQL(statement+", compiled for execution by postgres", text)
-	r.Table("Placeholders, in position order", placeholderRows(postgres.Dialect{}.Placeholder, st.Params()))
+	r.SQL(statementName+", compiled for execution by postgres", text)
+	r.Table("Placeholders, in position order", statement.Placeholders(postgres.Dialect{}.Placeholder, st.Params()))
 	r.Note("Compile splices the included pattern and rewrites each parameter to postgres's $n placeholder, numbered in first-occurrence order. The :uuid on parent_id became the CAST around its placeholder.")
 	return nil
-}
-
-// placeholderRows maps each parameter to the placeholder its position renders.
-func placeholderRows(placeholder func(int) string, names []string) [][2]string {
-	rows := make([][2]string, len(names))
-	for i, name := range names {
-		rows[i] = [2]string{placeholder(i + 1), name}
-	}
-	return rows
-}
-
-// find returns the statement named name from stmts, as an error rather than
-// the panic Statements.Statement reserves for a constructor's defect.
-func find(stmts *query.Statements, name string) (query.Statement, error) {
-	for _, st := range stmts.Statements() {
-		if st.Name() == name {
-			return st, nil
-		}
-	}
-	return query.Statement{}, fmt.Errorf("no statement %q compiled from %s", name, statementsDir)
 }

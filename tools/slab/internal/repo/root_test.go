@@ -3,13 +3,14 @@ package repo_test
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/standards-lab/go-web-service/tools/slab/internal/env"
 	"github.com/standards-lab/go-web-service/tools/slab/internal/repo"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/scenario"
 )
 
 // tree builds a fake checkout: the root's go.mod declaring the module, and a
@@ -74,7 +75,7 @@ func TestFind_ReportsNotFoundAboveADirectoryWithNoRoot(t *testing.T) {
 
 func TestRoot_UsesTheOverride(t *testing.T) {
 	root, _ := tree(t)
-	ctx := scenario.WithEnv(context.Background(), scenario.Env{Repo: root})
+	ctx := env.WithContext(context.Background(), env.Env{Repo: root})
 	got, err := repo.Root(ctx)
 	if err != nil {
 		t.Fatalf("Root with --repo %s: %v", root, err)
@@ -86,13 +87,37 @@ func TestRoot_UsesTheOverride(t *testing.T) {
 
 func TestRoot_RejectsAnOverrideThatIsNotTheRoot(t *testing.T) {
 	_, nested := tree(t)
-	ctx := scenario.WithEnv(context.Background(), scenario.Env{Repo: nested})
+	ctx := env.WithContext(context.Background(), env.Env{Repo: nested})
 	if _, err := repo.Root(ctx); err == nil {
 		t.Errorf("Root accepted --repo %s, which declares no go.mod", nested)
 	}
-	ctx = scenario.WithEnv(context.Background(), scenario.Env{Repo: filepath.Join(nested, "..", "..")})
+	ctx = env.WithContext(context.Background(), env.Env{Repo: filepath.Join(nested, "..", "..")})
 	if _, err := repo.Root(ctx); err == nil {
 		t.Error("Root accepted --repo tools/slab, whose go.mod declares another module")
+	}
+}
+
+func TestFS_ReadsUnderTheRoot(t *testing.T) {
+	root, _ := tree(t)
+	write(t, filepath.Join(root, "data", "seeds", "default.json"), "{}")
+	ctx := env.WithContext(context.Background(), env.Env{Repo: root})
+	fsys, err := repo.FS(ctx)
+	if err != nil {
+		t.Fatalf("FS: %v", err)
+	}
+	text, err := fs.ReadFile(fsys, "data/seeds/default.json")
+	if err != nil {
+		t.Fatalf("ReadFile through FS: %v", err)
+	}
+	if string(text) != "{}" {
+		t.Errorf("read %q, want {}", text)
+	}
+}
+
+func TestFS_FailsWhereRootFails(t *testing.T) {
+	ctx := env.WithContext(context.Background(), env.Env{Repo: t.TempDir()})
+	if _, err := repo.FS(ctx); err == nil {
+		t.Error("FS accepted --repo pointing at a directory with no go.mod")
 	}
 }
 

@@ -1,9 +1,11 @@
 // Package demo holds the narrated scenarios: sqlate, which runs a library's
 // mechanism in process over the service's own sources on disk with nothing
-// running, and domain, which runs the organization domain's full CRUD
-// surface against the running service, reseeded from a known fixture each
-// run. Each file is one scenario: its literal and the step methods that run
-// it. What two scenarios share lives in the packages under internal.
+// running; domain, which runs the organization domain's full CRUD surface
+// against the running service, reseeded from a known fixture each run; and
+// problems, which sends the running service one request per error
+// condition it answers with a problem document. Each file is one scenario:
+// its literal and the step methods that run it. What two scenarios share
+// lives in the packages under internal.
 package demo
 
 import (

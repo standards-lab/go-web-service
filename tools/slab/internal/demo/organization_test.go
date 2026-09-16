@@ -3,7 +3,9 @@ package demo
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +13,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"uuid"
+
+	"github.com/standards-lab/go-web-sdk"
 
 	"github.com/standards-lab/go-web-service/tools/slab/internal/api"
 	"github.com/standards-lab/go-web-service/tools/slab/internal/cli"
@@ -30,18 +35,58 @@ func TestCreatedCode_IsAValidOrganizationCode(t *testing.T) {
 
 // fakeService stands in for the service, Tempo, and Grafana on one
 // listener: the routes do not overlap. It holds the organization tree in
-// memory, reseeds it on the admin reset, checks every command's If-Match
-// against the row's version, and records each request's line and
-// precondition so the test can check what the steps sent.
+// memory, reseeds it on the admin reset, and records each request's line
+// and precondition so the test can check what the steps sent.
+//
+// Each route makes the checks the real handler makes, in the real order,
+// and a rejection is the problem document the real service would write:
+// the SDK's own parsers reject a path id, a query, a body, and an If-Match
+// header, and the fake's own vocabulary stands in for the domain's and the
+// store's, mapped to statuses the way domain/organization's status and
+// data's Status map them. Every response carries the trace id in
+// X-Request-Id, as the service's request-id middleware does.
 type fakeService struct {
 	mu       sync.Mutex
 	rows     []*api.Organization
 	trace    string
+	problems *web.ErrorWriter
 	requests []string
 	err      error
 }
 
 const fakeTrace = "4bf92f3577b34da6a3ce929d0e0e4736"
+
+// fakeMaxPageSize is the largest size a list request may ask for:
+// internal/config/reads.go's defaultReadsMaxSize.
+const fakeMaxPageSize = 100
+
+// The fake's error vocabulary: the domain's validation and cycle errors, the
+// path parser's, and the store's stale version and constraint violation,
+// with the wording the real ones carry. An absent row is sql.ErrNoRows, as
+// the store returns it.
+var (
+	errPathID     = errors.New("must be a UUID")
+	errValidation = errors.New("invalid command")
+	errCycle      = errors.New("transfer would create a cycle")
+	errStale      = errors.New("version mismatch")
+	errConstraint = errors.New("constraint violation")
+)
+
+// fakeStatus maps the fake's vocabulary to statuses as the service's two
+// matchers do. The SDK's own errors map themselves ahead of it.
+func fakeStatus(err error) (web.Problem, bool) {
+	switch {
+	case errors.Is(err, errPathID), errors.Is(err, errValidation):
+		return web.Problem{Status: http.StatusBadRequest}, true
+	case errors.Is(err, sql.ErrNoRows):
+		return web.Problem{Status: http.StatusNotFound}, true
+	case errors.Is(err, errCycle), errors.Is(err, errConstraint):
+		return web.Problem{Status: http.StatusConflict}, true
+	case errors.Is(err, errStale):
+		return web.Problem{Status: http.StatusPreconditionFailed}, true
+	}
+	return web.Problem{}, false
+}
 
 // seededTree is data/seeds/default.json as the fake holds it: parent code,
 // code, name, in file order.
@@ -56,7 +101,7 @@ var seededTree = [][3]string{
 }
 
 func newFakeService() *fakeService {
-	f := &fakeService{trace: fakeTrace}
+	f := &fakeService{trace: fakeTrace, problems: web.NewErrorWriter(fakeStatus)}
 	f.reseed()
 	return f
 }
@@ -107,28 +152,14 @@ func (f *fakeService) view(o *api.Organization) api.Organization {
 	return v
 }
 
-// fail records the first defect in what the scenario sent, for the test to
-// report, and answers it with 400.
+// fail records a request no route answers, for the test to report, and
+// answers it with 400 and no body: a scenario's own mistake, not a problem
+// the service would write.
 func (f *fakeService) fail(w http.ResponseWriter, format string, args ...any) {
 	if f.err == nil {
 		f.err = fmt.Errorf(format, args...)
 	}
 	w.WriteHeader(http.StatusBadRequest)
-}
-
-// command checks a command's If-Match against the row's version and
-// returns the row, or nil after answering the mismatch.
-func (f *fakeService) command(w http.ResponseWriter, r *http.Request, id string) *api.Organization {
-	o := f.byID(id)
-	if o == nil {
-		f.fail(w, "%s %s: no row %s", r.Method, r.URL.Path, id)
-		return nil
-	}
-	if want := fmt.Sprintf(`"%d"`, o.Version); r.Header.Get("If-Match") != want {
-		f.fail(w, "%s %s: If-Match %q, want %s", r.Method, r.URL.Path, r.Header.Get("If-Match"), want)
-		return nil
-	}
-	return o
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -146,6 +177,17 @@ func (f *fakeService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	f.requests = append(f.requests, line)
 
+	w.Header().Set("X-Request-Id", f.trace)
+	r = r.WithContext(web.WithRequestID(r.Context(), f.trace))
+	if err := f.route(w, r); err != nil {
+		_ = f.problems.Write(w, r, err)
+	}
+}
+
+// route dispatches r to the handler for its method and path, the way the
+// service's router does. A handler's error is the problem the response
+// reports.
+func (f *fakeService) route(w http.ResponseWriter, r *http.Request) error {
 	switch {
 	case r.Method == http.MethodGet && (r.URL.Path == "/healthz" || r.URL.Path == "/api/health"):
 		w.WriteHeader(http.StatusOK)
@@ -155,81 +197,220 @@ func (f *fakeService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.reseed()
 		writeJSON(w, http.StatusOK, map[string]string{"state": api.SeedState})
 	case r.Method == http.MethodGet && r.URL.Path == api.Organizations:
-		items := make([]api.Organization, 0, len(f.rows))
-		for _, o := range f.rows {
-			items = append(items, f.view(o))
-		}
-		size := api.DefaultPageSize
-		if r.URL.Query().Get("size") == "2" {
-			size = 2
-			items = items[:2]
-		}
-		writeJSON(w, http.StatusOK, api.Page{Items: items, Page: 1, Size: size, Total: len(f.rows)})
+		return f.list(w, r)
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, api.Organizations+"/path/"):
 		for _, o := range f.rows {
 			if "/"+strings.TrimPrefix(r.URL.Path, api.Organizations+"/path/") == f.pathOf(o) {
 				writeJSON(w, http.StatusOK, f.view(o))
-				return
+				return nil
 			}
 		}
-		w.WriteHeader(http.StatusNotFound)
+		return sql.ErrNoRows
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, api.Organizations+"/"):
-		o := f.byID(strings.TrimPrefix(r.URL.Path, api.Organizations+"/"))
-		if o == nil {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		writeJSON(w, http.StatusOK, f.view(o))
+		return f.find(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == api.Organizations:
-		var body api.CreateOrganization
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			f.fail(w, "create: %v", err)
-			return
-		}
-		o := &api.Organization{ID: fakeID(len(f.rows) + 1), ParentID: body.ParentID, Code: body.Code, Name: body.Name, Version: 1}
-		f.rows = append(f.rows, o)
-		w.Header().Set("X-Request-Id", f.trace)
-		w.Header().Set("Location", api.Organizations+"/"+o.ID)
-		writeJSON(w, http.StatusCreated, api.Identity{ID: o.ID, Version: o.Version})
+		return f.create(w, r)
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/transfer"):
-		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, api.Organizations+"/"), "/transfer")
-		o := f.command(w, r, id)
-		if o == nil {
-			return
-		}
-		var body struct {
-			ParentID *string `json:"parent_id"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			f.fail(w, "transfer: %v", err)
-			return
-		}
-		o.ParentID = body.ParentID
-		o.Version++
-		writeJSON(w, http.StatusOK, api.Identity{ID: o.ID, Version: o.Version})
+		return f.transfer(w, r)
 	case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, api.Organizations+"/"):
-		o := f.command(w, r, strings.TrimPrefix(r.URL.Path, api.Organizations+"/"))
-		if o == nil {
-			return
-		}
-		var body api.EditOrganization
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			f.fail(w, "edit: %v", err)
-			return
-		}
-		o.Code, o.Name = body.Code, body.Name
-		o.Version++
-		writeJSON(w, http.StatusOK, api.Identity{ID: o.ID, Version: o.Version})
+		return f.edit(w, r)
 	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, api.Organizations+"/"):
-		o := f.command(w, r, strings.TrimPrefix(r.URL.Path, api.Organizations+"/"))
-		if o == nil {
-			return
-		}
-		f.rows = append(f.rows[:f.index(o)], f.rows[f.index(o)+1:]...)
-		w.WriteHeader(http.StatusNoContent)
+		return f.delete(w, r)
 	default:
-		f.fail(w, "unexpected request %s", line)
+		f.fail(w, "unexpected request %s %s", r.Method, r.URL.RequestURI())
 	}
+	return nil
+}
+
+// pathID reads the {id} segment of r's path and parses it as a UUID, the
+// check sdk.PathID makes, with its wording.
+func pathID(r *http.Request) (string, error) {
+	raw := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, api.Organizations+"/"), "/transfer")
+	if _, err := uuid.Parse(raw); err != nil {
+		return "", fmt.Errorf("path id=%q: %w", raw, errPathID)
+	}
+	return raw, nil
+}
+
+// command reads a guarded command's three inputs in the order sdk.Command
+// does: the path id, the If-Match version, and the body, strictly decoded
+// and bounded at the command body limit.
+func command[T any](w http.ResponseWriter, r *http.Request) (id string, version int64, body T, err error) {
+	if id, err = pathID(r); err != nil {
+		return "", 0, body, err
+	}
+	if version, err = web.IfMatch(r); err != nil {
+		return "", 0, body, err
+	}
+	if body, err = web.DecodeJSON[T](w, r, api.MaxCommandBody); err != nil {
+		return "", 0, body, err
+	}
+	return id, version, body, nil
+}
+
+// validate is the create and edit commands' own rules, with the wording
+// domain/organization's validCode and validName carry.
+func validate(code, name string) error {
+	if !codePattern.MatchString(code) {
+		return fmt.Errorf("%w: code must be lowercase words joined by single hyphens", errValidation)
+	}
+	if name == "" {
+		return fmt.Errorf("%w: name must not be empty", errValidation)
+	}
+	return nil
+}
+
+// guard is the store's version guard: the row at id, at version, or the
+// error the guard returns when there is no such row or it is at another
+// version.
+func (f *fakeService) guard(id string, version int64) (*api.Organization, error) {
+	o := f.byID(id)
+	if o == nil {
+		return nil, sql.ErrNoRows
+	}
+	if o.Version != version {
+		return nil, fmt.Errorf("%w: expected %d, current %d", errStale, version, o.Version)
+	}
+	return o, nil
+}
+
+// list parses the query as the handler does and pages the rows by it. The
+// filters are not applied: no test reads the queried list's items.
+func (f *fakeService) list(w http.ResponseWriter, r *http.Request) error {
+	q, err := web.ParseQuery(r.URL.Query(), web.Limits{DefaultSize: api.DefaultPageSize, MaxSize: fakeMaxPageSize})
+	if err != nil {
+		return err
+	}
+	items := make([]api.Organization, 0, len(f.rows))
+	for _, o := range f.rows {
+		items = append(items, f.view(o))
+	}
+	start := min((q.Page-1)*q.Size, len(items))
+	end := min(start+q.Size, len(items))
+	writeJSON(w, http.StatusOK, api.Page{Items: items[start:end], Page: q.Page, Size: q.Size, Total: len(f.rows)})
+	return nil
+}
+
+func (f *fakeService) find(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r)
+	if err != nil {
+		return err
+	}
+	o := f.byID(id)
+	if o == nil {
+		return sql.ErrNoRows
+	}
+	writeJSON(w, http.StatusOK, f.view(o))
+	return nil
+}
+
+// create decodes and validates the body, then makes the store's two checks
+// as the schema's constraints would: the parent must exist (the foreign
+// key) and no sibling may carry the code (the unique constraint, null
+// parents equal).
+func (f *fakeService) create(w http.ResponseWriter, r *http.Request) error {
+	body, err := web.DecodeJSON[api.CreateOrganization](w, r, api.MaxCommandBody)
+	if err != nil {
+		return err
+	}
+	if err := validate(body.Code, body.Name); err != nil {
+		return err
+	}
+	if body.ParentID != nil && f.byID(*body.ParentID) == nil {
+		return fmt.Errorf("%w: parent %s does not exist", errConstraint, *body.ParentID)
+	}
+	for _, o := range f.rows {
+		if o.Code == body.Code && sameParent(o.ParentID, body.ParentID) {
+			return fmt.Errorf("%w: code %q exists under the same parent", errConstraint, body.Code)
+		}
+	}
+	o := &api.Organization{ID: fakeID(len(f.rows) + 1), ParentID: body.ParentID, Code: body.Code, Name: body.Name, Version: 1}
+	f.rows = append(f.rows, o)
+	w.Header().Set("Location", api.Organizations+"/"+o.ID)
+	writeJSON(w, http.StatusCreated, api.Identity{ID: o.ID, Version: o.Version})
+	return nil
+}
+
+func sameParent(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func (f *fakeService) edit(w http.ResponseWriter, r *http.Request) error {
+	id, version, body, err := command[api.EditOrganization](w, r)
+	if err != nil {
+		return err
+	}
+	if err := validate(body.Code, body.Name); err != nil {
+		return err
+	}
+	o, err := f.guard(id, version)
+	if err != nil {
+		return err
+	}
+	o.Code, o.Name = body.Code, body.Name
+	o.Version++
+	writeJSON(w, http.StatusOK, api.Identity{ID: o.ID, Version: o.Version})
+	return nil
+}
+
+// transfer checks the destination against the subtree before the guard,
+// as the store does under the tree lock.
+func (f *fakeService) transfer(w http.ResponseWriter, r *http.Request) error {
+	type transferOrganization struct {
+		ParentID *string `json:"parent_id"`
+	}
+	id, version, body, err := command[transferOrganization](w, r)
+	if err != nil {
+		return err
+	}
+	if body.ParentID != nil {
+		for p := f.byID(*body.ParentID); p != nil; p = f.parentOf(p) {
+			if p.ID == id {
+				return fmt.Errorf("%w: %s is in the subtree of %s", errCycle, *body.ParentID, id)
+			}
+		}
+	}
+	o, err := f.guard(id, version)
+	if err != nil {
+		return err
+	}
+	o.ParentID = body.ParentID
+	o.Version++
+	writeJSON(w, http.StatusOK, api.Identity{ID: o.ID, Version: o.Version})
+	return nil
+}
+
+func (f *fakeService) parentOf(o *api.Organization) *api.Organization {
+	if o.ParentID == nil {
+		return nil
+	}
+	return f.byID(*o.ParentID)
+}
+
+func (f *fakeService) delete(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r)
+	if err != nil {
+		return err
+	}
+	version, err := web.IfMatch(r)
+	if err != nil {
+		return err
+	}
+	o, err := f.guard(id, version)
+	if err != nil {
+		return err
+	}
+	for _, child := range f.rows {
+		if child.ParentID != nil && *child.ParentID == id {
+			return fmt.Errorf("%w: %s has children", errConstraint, id)
+		}
+	}
+	f.rows = append(f.rows[:f.index(o)], f.rows[f.index(o)+1:]...)
+	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 func (f *fakeService) index(o *api.Organization) int {
@@ -241,14 +422,20 @@ func (f *fakeService) index(o *api.Organization) int {
 	return -1
 }
 
-// runDomain runs the domain scenario against a fake of the service, Tempo,
-// and Grafana, from the working directory under the repository (so the
-// reset step reads the real seed file), and returns the narration.
+// runDomain runs the domain scenario against the fake.
 func runDomain(t *testing.T) (*fakeService, string) {
 	t.Helper()
-	s, ok := scenario.Lookup("domain")
+	return runScenario(t, "domain")
+}
+
+// runScenario runs the named scenario against a fake of the service, Tempo,
+// and Grafana, from the working directory under the repository (so the
+// reset step reads the real seed file), and returns the narration.
+func runScenario(t *testing.T, name string) (*fakeService, string) {
+	t.Helper()
+	s, ok := scenario.Lookup(name)
 	if !ok {
-		t.Fatal("domain is not registered")
+		t.Fatalf("%s is not registered", name)
 	}
 	fake := newFakeService()
 	srv := httptest.NewServer(fake)
@@ -478,7 +665,7 @@ func TestList_ShowsTheScenarioWithItsFourNeeds(t *testing.T) {
 		t.Fatalf("list: %v", err)
 	}
 	for _, want := range []string{
-		"domain  The organization domain's full CRUD surface against the running service",
+		"domain    The organization domain's full CRUD surface against the running service",
 		"needs postgres (mise run db-up)",
 		"needs the observability profile (mise run otel-up)",
 		"needs the service (mise run serve)",

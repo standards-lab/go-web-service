@@ -80,7 +80,7 @@ func TestList_ShowsTheScenarioWithNoNeeds(t *testing.T) {
 	if err := root.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	summary := "sqlate  One pattern, one statement that includes it, the two calls that register them, and the compiled result (no compose stack needed)"
+	summary := "sqlate    One pattern, one statement that includes it, the two calls that register them, and the compiled result (no compose stack needed)"
 	lines := strings.Split(out.String(), "\n")
 	at := slices.IndexFunc(lines, func(line string) bool { return strings.Contains(line, summary) })
 	if at < 0 {

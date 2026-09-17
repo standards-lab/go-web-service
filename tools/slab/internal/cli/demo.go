@@ -3,8 +3,8 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/standards-lab/go-web-service/tools/slab/internal/env"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/scenario"
+	"github.com/standards-lab/go-web-service/tools/slab/env"
+	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 
 // demoCommand builds demo with one subcommand per registered scenario, named

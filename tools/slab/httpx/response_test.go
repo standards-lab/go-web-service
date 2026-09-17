@@ -7,7 +7,7 @@ import (
 
 	"github.com/standards-lab/go-web-sdk"
 
-	"github.com/standards-lab/go-web-service/tools/slab/internal/httpx"
+	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 )
 
 func TestResponseTraceID(t *testing.T) {

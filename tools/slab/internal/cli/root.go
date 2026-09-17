@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/standards-lab/go-web-service/tools/slab/internal/env"
+	"github.com/standards-lab/go-web-service/tools/slab/env"
 )
 
 // options are the root command's persistent flags after parsing.

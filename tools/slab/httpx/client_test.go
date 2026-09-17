@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/standards-lab/go-web-service/tools/slab/internal/httpx"
+	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 )
 
 // echo answers every request with a JSON record of what it received.

@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/pflag"
 
+	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/internal/cli"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/env"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/scenario"
+	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 
 // Two stubs stand in for real scenarios: the registry is package state, so

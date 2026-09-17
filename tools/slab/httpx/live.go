@@ -8,7 +8,7 @@ import (
 
 	"github.com/standards-lab/go-web-sdk"
 
-	"github.com/standards-lab/go-web-service/tools/slab/internal/env"
+	"github.com/standards-lab/go-web-service/tools/slab/env"
 )
 
 // probe is the client Live polls with: a short timeout, so a service that

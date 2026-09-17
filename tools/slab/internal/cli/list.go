@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/standards-lab/go-web-service/tools/slab/internal/scenario"
+	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 
 func listCommand() *cobra.Command {

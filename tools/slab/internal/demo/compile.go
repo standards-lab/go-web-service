@@ -18,9 +18,9 @@ import (
 	"github.com/standards-lab/sqlate/postgres"
 	"github.com/standards-lab/sqlate/query"
 
-	"github.com/standards-lab/go-web-service/tools/slab/internal/repo"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/scenario"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/statement"
+	"github.com/standards-lab/go-web-service/tools/slab/repo"
+	"github.com/standards-lab/go-web-service/tools/slab/scenario"
+	"github.com/standards-lab/go-web-service/tools/slab/statement"
 )
 
 // The sources the scenario reads, relative to the repository root, are one

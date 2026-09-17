@@ -9,7 +9,7 @@ import (
 	"github.com/standards-lab/sqlate/postgres"
 	"github.com/standards-lab/sqlate/query"
 
-	"github.com/standards-lab/go-web-service/tools/slab/internal/statement"
+	"github.com/standards-lab/go-web-service/tools/slab/statement"
 )
 
 // compiled builds a two-statement set over an in-memory directory.

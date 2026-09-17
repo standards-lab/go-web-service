@@ -17,10 +17,10 @@ import (
 
 	"github.com/standards-lab/go-web-sdk"
 
+	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/internal/api"
 	"github.com/standards-lab/go-web-service/tools/slab/internal/cli"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/env"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/scenario"
+	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 
 // codePattern is the layer's code rule, domain/organization's codePattern,

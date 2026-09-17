@@ -3,7 +3,7 @@ package httpx_test
 import (
 	"testing"
 
-	"github.com/standards-lab/go-web-service/tools/slab/internal/httpx"
+	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 )
 
 func TestRawQuery_EscapesValuesAndLeavesNamesAsWritten(t *testing.T) {

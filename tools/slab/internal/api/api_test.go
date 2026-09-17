@@ -11,10 +11,10 @@ import (
 
 	"github.com/standards-lab/go-web-sdk"
 
+	"github.com/standards-lab/go-web-service/tools/slab/env"
+	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 	"github.com/standards-lab/go-web-service/tools/slab/internal/api"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/env"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/httpx"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/scenario"
+	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 
 func TestCreateOrganization_MarshalsUnderTheServiceFieldNames(t *testing.T) {

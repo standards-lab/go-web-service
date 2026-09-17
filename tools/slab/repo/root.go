@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/standards-lab/go-web-service/tools/slab/internal/env"
+	"github.com/standards-lab/go-web-service/tools/slab/env"
 )
 
 // Module is the module path the repository root's go.mod declares. slab is

@@ -9,8 +9,8 @@ import (
 
 	"github.com/standards-lab/go-web-sdk"
 
-	"github.com/standards-lab/go-web-service/tools/slab/internal/env"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/httpx"
+	"github.com/standards-lab/go-web-service/tools/slab/env"
+	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 )
 
 // withBase returns a context carrying base as the env's service base URL,

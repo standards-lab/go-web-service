@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/standards-lab/go-web-service/tools/slab/internal/env"
+	"github.com/standards-lab/go-web-service/tools/slab/env"
 )
 
 func TestFromContext_RoundTripsWhatWithContextCarried(t *testing.T) {

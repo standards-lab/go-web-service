@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/standards-lab/go-web-service/tools/slab/internal/httpx"
+	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 )
 
 var ansi = regexp.MustCompile("\x1b\\[[0-9;]*m")

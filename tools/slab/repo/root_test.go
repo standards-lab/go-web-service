@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/standards-lab/go-web-service/tools/slab/internal/env"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/repo"
+	"github.com/standards-lab/go-web-service/tools/slab/env"
+	"github.com/standards-lab/go-web-service/tools/slab/repo"
 )
 
 // tree builds a fake checkout: the root's go.mod declaring the module, and a

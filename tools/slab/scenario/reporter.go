@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/standards-lab/go-web-service/tools/slab/internal/httpx"
+	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 )
 
 // Reporter is the observation channels every scenario narrates through. Each

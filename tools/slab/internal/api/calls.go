@@ -8,9 +8,9 @@ import (
 	"path"
 	"strings"
 
-	"github.com/standards-lab/go-web-service/tools/slab/internal/httpx"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/repo"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/scenario"
+	"github.com/standards-lab/go-web-service/tools/slab/httpx"
+	"github.com/standards-lab/go-web-service/tools/slab/repo"
+	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 
 // Reset posts SeedState to State, narrated: the note saying why, the seed

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
 	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/api"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 
@@ -36,8 +36,8 @@ const (
 // showed, the created row at the version create returned.
 type orgState struct {
 	client  *httpx.Client
-	tree    api.Tree
-	created api.Identity
+	tree    Tree
+	created organization.Identity
 }
 
 // Organization returns the domain scenario over fresh state.
@@ -69,19 +69,19 @@ func Organization() scenario.Scenario {
 
 func (s *orgState) initialization(ctx context.Context, r *scenario.Reporter) error {
 	s.client = httpx.NewClient(env.FromContext(ctx).Base)
-	return api.Reset(ctx, s.client, r)
+	return Reset(ctx, s.client, r)
 }
 
 func (s *orgState) rawList(ctx context.Context, r *scenario.Reporter) error {
-	r.Note("A list request with no query component (no filter, no page, no size) returns the first page at the configured default size, %d results per page. The later steps take the ids and versions they need from this page, by code.", api.DefaultPageSize)
-	p, err := api.List(ctx, s.client, r)
+	r.Note("A list request with no query component (no filter, no page, no size) returns the first page at the configured default size, %d results per page. The later steps take the ids and versions they need from this page, by code.", organization.DefaultPageSize)
+	p, err := List(ctx, s.client, r)
 	if err != nil {
 		return err
 	}
-	if p.Size != api.DefaultPageSize {
-		return fmt.Errorf("the default page size is %d, not the %d the narration states", p.Size, api.DefaultPageSize)
+	if p.Size != organization.DefaultPageSize {
+		return fmt.Errorf("the default page size is %d, not the %d the narration states", p.Size, organization.DefaultPageSize)
 	}
-	s.tree = make(api.Tree, len(p.Items))
+	s.tree = make(Tree, len(p.Items))
 	for _, o := range p.Items {
 		s.tree[o.Code] = o
 	}
@@ -114,7 +114,7 @@ func (s *orgState) queriedList(ctx context.Context, r *scenario.Reporter) error 
 		"\n\npage selects a 1-based page and size its length, up to the configured maximum. sort takes comma-separated field names, each with a leading - for descending." +
 		"\n\nHere, like passes its value to SQL's LIKE as given, so the caller supplies the wildcards: %%o%% matches every code containing an o, encoded as %%25o%%25 in the URL. Four codes match, and size=2 asks for them two to a page.")
 	query := httpx.RawQuery([2]string{"code[like]", "%o%"}, [2]string{"size", "2"}, [2]string{"page", "1"})
-	path := api.Organizations + "?" + query
+	path := organization.Organizations + "?" + query
 	r.Request(http.MethodGet, path, nil, nil)
 	res, err := s.client.Get(ctx, path)
 	if err != nil {
@@ -129,7 +129,7 @@ func (s *orgState) find(ctx context.Context, r *scenario.Reporter) error {
 	if err != nil {
 		return err
 	}
-	path := api.Organizations + "/" + acme.ID
+	path := organization.Organizations + "/" + acme.ID
 	r.Request(http.MethodGet, path, nil, nil)
 	res, err := s.client.Get(ctx, path)
 	if err != nil {
@@ -140,7 +140,7 @@ func (s *orgState) find(ctx context.Context, r *scenario.Reporter) error {
 }
 
 func (s *orgState) findByPath(ctx context.Context, r *scenario.Reporter) error {
-	path := api.Organizations + "/path/acme/engineering/platform"
+	path := organization.Organizations + "/path/acme/engineering/platform"
 	r.Request(http.MethodGet, path, nil, nil)
 	res, err := s.client.Get(ctx, path)
 	if err != nil {
@@ -157,9 +157,9 @@ func (s *orgState) create(ctx context.Context, r *scenario.Reporter) error {
 		return err
 	}
 	r.Note("This creates %s under acme. The response's X-Request-Id header is the request's trace id. The trace becomes queryable in Tempo a few seconds after the response returns, once the service's exporter flushes its next batch and the collector batches it again; the trace id and where to find it in Grafana follow the response below.", createdCode)
-	body := api.CreateOrganization{ParentID: &acme.ID, Code: createdCode, Name: createdName}
-	r.Request(http.MethodPost, api.Organizations, nil, body)
-	res, err := s.client.Post(ctx, api.Organizations, body)
+	body := organization.CreateOrganization{ParentID: &acme.ID, Code: createdCode, Name: createdName}
+	r.Request(http.MethodPost, organization.Organizations, nil, body)
+	res, err := s.client.Post(ctx, organization.Organizations, body)
 	if err != nil {
 		return err
 	}
@@ -174,7 +174,7 @@ func (s *orgState) create(ctx context.Context, r *scenario.Reporter) error {
 	if err != nil {
 		return err
 	}
-	r.Trace(e.Grafana, api.ServiceName, traceID)
+	r.Trace(e.Grafana, ServiceName, traceID)
 	return nil
 }
 
@@ -184,8 +184,8 @@ func (s *orgState) edit(ctx context.Context, r *scenario.Reporter) error {
 		return err
 	}
 	r.Note("Rename the seeded %s row's name column to %q. The If-Match header version must match the version column for the row in the database in order for the write to succeed. This facilitates optimistic concurrency and prevents simultaneous writes from resulting in an undesired state. The write increments the version when successful.", target.Code, editedName)
-	path := api.Organizations + "/" + target.ID
-	body := api.EditOrganization{Code: target.Code, Name: editedName}
+	path := organization.Organizations + "/" + target.ID
+	body := organization.EditOrganization{Code: target.Code, Name: editedName}
 	headers := []httpx.Header{httpx.IfMatch(target.Version)}
 	r.Request(http.MethodPut, path, headers, body)
 	res, err := s.client.Put(ctx, path, body, headers...)
@@ -196,11 +196,11 @@ func (s *orgState) edit(ctx context.Context, r *scenario.Reporter) error {
 	if err := res.Expect(http.StatusOK); err != nil {
 		return err
 	}
-	id, err := api.IdentityOf(res, target.ID)
+	id, err := IdentityOf(res, target.ID)
 	if err != nil {
 		return err
 	}
-	return api.ExpectVersion(id, target.Version+1)
+	return ExpectVersion(id, target.Version+1)
 }
 
 func (s *orgState) transfer(ctx context.Context, r *scenario.Reporter) error {
@@ -213,7 +213,7 @@ func (s *orgState) transfer(ctx context.Context, r *scenario.Reporter) error {
 		return err
 	}
 	r.Note("A transfer is a structural move, not a rename: this makes the seeded %s row a child of %s instead of operations, so its path changes and its code and name do not. The same If-Match precondition guards it, at %s's own version, %d.", target.Code, parent.Code, target.Code, target.Version)
-	path := api.Organizations + "/" + target.ID + "/transfer"
+	path := organization.Organizations + "/" + target.ID + "/transfer"
 	body := map[string]*string{"parent_id": &parent.ID}
 	headers := []httpx.Header{httpx.IfMatch(target.Version)}
 	r.Request(http.MethodPost, path, headers, body)
@@ -225,20 +225,20 @@ func (s *orgState) transfer(ctx context.Context, r *scenario.Reporter) error {
 	if err := res.Expect(http.StatusOK); err != nil {
 		return err
 	}
-	id, err := api.IdentityOf(res, target.ID)
+	id, err := IdentityOf(res, target.ID)
 	if err != nil {
 		return err
 	}
-	return api.ExpectVersion(id, target.Version+1)
+	return ExpectVersion(id, target.Version+1)
 }
 
 func (s *orgState) results(ctx context.Context, r *scenario.Reporter) error {
 	r.Note("Retrieving the raw list data again shows how the commands have mutated the data from its original state.")
-	p, err := api.List(ctx, s.client, r)
+	p, err := List(ctx, s.client, r)
 	if err != nil {
 		return err
 	}
-	after := make(api.Tree, len(p.Items))
+	after := make(Tree, len(p.Items))
 	for _, o := range p.Items {
 		after[o.Code] = o
 	}
@@ -258,7 +258,7 @@ func (s *orgState) results(ctx context.Context, r *scenario.Reporter) error {
 
 func (s *orgState) delete(ctx context.Context, r *scenario.Reporter) error {
 	r.Note("Delete only the %s row that we created, ensuring If-Match aligns with the row version.", createdCode)
-	path := api.Organizations + "/" + s.created.ID
+	path := organization.Organizations + "/" + s.created.ID
 	headers := []httpx.Header{httpx.IfMatch(s.created.Version)}
 	r.Request(http.MethodDelete, path, headers, nil)
 	res, err := s.client.Delete(ctx, path, headers...)

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
 	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/api"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 
@@ -177,7 +177,7 @@ func TestProblems_FailsTheStepWhenTheStatusIsNotTheOneNarrated(t *testing.T) {
 	s := &problemState{client: httpx.NewClient(srv.URL)}
 	var out bytes.Buffer
 	r := scenario.NewReporter(&out, false)
-	res, err := s.client.Get(ctx, api.Organizations+"/"+fakeID(1))
+	res, err := s.client.Get(ctx, organization.Organizations+"/"+fakeID(1))
 	if err != nil {
 		t.Fatal(err)
 	}

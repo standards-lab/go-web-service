@@ -4,8 +4,10 @@
 // against the running service, reseeded from a known fixture each run; and
 // problems, which sends the running service one request per error
 // condition it answers with a problem document. Each file is one scenario:
-// its literal and the step methods that run it. What two scenarios share
-// lives in the packages under internal.
+// its literal and the step methods that run it. calls.go holds the calls
+// and checks two scenarios make identically; the wire types and routes they
+// send come from domain/organization and admin/database, which restate the
+// service's contract once for every slab command.
 package demo
 
 import (

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
 	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/api"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 
@@ -33,7 +33,7 @@ const renamedName = "Acme Corporation, Inc."
 // every id and version a later step sends is the one the list showed.
 type problemState struct {
 	client *httpx.Client
-	tree   api.Tree
+	tree   Tree
 }
 
 // Problems returns the problems scenario over fresh state.
@@ -67,14 +67,14 @@ func Problems() scenario.Scenario {
 
 func (s *problemState) initialization(ctx context.Context, r *scenario.Reporter) error {
 	s.client = httpx.NewClient(env.FromContext(ctx).Base)
-	if err := api.Reset(ctx, s.client, r); err != nil {
+	if err := Reset(ctx, s.client, r); err != nil {
 		return err
 	}
 	p, err := s.list(ctx)
 	if err != nil {
 		return err
 	}
-	s.tree = make(api.Tree, len(p.Items))
+	s.tree = make(Tree, len(p.Items))
 	for _, o := range p.Items {
 		s.tree[o.Code] = o
 	}
@@ -84,24 +84,24 @@ func (s *problemState) initialization(ctx context.Context, r *scenario.Reporter)
 // list fetches the seeded tree without narrating it: the ids and versions
 // are bookkeeping for the conditions that follow, not something this
 // scenario demonstrates.
-func (s *problemState) list(ctx context.Context) (api.Page, error) {
-	res, err := s.client.Get(ctx, api.Organizations)
+func (s *problemState) list(ctx context.Context) (organization.Page, error) {
+	res, err := s.client.Get(ctx, organization.Organizations)
 	if err != nil {
-		return api.Page{}, err
+		return organization.Page{}, err
 	}
 	if err := res.Expect(http.StatusOK); err != nil {
-		return api.Page{}, err
+		return organization.Page{}, err
 	}
-	var p api.Page
+	var p organization.Page
 	if err := res.JSON(&p); err != nil {
-		return api.Page{}, err
+		return organization.Page{}, err
 	}
 	return p, nil
 }
 
 func (s *problemState) malformedIdentifier(ctx context.Context, r *scenario.Reporter) error {
 	r.Note("Every route with an {id} segment is first parsed as a UUID. A segment that is not a valid UUID results in a 400 response, with the detail specifying the segment. The query never reaches the database.")
-	path := api.Organizations + "/not-a-uuid"
+	path := organization.Organizations + "/not-a-uuid"
 	r.Request(http.MethodGet, path, nil, nil)
 	res, err := s.client.Get(ctx, path)
 	if err != nil {
@@ -113,7 +113,7 @@ func (s *problemState) malformedIdentifier(ctx context.Context, r *scenario.Repo
 func (s *problemState) malformedQuery(ctx context.Context, r *scenario.Reporter) error {
 	r.Note("The list parses its query string whole: page and size must be integers of at least 1, size at most the configured maximum, and sort a comma-separated list of field names. page=0 breaks the first rule, since pages are numbered from 1, and the parser answers 400 with the parameter, the value, and the rule in the detail." +
 		"\n\nAn operator the read model does not support, code[between]=a for instance, is also a 400, but from a different place: the query parser passes an operator through as text, and the data layer rejects it when it lowers the filter into a directive against the read model. The detail names the operator the same way.")
-	path := api.Organizations + "?" + httpx.RawQuery([2]string{"page", "0"})
+	path := organization.Organizations + "?" + httpx.RawQuery([2]string{"page", "0"})
 	r.Request(http.MethodGet, path, nil, nil)
 	res, err := s.client.Get(ctx, path)
 	if err != nil {
@@ -129,8 +129,8 @@ func (s *problemState) malformedBody(ctx context.Context, r *scenario.Reporter) 
 		"\n- more than one JSON value" +
 		"\n- an empty body" +
 		"\n\nThis create body stops before its closing brace, resulting in invalid JSON.")
-	r.Request(http.MethodPost, api.Organizations, nil, malformedBody)
-	res, err := s.client.Post(ctx, api.Organizations, malformedBody)
+	r.Request(http.MethodPost, organization.Organizations, nil, malformedBody)
+	res, err := s.client.Post(ctx, organization.Organizations, malformedBody)
 	if err != nil {
 		return err
 	}
@@ -138,10 +138,10 @@ func (s *problemState) malformedBody(ctx context.Context, r *scenario.Reporter) 
 }
 
 func (s *problemState) oversizedBody(ctx context.Context, r *scenario.Reporter) error {
-	payload, printable := api.OversizedBody()
-	r.Note("Commands are typically only a JSON payload with a few fields, so the handler bounds a command body at %d bytes. This create body is well-formed JSON whose code is %d bytes of filler. The bounded reader stops at the limit before the decoder sees the end of the value, and the response is a 413 naming the limit. The request below prints the filler's length in place of the filler.", api.MaxCommandBody, api.MaxCommandBody+1)
-	r.Request(http.MethodPost, api.Organizations, nil, printable)
-	res, err := s.client.Post(ctx, api.Organizations, payload)
+	payload, printable := OversizedBody()
+	r.Note("Commands are typically only a JSON payload with a few fields, so the handler bounds a command body at %d bytes. This create body is well-formed JSON whose code is %d bytes of filler. The bounded reader stops at the limit before the decoder sees the end of the value, and the response is a 413 naming the limit. The request below prints the filler's length in place of the filler.", maxCommandBody, maxCommandBody+1)
+	r.Request(http.MethodPost, organization.Organizations, nil, printable)
+	res, err := s.client.Post(ctx, organization.Organizations, payload)
 	if err != nil {
 		return err
 	}
@@ -158,9 +158,9 @@ func (s *problemState) domainValidation(ctx context.Context, r *scenario.Reporte
 		"\n- a name must not be empty"+
 		"\n- parent_id, when present, must be a UUID"+
 		"\n\nThe rules mirror the schema's check constraints, and an invalid state results in a 400 and a detail of the invalid state. This command attempts to create an organization with the code %q, which has capital letters and a space.", invalidCode)
-	body := api.CreateOrganization{ParentID: &acme.ID, Code: invalidCode, Name: "Sales Team"}
-	r.Request(http.MethodPost, api.Organizations, nil, body)
-	res, err := s.client.Post(ctx, api.Organizations, body)
+	body := organization.CreateOrganization{ParentID: &acme.ID, Code: invalidCode, Name: "Sales Team"}
+	r.Request(http.MethodPost, organization.Organizations, nil, body)
+	res, err := s.client.Post(ctx, organization.Organizations, body)
 	if err != nil {
 		return err
 	}
@@ -173,8 +173,8 @@ func (s *problemState) missingIfMatch(ctx context.Context, r *scenario.Reporter)
 		return err
 	}
 	r.Note("Edit, transfer, and delete are guarded commands. They mutate the state of existing data, so they must specify an If-Match header set to the value of the most recently retrieved row version. This prevents two callers from simultaneously writing to the same row (optimistic concurrency). A guarded command with no If-Match results in a 428 Precondition Required response, and is refused before the body is read.")
-	path := api.Organizations + "/" + acme.ID
-	body := api.EditOrganization{Code: acme.Code, Name: renamedName}
+	path := organization.Organizations + "/" + acme.ID
+	body := organization.EditOrganization{Code: acme.Code, Name: renamedName}
 	r.Request(http.MethodPut, path, nil, body)
 	res, err := s.client.Put(ctx, path, body)
 	if err != nil {
@@ -189,8 +189,8 @@ func (s *problemState) malformedIfMatch(ctx context.Context, r *scenario.Reporte
 		return err
 	}
 	r.Note("If-Match must be exactly one strong entity-tag whose value is the integer version, \"%d\" here. A weak tag, W/\"%d\", presents an invalid form the guard cannot compare. RFC 9110 requires strong comparison for If-Match to succeed, so the header syntax fails. This results in a 400 response with the detail articulating the error.", acme.Version, acme.Version)
-	path := api.Organizations + "/" + acme.ID
-	body := api.EditOrganization{Code: acme.Code, Name: renamedName}
+	path := organization.Organizations + "/" + acme.ID
+	body := organization.EditOrganization{Code: acme.Code, Name: renamedName}
 	headers := []httpx.Header{{Name: "If-Match", Value: fmt.Sprintf(`W/"%d"`, acme.Version)}}
 	r.Request(http.MethodPut, path, headers, body)
 	res, err := s.client.Put(ctx, path, body, headers...)
@@ -206,8 +206,8 @@ func (s *problemState) staleVersion(ctx context.Context, r *scenario.Reporter) e
 		return err
 	}
 	r.Note("A well-formed If-Match with an out of date version results in a 412 Precondition Failed response. The guarded UPDATE matches no row at that version, so the write does not happen. The response does not include a detail because there is nothing about the request to fix.")
-	path := api.Organizations + "/" + acme.ID
-	body := api.EditOrganization{Code: acme.Code, Name: renamedName}
+	path := organization.Organizations + "/" + acme.ID
+	body := organization.EditOrganization{Code: acme.Code, Name: renamedName}
 	headers := []httpx.Header{httpx.IfMatch(acme.Version + 1)}
 	r.Request(http.MethodPut, path, headers, body)
 	res, err := s.client.Put(ctx, path, body, headers...)
@@ -219,7 +219,7 @@ func (s *problemState) staleVersion(ctx context.Context, r *scenario.Reporter) e
 
 func (s *problemState) notFound(ctx context.Context, r *scenario.Reporter) error {
 	r.Note("A well-formed ID that doesn't match any row results in a 404 response without a detail. The 404 Not Found response provides all of the context needed.")
-	path := api.Organizations + "/" + absentID
+	path := organization.Organizations + "/" + absentID
 	r.Request(http.MethodGet, path, nil, nil)
 	res, err := s.client.Get(ctx, path)
 	if err != nil {
@@ -234,9 +234,9 @@ func (s *problemState) duplicateCode(ctx context.Context, r *scenario.Reporter) 
 		return err
 	}
 	r.Note("The schema's unique constraint on (parent_id, code) means that a code cannot be duplicated within the same parent_id value. Creating a second %q organization at the root collides with the seeded %q organization and results in a 409 Conflict. A parent_id that does not point to an existing record is the same problem class and also results in a 409 Conflict response. The command is technically valid, but the database constraint is violated and the error is raised when a write is attempted.", acme.Code, acme.Code)
-	body := api.CreateOrganization{ParentID: nil, Code: acme.Code, Name: acme.Name}
-	r.Request(http.MethodPost, api.Organizations, nil, body)
-	res, err := s.client.Post(ctx, api.Organizations, body)
+	body := organization.CreateOrganization{ParentID: nil, Code: acme.Code, Name: acme.Name}
+	r.Request(http.MethodPost, organization.Organizations, nil, body)
+	res, err := s.client.Post(ctx, organization.Organizations, body)
 	if err != nil {
 		return err
 	}
@@ -253,7 +253,7 @@ func (s *problemState) transferCycle(ctx context.Context, r *scenario.Reporter) 
 		return err
 	}
 	r.Note("A transfer moves an organization under a new parent. Attempting to transfer an organization to itself or any element within its current hierarchy will result in a 409 Conflict response. Allowing this would essentially break the organizational hierarchy by orphaning the organization from the rest of the organizational structure. When trying to move /acme to /acme/engineering/platform, the cycle check identifies and refuses the attempted transfer cycle.")
-	path := api.Organizations + "/" + acme.ID + "/transfer"
+	path := organization.Organizations + "/" + acme.ID + "/transfer"
 	body := map[string]*string{"parent_id": &platform.ID}
 	headers := []httpx.Header{httpx.IfMatch(acme.Version)}
 	r.Request(http.MethodPost, path, headers, body)
@@ -276,6 +276,6 @@ func (s *problemState) observe(ctx context.Context, r *scenario.Reporter, res *h
 	if err != nil {
 		return err
 	}
-	r.Trace(env.FromContext(ctx).Grafana, api.ServiceName, traceID)
+	r.Trace(env.FromContext(ctx).Grafana, ServiceName, traceID)
 	return nil
 }

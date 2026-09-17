@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/standards-lab/go-web-service/tools/slab/internal/demo"
+	"github.com/standards-lab/go-web-service/tools/slab/demo"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 

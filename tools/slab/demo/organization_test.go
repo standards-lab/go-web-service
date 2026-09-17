@@ -17,8 +17,8 @@ import (
 
 	"github.com/standards-lab/go-web-sdk"
 
+	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
 	"github.com/standards-lab/go-web-service/tools/slab/env"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/api"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 
@@ -46,7 +46,7 @@ func TestCreatedCode_IsAValidOrganizationCode(t *testing.T) {
 // X-Request-Id, as the service's request-id middleware does.
 type fakeService struct {
 	mu       sync.Mutex
-	rows     []*api.Organization
+	rows     []*organization.Organization
 	trace    string
 	problems *web.ErrorWriter
 	requests []string
@@ -108,7 +108,7 @@ func newFakeService() *fakeService {
 func (f *fakeService) reseed() {
 	f.rows = nil
 	for i, row := range seededTree {
-		o := &api.Organization{ID: fakeID(i + 1), Code: row[1], Name: row[2], Version: 1}
+		o := &organization.Organization{ID: fakeID(i + 1), Code: row[1], Name: row[2], Version: 1}
 		if row[0] != "" {
 			id := f.byCode(row[0]).ID
 			o.ParentID = &id
@@ -119,7 +119,7 @@ func (f *fakeService) reseed() {
 
 func fakeID(n int) string { return fmt.Sprintf("00000000-0000-0000-0000-%012d", n) }
 
-func (f *fakeService) byCode(code string) *api.Organization {
+func (f *fakeService) byCode(code string) *organization.Organization {
 	for _, o := range f.rows {
 		if o.Code == code {
 			return o
@@ -128,7 +128,7 @@ func (f *fakeService) byCode(code string) *api.Organization {
 	return nil
 }
 
-func (f *fakeService) byID(id string) *api.Organization {
+func (f *fakeService) byID(id string) *organization.Organization {
 	for _, o := range f.rows {
 		if o.ID == id {
 			return o
@@ -137,7 +137,7 @@ func (f *fakeService) byID(id string) *api.Organization {
 	return nil
 }
 
-func (f *fakeService) pathOf(o *api.Organization) string {
+func (f *fakeService) pathOf(o *organization.Organization) string {
 	if o.ParentID == nil {
 		return "/" + o.Code
 	}
@@ -145,7 +145,7 @@ func (f *fakeService) pathOf(o *api.Organization) string {
 }
 
 // view is o as the read model presents it, its path composed.
-func (f *fakeService) view(o *api.Organization) api.Organization {
+func (f *fakeService) view(o *organization.Organization) organization.Organization {
 	v := *o
 	v.Path = f.pathOf(o)
 	return v
@@ -192,28 +192,28 @@ func (f *fakeService) route(w http.ResponseWriter, r *http.Request) error {
 		w.WriteHeader(http.StatusOK)
 	case r.Method == http.MethodGet && r.URL.Path == "/api/traces/"+f.trace:
 		w.WriteHeader(http.StatusOK)
-	case r.Method == http.MethodPost && r.URL.Path == api.State:
+	case r.Method == http.MethodPost && r.URL.Path == stateRoute:
 		f.reseed()
-		writeJSON(w, http.StatusOK, map[string]string{"state": api.SeedState})
-	case r.Method == http.MethodGet && r.URL.Path == api.Organizations:
+		writeJSON(w, http.StatusOK, map[string]string{"state": SeedState})
+	case r.Method == http.MethodGet && r.URL.Path == organization.Organizations:
 		return f.list(w, r)
-	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, api.Organizations+"/path/"):
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, organization.Organizations+"/path/"):
 		for _, o := range f.rows {
-			if "/"+strings.TrimPrefix(r.URL.Path, api.Organizations+"/path/") == f.pathOf(o) {
+			if "/"+strings.TrimPrefix(r.URL.Path, organization.Organizations+"/path/") == f.pathOf(o) {
 				writeJSON(w, http.StatusOK, f.view(o))
 				return nil
 			}
 		}
 		return sql.ErrNoRows
-	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, api.Organizations+"/"):
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, organization.Organizations+"/"):
 		return f.find(w, r)
-	case r.Method == http.MethodPost && r.URL.Path == api.Organizations:
+	case r.Method == http.MethodPost && r.URL.Path == organization.Organizations:
 		return f.create(w, r)
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/transfer"):
 		return f.transfer(w, r)
-	case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, api.Organizations+"/"):
+	case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, organization.Organizations+"/"):
 		return f.edit(w, r)
-	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, api.Organizations+"/"):
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, organization.Organizations+"/"):
 		return f.delete(w, r)
 	default:
 		f.fail(w, "unexpected request %s %s", r.Method, r.URL.RequestURI())
@@ -224,7 +224,7 @@ func (f *fakeService) route(w http.ResponseWriter, r *http.Request) error {
 // pathID reads the {id} segment of r's path and parses it as a UUID, the
 // check sdk.PathID makes, with its wording.
 func pathID(r *http.Request) (string, error) {
-	raw := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, api.Organizations+"/"), "/transfer")
+	raw := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, organization.Organizations+"/"), "/transfer")
 	if _, err := uuid.Parse(raw); err != nil {
 		return "", fmt.Errorf("path id=%q: %w", raw, errPathID)
 	}
@@ -241,7 +241,7 @@ func command[T any](w http.ResponseWriter, r *http.Request) (id string, version 
 	if version, err = web.IfMatch(r); err != nil {
 		return "", 0, body, err
 	}
-	if body, err = web.DecodeJSON[T](w, r, api.MaxCommandBody); err != nil {
+	if body, err = web.DecodeJSON[T](w, r, maxCommandBody); err != nil {
 		return "", 0, body, err
 	}
 	return id, version, body, nil
@@ -262,7 +262,7 @@ func validate(code, name string) error {
 // guard is the store's version guard: the row at id, at version, or the
 // error the guard returns when there is no such row or it is at another
 // version.
-func (f *fakeService) guard(id string, version int64) (*api.Organization, error) {
+func (f *fakeService) guard(id string, version int64) (*organization.Organization, error) {
 	o := f.byID(id)
 	if o == nil {
 		return nil, sql.ErrNoRows
@@ -276,17 +276,17 @@ func (f *fakeService) guard(id string, version int64) (*api.Organization, error)
 // list parses the query as the handler does and pages the rows by it. The
 // filters are not applied: no test reads the queried list's items.
 func (f *fakeService) list(w http.ResponseWriter, r *http.Request) error {
-	q, err := web.ParseQuery(r.URL.Query(), web.Limits{DefaultSize: api.DefaultPageSize, MaxSize: fakeMaxPageSize})
+	q, err := web.ParseQuery(r.URL.Query(), web.Limits{DefaultSize: organization.DefaultPageSize, MaxSize: fakeMaxPageSize})
 	if err != nil {
 		return err
 	}
-	items := make([]api.Organization, 0, len(f.rows))
+	items := make([]organization.Organization, 0, len(f.rows))
 	for _, o := range f.rows {
 		items = append(items, f.view(o))
 	}
 	start := min((q.Page-1)*q.Size, len(items))
 	end := min(start+q.Size, len(items))
-	writeJSON(w, http.StatusOK, api.Page{Items: items[start:end], Page: q.Page, Size: q.Size, Total: len(f.rows)})
+	writeJSON(w, http.StatusOK, organization.Page{Items: items[start:end], Page: q.Page, Size: q.Size, Total: len(f.rows)})
 	return nil
 }
 
@@ -308,7 +308,7 @@ func (f *fakeService) find(w http.ResponseWriter, r *http.Request) error {
 // key) and no sibling may carry the code (the unique constraint, null
 // parents equal).
 func (f *fakeService) create(w http.ResponseWriter, r *http.Request) error {
-	body, err := web.DecodeJSON[api.CreateOrganization](w, r, api.MaxCommandBody)
+	body, err := web.DecodeJSON[organization.CreateOrganization](w, r, maxCommandBody)
 	if err != nil {
 		return err
 	}
@@ -323,10 +323,10 @@ func (f *fakeService) create(w http.ResponseWriter, r *http.Request) error {
 			return fmt.Errorf("%w: code %q exists under the same parent", errConstraint, body.Code)
 		}
 	}
-	o := &api.Organization{ID: fakeID(len(f.rows) + 1), ParentID: body.ParentID, Code: body.Code, Name: body.Name, Version: 1}
+	o := &organization.Organization{ID: fakeID(len(f.rows) + 1), ParentID: body.ParentID, Code: body.Code, Name: body.Name, Version: 1}
 	f.rows = append(f.rows, o)
-	w.Header().Set("Location", api.Organizations+"/"+o.ID)
-	writeJSON(w, http.StatusCreated, api.Identity{ID: o.ID, Version: o.Version})
+	w.Header().Set("Location", organization.Organizations+"/"+o.ID)
+	writeJSON(w, http.StatusCreated, organization.Identity{ID: o.ID, Version: o.Version})
 	return nil
 }
 
@@ -338,7 +338,7 @@ func sameParent(a, b *string) bool {
 }
 
 func (f *fakeService) edit(w http.ResponseWriter, r *http.Request) error {
-	id, version, body, err := command[api.EditOrganization](w, r)
+	id, version, body, err := command[organization.EditOrganization](w, r)
 	if err != nil {
 		return err
 	}
@@ -351,7 +351,7 @@ func (f *fakeService) edit(w http.ResponseWriter, r *http.Request) error {
 	}
 	o.Code, o.Name = body.Code, body.Name
 	o.Version++
-	writeJSON(w, http.StatusOK, api.Identity{ID: o.ID, Version: o.Version})
+	writeJSON(w, http.StatusOK, organization.Identity{ID: o.ID, Version: o.Version})
 	return nil
 }
 
@@ -378,11 +378,11 @@ func (f *fakeService) transfer(w http.ResponseWriter, r *http.Request) error {
 	}
 	o.ParentID = body.ParentID
 	o.Version++
-	writeJSON(w, http.StatusOK, api.Identity{ID: o.ID, Version: o.Version})
+	writeJSON(w, http.StatusOK, organization.Identity{ID: o.ID, Version: o.Version})
 	return nil
 }
 
-func (f *fakeService) parentOf(o *api.Organization) *api.Organization {
+func (f *fakeService) parentOf(o *organization.Organization) *organization.Organization {
 	if o.ParentID == nil {
 		return nil
 	}
@@ -412,7 +412,7 @@ func (f *fakeService) delete(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func (f *fakeService) index(o *api.Organization) int {
+func (f *fakeService) index(o *organization.Organization) int {
 	for i, row := range f.rows {
 		if row == o {
 			return i

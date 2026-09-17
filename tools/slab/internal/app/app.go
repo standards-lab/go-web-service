@@ -14,35 +14,38 @@ import (
 // layer, the admin layer, and the demo into a command tree, and runs the
 // process.
 type App struct {
-	root   *cobra.Command
-	stderr io.Writer
+	root *cobra.Command
+	out  *output.Output
 }
 
 // New is the cold start: it composes the layers in dependency order and
 // performs no I/O. The tree writes its output to stdout and its errors to
-// stderr.
+// stderr: cobra's own output (help, usage) through the root's writers, and
+// every command's result through the one output.Output built over the
+// same two streams.
 func New(stdout, stderr io.Writer) *App {
 	cfg := &Config{}
 	root := newRoot(cfg)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 
+	out := newOutput(stdout, stderr, cfg)
 	infra := newInfrastructure(cfg)
 	dom := newDomain(infra)
 	adm := newAdmin(infra)
 
-	root.AddCommand(commands(dom, adm, cfg)...)
+	root.AddCommand(commands(dom, adm, out, cfg)...)
 
-	return &App{root: root, stderr: stderr}
+	return &App{root: root, out: out}
 }
 
 // Run is the hot start: it executes the tree under ctx, which cancels every
 // request in flight when the process is signalled. The tree silences cobra's
 // own reporting, so the error a command returns is rendered here, through
-// output.Error, and sets the exit code.
+// the output's Error, and sets the exit code.
 func (a *App) Run(ctx context.Context) int {
 	if err := a.root.ExecuteContext(ctx); err != nil {
-		output.Error(a.stderr, err)
+		a.out.Error(err)
 		return 1
 	}
 	return 0

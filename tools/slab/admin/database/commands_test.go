@@ -13,6 +13,7 @@ import (
 
 	"github.com/standards-lab/go-web-service/tools/slab/admin/database"
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
+	"github.com/standards-lab/go-web-service/tools/slab/output"
 )
 
 // exchange is one request as the fake service received it.
@@ -69,10 +70,10 @@ func (s *service) only(t *testing.T) exchange {
 // stdout and the error it returned.
 func run(t *testing.T, srv *httptest.Server, args ...string) (string, error) {
 	t.Helper()
+	var out, errOut bytes.Buffer
 	db := database.Commands(func() *database.Client {
 		return database.NewClient(httpx.NewClient(srv.URL))
-	})
-	var out, errOut bytes.Buffer
+	}, output.New(&out, &errOut, nil))
 	db.SetOut(&out)
 	db.SetErr(&errOut)
 	db.SilenceUsage = true
@@ -83,7 +84,7 @@ func run(t *testing.T, srv *httptest.Server, args ...string) (string, error) {
 }
 
 func TestCommands_MountsTheSchemaGroupAndOneSubcommandPerEndpoint(t *testing.T) {
-	db := database.Commands(nil)
+	db := database.Commands(nil, nil)
 	if db.Name() != "database" {
 		t.Errorf("Commands().Name() = %q; want database", db.Name())
 	}
@@ -113,7 +114,7 @@ func TestCommands_ConstructsTheClientWhenASubcommandRuns(t *testing.T) {
 	db := database.Commands(func() *database.Client {
 		calls++
 		return database.NewClient(httpx.NewClient(srv.URL))
-	})
+	}, output.New(io.Discard, io.Discard, nil))
 	if calls != 0 {
 		t.Fatalf("Commands constructed the client %d times while building the tree", calls)
 	}

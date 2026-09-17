@@ -12,14 +12,24 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/output"
 )
 
+// deps is what every leaf command needs: the client constructor and the
+// output to render its reply through. Bundled once here so a leaf builder
+// is a method taking neither, rather than a free function repeating both.
+type deps struct {
+	newClient func() *Client
+	out       *output.Output
+}
+
 // Commands builds the database command: the schema subcommand over the
 // migration operations, and one subcommand per remaining endpoint. Each leaf
 // subcommand's RunE calls newClient when it runs, not when the tree is
 // built: the composition root closes newClient over its persistent flags,
 // which cobra parses during execution, so the base URL is unknown until
-// then. A subcommand returns its error unrendered; the root writes it
-// through output.Error and sets the exit code.
-func Commands(newClient func() *Client) *cobra.Command {
+// then. out is the output every subcommand renders its reply through,
+// constructed by the same root. A subcommand returns its error unrendered;
+// the root writes it through out's Error and sets the exit code.
+func Commands(newClient func() *Client, out *output.Output) *cobra.Command {
+	d := deps{newClient: newClient, out: out}
 	database := &cobra.Command{
 		Use:   "database",
 		Short: "Call the database admin service's endpoints",
@@ -29,20 +39,20 @@ func Commands(newClient func() *Client) *cobra.Command {
 		},
 	}
 	database.AddCommand(
-		schemaCommands(newClient),
-		seedCommand(newClient),
-		stateCommand(newClient),
-		output.FixedCommand("diagnostics", "Read the database's health: dialect, ping, server version, and pool counters", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
-			return newClient().Diagnose(ctx)
+		d.schemaCommands(),
+		d.seedCommand(),
+		d.stateCommand(),
+		d.out.FixedCommand("diagnostics", "Read the database's health: dialect, ping, server version, and pool counters", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
+			return d.newClient().Diagnose(ctx)
 		}),
-		output.FixedCommand("patterns", "Read the pattern catalog", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
-			return newClient().Catalog(ctx)
+		d.out.FixedCommand("patterns", "Read the pattern catalog", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
+			return d.newClient().Catalog(ctx)
 		}),
-		output.FixedCommand("statements", "Read the statements registry, every domain's compiled inventory", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
-			return newClient().Statements(ctx)
+		d.out.FixedCommand("statements", "Read the statements registry, every domain's compiled inventory", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
+			return d.newClient().Statements(ctx)
 		}),
-		output.FixedCommand("states", "List the named states the seeder declares", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
-			return newClient().States(ctx)
+		d.out.FixedCommand("states", "List the named states the seeder declares", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
+			return d.newClient().States(ctx)
 		}),
 	)
 	return database
@@ -50,7 +60,7 @@ func Commands(newClient func() *Client) *cobra.Command {
 
 // schemaCommands builds the schema subcommand: the migration operations,
 // each answering with the schema's resulting status.
-func schemaCommands(newClient func() *Client) *cobra.Command {
+func (d deps) schemaCommands() *cobra.Command {
 	schema := &cobra.Command{
 		Use:   "schema",
 		Short: "Read and operate on the schema's migration history",
@@ -60,18 +70,18 @@ func schemaCommands(newClient func() *Client) *cobra.Command {
 		},
 	}
 	schema.AddCommand(
-		output.FixedCommand("status", "Read the schema's status against the migration set", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
-			return newClient().Status(ctx)
+		d.out.FixedCommand("status", "Read the schema's status against the migration set", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
+			return d.newClient().Status(ctx)
 		}),
-		output.FixedCommand("verify", "Check that the schema is at the set's clean head and the seeder's statements prepare against it", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
-			return newClient().Verify(ctx)
+		d.out.FixedCommand("verify", "Check that the schema is at the set's clean head and the seeder's statements prepare against it", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
+			return d.newClient().Verify(ctx)
 		}),
-		output.FixedCommand("up", "Apply every pending migration", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
-			return newClient().Up(ctx)
+		d.out.FixedCommand("up", "Apply every pending migration", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
+			return d.newClient().Up(ctx)
 		}),
-		downCommand(newClient),
-		stepsCommand(newClient),
-		forceCommand(newClient),
+		d.downCommand(),
+		d.stepsCommand(),
+		d.forceCommand(),
 	)
 	return schema
 }
@@ -80,7 +90,7 @@ func schemaCommands(newClient func() *Client) *cobra.Command {
 // Steps built from --steps when it is set, and otherwise nothing: the
 // service reverts one migration when the request carries no body, and the
 // default is left to it rather than restated here.
-func downCommand(newClient func() *Client) *cobra.Command {
+func (d deps) downCommand() *cobra.Command {
 	var (
 		raw   string
 		steps int
@@ -100,14 +110,14 @@ func downCommand(newClient func() *Client) *cobra.Command {
 					return err
 				}
 			}
-			res, err := newClient().Down(cmd.Context(), body)
+			res, err := d.newClient().Down(cmd.Context(), body)
 			if err != nil {
 				return err
 			}
 			if err := output.Expect(res, http.StatusOK); err != nil {
 				return err
 			}
-			output.Response(cmd.OutOrStdout(), res.Status, res.Body)
+			d.out.Response(res.Status, res.Body)
 			return nil
 		},
 	}
@@ -120,7 +130,7 @@ func downCommand(newClient func() *Client) *cobra.Command {
 // stepsCommand is POST Database/schema/steps. The body is --body verbatim,
 // or Steps built from --steps, which must be given: the service rejects
 // zero, so an unset flag is refused here rather than sent as one.
-func stepsCommand(newClient func() *Client) *cobra.Command {
+func (d deps) stepsCommand() *cobra.Command {
 	var (
 		raw   string
 		steps int
@@ -139,14 +149,14 @@ func stepsCommand(newClient func() *Client) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, err := newClient().Steps(cmd.Context(), body)
+			res, err := d.newClient().Steps(cmd.Context(), body)
 			if err != nil {
 				return err
 			}
 			if err := output.Expect(res, http.StatusOK); err != nil {
 				return err
 			}
-			output.Response(cmd.OutOrStdout(), res.Status, res.Body)
+			d.out.Response(res.Status, res.Body)
 			return nil
 		},
 	}
@@ -159,7 +169,7 @@ func stepsCommand(newClient func() *Client) *cobra.Command {
 // forceCommand is POST Database/schema/force. The body is --body verbatim,
 // or Force built from --version, which must be given: 0 is a meaningful
 // value (an empty history), so an unset flag is refused rather than sent.
-func forceCommand(newClient func() *Client) *cobra.Command {
+func (d deps) forceCommand() *cobra.Command {
 	var (
 		raw     string
 		version int
@@ -178,14 +188,14 @@ func forceCommand(newClient func() *Client) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, err := newClient().Force(cmd.Context(), body)
+			res, err := d.newClient().Force(cmd.Context(), body)
 			if err != nil {
 				return err
 			}
 			if err := output.Expect(res, http.StatusOK); err != nil {
 				return err
 			}
-			output.Response(cmd.OutOrStdout(), res.Status, res.Body)
+			d.out.Response(res.Status, res.Body)
 			return nil
 		},
 	}
@@ -202,7 +212,7 @@ func forceCommand(newClient func() *Client) *cobra.Command {
 // named set's rows idempotently over the schema as it stands, so seeding
 // an empty set onto a populated database leaves the existing rows in
 // place. stateCommand is the one that clears first.
-func seedCommand(newClient func() *Client) *cobra.Command {
+func (d deps) seedCommand() *cobra.Command {
 	var raw, state string
 	cmd := &cobra.Command{
 		Use:   "seed",
@@ -219,14 +229,14 @@ func seedCommand(newClient func() *Client) *cobra.Command {
 					return err
 				}
 			}
-			res, err := newClient().Seed(cmd.Context(), body)
+			res, err := d.newClient().Seed(cmd.Context(), body)
 			if err != nil {
 				return err
 			}
 			if err := output.Expect(res, http.StatusOK); err != nil {
 				return err
 			}
-			output.Response(cmd.OutOrStdout(), res.Status, res.Body)
+			d.out.Response(res.Status, res.Body)
 			return nil
 		},
 	}
@@ -239,7 +249,7 @@ func seedCommand(newClient func() *Client) *cobra.Command {
 // stateCommand is POST Database/state. The body is --body verbatim, or
 // State built from --state, which must be given: the service refuses an
 // empty name, so an unset flag is refused here before the request fires.
-func stateCommand(newClient func() *Client) *cobra.Command {
+func (d deps) stateCommand() *cobra.Command {
 	var raw, state string
 	cmd := &cobra.Command{
 		Use:   "state",
@@ -255,14 +265,14 @@ func stateCommand(newClient func() *Client) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, err := newClient().Reset(cmd.Context(), body)
+			res, err := d.newClient().Reset(cmd.Context(), body)
 			if err != nil {
 				return err
 			}
 			if err := output.Expect(res, http.StatusOK); err != nil {
 				return err
 			}
-			output.Response(cmd.OutOrStdout(), res.Status, res.Body)
+			d.out.Response(res.Status, res.Body)
 			return nil
 		},
 	}

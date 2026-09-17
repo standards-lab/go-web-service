@@ -13,13 +13,23 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/output"
 )
 
+// deps is what every leaf command needs: the client constructor and the
+// output to render its reply through. Bundled once here so a leaf builder
+// is a method taking neither, rather than a free function repeating both.
+type deps struct {
+	newClient func() *Client
+	out       *output.Output
+}
+
 // Commands builds the org command with one subcommand per endpoint. Each
 // subcommand's RunE calls newClient when it runs, not when the tree is
 // built: the composition root closes newClient over its persistent flags,
 // which cobra parses during execution, so the base URL is unknown until
-// then. A subcommand returns its error unrendered; the root writes it
-// through output.Error and sets the exit code.
-func Commands(newClient func() *Client) *cobra.Command {
+// then. out is the output every subcommand renders its reply through,
+// constructed by the same root. A subcommand returns its error unrendered;
+// the root writes it through out's Error and sets the exit code.
+func Commands(newClient func() *Client, out *output.Output) *cobra.Command {
+	d := deps{newClient: newClient, out: out}
 	org := &cobra.Command{
 		Use:   "org",
 		Short: "Call the organization domain's endpoints",
@@ -29,13 +39,13 @@ func Commands(newClient func() *Client) *cobra.Command {
 		},
 	}
 	org.AddCommand(
-		listCommand(newClient),
-		getCommand(newClient),
-		getByPathCommand(newClient),
-		createCommand(newClient),
-		editCommand(newClient),
-		transferCommand(newClient),
-		deleteCommand(newClient),
+		d.listCommand(),
+		d.getCommand(),
+		d.getByPathCommand(),
+		d.createCommand(),
+		d.editCommand(),
+		d.transferCommand(),
+		d.deleteCommand(),
 	)
 	return org
 }
@@ -44,7 +54,7 @@ func Commands(newClient func() *Client) *cobra.Command {
 // sort as their own flags, and each --filter a name=value pair passed
 // through as written, so the operator syntax (code[like]=%o%) is the
 // caller's to spell.
-func listCommand(newClient func() *Client) *cobra.Command {
+func (d deps) listCommand() *cobra.Command {
 	var (
 		page, size int
 		sort       string
@@ -72,14 +82,14 @@ func listCommand(newClient func() *Client) *cobra.Command {
 				}
 				query = append(query, [2]string{name, value})
 			}
-			res, err := newClient().List(cmd.Context(), query...)
+			res, err := d.newClient().List(cmd.Context(), query...)
 			if err != nil {
 				return err
 			}
 			if err := output.Expect(res, http.StatusOK); err != nil {
 				return err
 			}
-			output.Response(cmd.OutOrStdout(), res.Status, res.Body)
+			d.out.Response(res.Status, res.Body)
 			return nil
 		},
 	}
@@ -91,40 +101,40 @@ func listCommand(newClient func() *Client) *cobra.Command {
 }
 
 // getCommand is GET Organizations/{id}.
-func getCommand(newClient func() *Client) *cobra.Command {
+func (d deps) getCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "get <id>",
 		Short: "Read one organization by id",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			res, err := newClient().Find(cmd.Context(), args[0])
+			res, err := d.newClient().Find(cmd.Context(), args[0])
 			if err != nil {
 				return err
 			}
 			if err := output.Expect(res, http.StatusOK); err != nil {
 				return err
 			}
-			output.Response(cmd.OutOrStdout(), res.Status, res.Body)
+			d.out.Response(res.Status, res.Body)
 			return nil
 		},
 	}
 }
 
 // getByPathCommand is GET Organizations/path/{path}.
-func getByPathCommand(newClient func() *Client) *cobra.Command {
+func (d deps) getByPathCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "get-by-path <path>",
 		Short: "Read one organization by its hierarchy path (acme/engineering)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			res, err := newClient().FindByPath(cmd.Context(), args[0])
+			res, err := d.newClient().FindByPath(cmd.Context(), args[0])
 			if err != nil {
 				return err
 			}
 			if err := output.Expect(res, http.StatusOK); err != nil {
 				return err
 			}
-			output.Response(cmd.OutOrStdout(), res.Status, res.Body)
+			d.out.Response(res.Status, res.Body)
 			return nil
 		},
 	}
@@ -133,7 +143,7 @@ func getByPathCommand(newClient func() *Client) *cobra.Command {
 // createCommand is POST Organizations. The body is --body verbatim, or
 // CreateOrganization built from --code, --name, and --parent-id (absent or
 // empty for a root).
-func createCommand(newClient func() *Client) *cobra.Command {
+func (d deps) createCommand() *cobra.Command {
 	var (
 		raw, code, name, parentID string
 	)
@@ -151,14 +161,14 @@ func createCommand(newClient func() *Client) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, err := newClient().Create(cmd.Context(), body)
+			res, err := d.newClient().Create(cmd.Context(), body)
 			if err != nil {
 				return err
 			}
 			if err := output.Expect(res, http.StatusCreated); err != nil {
 				return err
 			}
-			output.Response(cmd.OutOrStdout(), res.Status, res.Body)
+			d.out.Response(res.Status, res.Body)
 			return nil
 		},
 	}
@@ -175,7 +185,7 @@ func createCommand(newClient func() *Client) *cobra.Command {
 // editCommand is PUT Organizations/{id} under If-Match. The body is --body
 // verbatim, or EditOrganization built from --code and --name; the version
 // is resolved by input.GuardedBody.
-func editCommand(newClient func() *Client) *cobra.Command {
+func (d deps) editCommand() *cobra.Command {
 	var (
 		raw, code, name string
 		version         int64
@@ -194,14 +204,14 @@ func editCommand(newClient func() *Client) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, err := newClient().Edit(cmd.Context(), args[0], ifMatch, body)
+			res, err := d.newClient().Edit(cmd.Context(), args[0], ifMatch, body)
 			if err != nil {
 				return err
 			}
 			if err := output.Expect(res, http.StatusOK); err != nil {
 				return err
 			}
-			output.Response(cmd.OutOrStdout(), res.Status, res.Body)
+			d.out.Response(res.Status, res.Body)
 			return nil
 		},
 	}
@@ -219,7 +229,7 @@ func editCommand(newClient func() *Client) *cobra.Command {
 // which must be given: the service requires the parent_id key and reads
 // null as a move to the root, so an unset flag is refused here and an empty
 // one sends null.
-func transferCommand(newClient func() *Client) *cobra.Command {
+func (d deps) transferCommand() *cobra.Command {
 	var (
 		raw, parentID string
 		version       int64
@@ -238,14 +248,14 @@ func transferCommand(newClient func() *Client) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, err := newClient().Transfer(cmd.Context(), args[0], ifMatch, body)
+			res, err := d.newClient().Transfer(cmd.Context(), args[0], ifMatch, body)
 			if err != nil {
 				return err
 			}
 			if err := output.Expect(res, http.StatusOK); err != nil {
 				return err
 			}
-			output.Response(cmd.OutOrStdout(), res.Status, res.Body)
+			d.out.Response(res.Status, res.Body)
 			return nil
 		},
 	}
@@ -258,21 +268,21 @@ func transferCommand(newClient func() *Client) *cobra.Command {
 
 // deleteCommand is DELETE Organizations/{id} under If-Match. There is no
 // body, so --version is simply required.
-func deleteCommand(newClient func() *Client) *cobra.Command {
+func (d deps) deleteCommand() *cobra.Command {
 	var version int64
 	cmd := &cobra.Command{
 		Use:   "delete <id>",
 		Short: "Delete an organization",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			res, err := newClient().Delete(cmd.Context(), args[0], version)
+			res, err := d.newClient().Delete(cmd.Context(), args[0], version)
 			if err != nil {
 				return err
 			}
 			if err := output.Expect(res, http.StatusNoContent); err != nil {
 				return err
 			}
-			output.Response(cmd.OutOrStdout(), res.Status, res.Body)
+			d.out.Response(res.Status, res.Body)
 			return nil
 		},
 	}

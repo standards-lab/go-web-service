@@ -12,13 +12,13 @@ import (
 
 // mountDemo builds the demo mount over cfg: each scenario reads the
 // environment cfg resolves and narrates through a reporter colored as cfg
-// says. Both are read when the scenario runs, after cobra parses. The
-// scenarios construct their own HTTP clients from that environment rather
-// than through the infrastructure, since each one addresses the stack it
-// needs (the service, Grafana, Tempo) by name.
+// and the stream it writes to say. Both are read when the scenario runs,
+// after cobra parses. The scenarios construct their own HTTP clients from
+// that environment rather than through the infrastructure, since each one
+// addresses the stack it needs (the service, Grafana, Tempo) by name.
 func mountDemo(cfg *Config) *cobra.Command {
 	return demo.Commands(cfg.runEnv, func(w io.Writer) *scenario.Reporter {
-		return scenario.NewReporter(w, style.ColorEnabled(cfg.NoColor))
+		return scenario.NewReporter(w, style.ColorEnabled(w, cfg.NoColor))
 	})
 }
 

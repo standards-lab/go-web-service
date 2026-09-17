@@ -1,16 +1,27 @@
 package style
 
 import (
+	"io"
 	"os"
 
 	"golang.org/x/term"
 )
 
-// ColorEnabled reports whether output should emit ANSI color: only when
-// stdout is a terminal, NO_COLOR is unset, and the caller's own --no-color
-// flag was not passed.
-func ColorEnabled(noColor bool) bool {
-	return !noColor && os.Getenv("NO_COLOR") == "" && term.IsTerminal(int(os.Stdout.Fd()))
+// ColorEnabled reports whether output written to w should emit ANSI color:
+// only when w is a terminal, NO_COLOR is unset, and the caller's own
+// --no-color flag was not passed. It asks w rather than os.Stdout so the
+// decision is about the stream actually written to, which a test can make a
+// terminal without touching the process's own.
+func ColorEnabled(w io.Writer, noColor bool) bool {
+	return !noColor && os.Getenv("NO_COLOR") == "" && isTerminal(w)
+}
+
+// isTerminal reports whether w is an open terminal: an *os.File whose
+// descriptor answers as one. Any other writer (a buffer, a pipe wrapped in
+// something else) is not.
+func isTerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && term.IsTerminal(int(f.Fd()))
 }
 
 // Style is the one place ANSI escapes live. With On false every method

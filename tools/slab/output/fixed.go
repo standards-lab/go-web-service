@@ -15,7 +15,7 @@ import (
 // method has once its receiver is bound, so a caller passes a closure that
 // constructs the client and calls the method, and the client is constructed
 // when the command runs, not when the tree is built.
-func FixedCommand(use, short string, status int, op func(ctx context.Context) (*httpx.Response, error)) *cobra.Command {
+func (o *Output) FixedCommand(use, short string, status int, op func(ctx context.Context) (*httpx.Response, error)) *cobra.Command {
 	return &cobra.Command{
 		Use:   use,
 		Short: short,
@@ -28,7 +28,7 @@ func FixedCommand(use, short string, status int, op func(ctx context.Context) (*
 			if err := Expect(res, status); err != nil {
 				return err
 			}
-			Response(cmd.OutOrStdout(), res.Status, res.Body)
+			o.Response(res.Status, res.Body)
 			return nil
 		},
 	}

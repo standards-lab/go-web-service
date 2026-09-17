@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
+	"github.com/standards-lab/go-web-service/tools/slab/output"
 )
 
 // Domain composes the domain clients, one field per domain package. Each
@@ -26,11 +27,11 @@ func newDomain(infra *Infrastructure) *Domain {
 }
 
 // mountDomain builds the domain layer's commands, one per domain package,
-// each handed its client constructor from dom. They mount directly on the
-// root: slab has no container command for the domains the way the service
-// has an /api group.
-func mountDomain(dom *Domain) []*cobra.Command {
+// each handed its client constructor from dom and the output to render
+// through. They mount directly on the root: slab has no container command
+// for the domains the way the service has an /api group.
+func mountDomain(dom *Domain, out *output.Output) []*cobra.Command {
 	return []*cobra.Command{
-		organization.Commands(dom.Organization),
+		organization.Commands(dom.Organization, out),
 	}
 }

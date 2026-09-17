@@ -1,16 +1,14 @@
-// Command slab runs the service's narrated scenarios: one command per
-// capability the service shows, each printing what it is about to do and what
-// it observed.
+// Command slab calls the service's endpoints, one subcommand per endpoint,
+// and runs its narrated scenarios, each printing what it is about to do and
+// what it observed.
 package main
 
 import (
-	"context"
-	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 
-	"github.com/standards-lab/go-web-service/tools/slab/internal/cli"
+	"github.com/standards-lab/go-core/process"
+
+	"github.com/standards-lab/go-web-service/tools/slab/internal/app"
 )
 
 func main() {
@@ -18,7 +16,7 @@ func main() {
 }
 
 func run() int {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := process.SignalContext()
 	defer stop()
 	// The first signal cancels the context; stop then restores the default
 	// handlers so a second signal terminates the process even if a scenario
@@ -28,9 +26,5 @@ func run() int {
 		stop()
 	}()
 
-	if err := cli.Root().ExecuteContext(ctx); err != nil {
-		fmt.Fprintln(os.Stderr, "slab:", err)
-		return 1
-	}
-	return 0
+	return app.New(os.Stdout, os.Stderr).Run(ctx)
 }

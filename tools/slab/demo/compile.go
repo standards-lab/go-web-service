@@ -71,6 +71,8 @@ func (s *state) writePattern(ctx context.Context, r *scenario.Reporter) error {
 		return err
 	}
 	r.SQL(file, string(text))
+	r.SQL("An embed directive over an embed.FS variable", "//go:embed patterns/*.sql\nvar patterns embed.FS")
+	r.Note("The SQL pattern files are embedded into the binary using an embed directive, //go:embed patterns/*.sql. The embedded files can be accessed via an embed.FS variable.")
 	return nil
 }
 
@@ -82,10 +84,14 @@ func (s *state) writeStatement(_ context.Context, r *scenario.Reporter) error {
 	}
 	r.SQL(file, string(text))
 	r.Note("The statement reuses the %s pattern above, and declares three parameters of its own: {{parent_id:uuid}}, {{code}}, {{name}}.", pattern)
+	r.SQL("An embed directive over an embed.FS variable", "//go:embed statements/*.sql\nvar statements embed.FS")
+	r.Note("The SQL statements are embedded in the same way as the patterns, sourced from statements/*.sql.")
 	return nil
 }
 
 func (s *state) registerCatalog(_ context.Context, r *scenario.Reporter) error {
+	r.SQL("fsys, the filesystem both calls below read from", "fsys, err := repo.FS(ctx)")
+	r.Note("repo.FS(ctx) resolves the repository root — the --repo flag when it is set, or the nearest ancestor directory whose go.mod declares this module — and returns an os.DirFS rooted there. Every path this scenario reads, the pattern and statement above included, is relative to that root.")
 	r.SQL(fmt.Sprintf("The pattern registered under the %q namespace", appNamespace),
 		fmt.Sprintf("query.NewCatalog(query.Patterns(), query.Publish(%q, fsys, %q))", appNamespace, patternsDir))
 	catalog, err := query.NewCatalog(query.Patterns(), query.Publish(appNamespace, s.fsys, patternsDir))

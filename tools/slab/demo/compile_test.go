@@ -27,11 +27,16 @@ func TestScenario_NarratesFourStepsOverTheCheckout(t *testing.T) {
 		"[1/4]", "[4/4]",
 		"data/patterns/identity.sql",
 		"RETURNING id, version",
+		"//go:embed patterns/*.sql",
+		"var patterns embed.FS",
 		"domain/organization/statements/create.sql",
 		"VALUES ({{parent_id:uuid}}, {{code}}, {{name}})",
 		"{{> app.identity}}",
+		"//go:embed statements/*.sql",
+		"var statements embed.FS",
 		`query.NewCatalog(query.Patterns(), query.Publish("app", fsys, "data/patterns"))`,
 		`catalog.Compile(fsys, "domain/organization/statements", postgres.Dialect{})`,
+		"fsys, err := repo.FS(ctx)",
 		"create, compiled for execution by postgres",
 		"VALUES (CAST($1 AS uuid), $2, $3)",
 		"$1  parent_id",
@@ -40,6 +45,18 @@ func TestScenario_NarratesFourStepsOverTheCheckout(t *testing.T) {
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	// The notes wrap at the reporter's column width, so a sentence is checked
+	// against the output with its line breaks collapsed.
+	flat := strings.Join(strings.Fields(out), " ")
+	for _, want := range []string{
+		"The SQL pattern files are embedded into the binary using an embed directive, //go:embed patterns/*.sql. The embedded files can be accessed via an embed.FS variable.",
+		"The SQL statements are embedded in the same way as the patterns, sourced from statements/*.sql.",
+		"repo.FS(ctx) resolves the repository root — the --repo flag when it is set, or the nearest ancestor directory whose go.mod declares this module — and returns an os.DirFS rooted there. Every path this scenario reads, the pattern and statement above included, is relative to that root.",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("narration lacks %q:\n%s", want, out)
 		}
 	}
 	if strings.Contains(out, "[5/") {

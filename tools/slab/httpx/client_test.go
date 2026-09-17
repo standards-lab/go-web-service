@@ -88,6 +88,21 @@ func TestClientDo(t *testing.T) {
 			call:   func() (*httpx.Response, error) { return c.Delete(ctx, "/things/1") },
 			method: http.MethodDelete,
 		},
+		{
+			name:   "post treats an empty byte body as no body",
+			call:   func() (*httpx.Response, error) { return c.Post(ctx, "/things", []byte{}) },
+			method: http.MethodPost,
+		},
+		{
+			name:   "post treats a nil byte body as no body",
+			call:   func() (*httpx.Response, error) { return c.Post(ctx, "/things", []byte(nil)) },
+			method: http.MethodPost,
+		},
+		{
+			name:   "put treats an empty string body as no body",
+			call:   func() (*httpx.Response, error) { return c.Put(ctx, "/things", "") },
+			method: http.MethodPut,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

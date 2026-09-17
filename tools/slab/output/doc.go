@@ -13,4 +13,9 @@
 // document the service answers with. The exit code is the composition
 // root's concern, not this package's: a command returns the error, and the
 // root renders it and exits non-zero.
+//
+// FixedCommand builds the whole subcommand for an endpoint that takes no
+// input, over a func(context.Context) (*httpx.Response, error): the shape a
+// domain client's no-input method has once its receiver is bound, so any
+// command family uses it without this package naming that family's client.
 package output

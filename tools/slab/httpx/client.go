@@ -46,16 +46,23 @@ func newHTTPClient(timeout time.Duration) *http.Client {
 type Header struct{ Name, Value string }
 
 // Do sends method path with body encoded as JSON when it is not nil (a
-// []byte or string body is sent as is), and reads the response whole. The
-// error names the request that failed.
+// []byte or string body is sent as is), and reads the response whole. An
+// empty []byte or string is no body: nothing is sent and no Content-Type is
+// set, the same as nil, so a caller whose body is optional passes what it
+// has without converting an empty value to nil first. The error names the
+// request that failed.
 func (c *Client) Do(ctx context.Context, method, path string, body any, headers ...Header) (*Response, error) {
 	var reader io.Reader
 	switch b := body.(type) {
 	case nil:
 	case []byte:
-		reader = bytes.NewReader(b)
+		if len(b) > 0 {
+			reader = bytes.NewReader(b)
+		}
 	case string:
-		reader = strings.NewReader(b)
+		if len(b) > 0 {
+			reader = strings.NewReader(b)
+		}
 	default:
 		buf, err := json.Marshal(b)
 		if err != nil {
@@ -67,7 +74,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body any, headers 
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: build request: %w", method, path, err)
 	}
-	if body != nil {
+	if reader != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	for _, h := range headers {

@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
 func TestWrap_LeavesShortTextOnOneLine(t *testing.T) {
@@ -102,13 +104,14 @@ func TestReporter_JSONPrintsACaptionedColoredBlockAsAuthored(t *testing.T) {
 	}
 
 	out.Reset()
-	on := NewReporter(&out, true)
-	on.JSON("caption", []byte(`{"code": "acme"}`))
+	r2 := NewReporter(&out, true)
+	r2.JSON("caption", []byte(`{"code": "acme"}`))
 	got := out.String()
-	if !strings.Contains(got, ansiMagenta+"caption"+ansiReset) {
+	st := style.New(true)
+	if !strings.Contains(got, st.Caption("caption")) {
 		t.Error("the caption is not styled as a caption")
 	}
-	if !strings.Contains(got, ansiBlue+`"code"`+ansiReset+": "+ansiGreen+`"acme"`+ansiReset) {
+	if !strings.Contains(got, st.Key(`"code"`)+": "+st.Value(`"acme"`)) {
 		t.Errorf("the body is not colored as JSON:\n%q", got)
 	}
 }

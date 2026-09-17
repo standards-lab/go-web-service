@@ -8,75 +8,12 @@ import (
 	"testing"
 
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
+	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
 var ansi = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 func strip(s string) string { return ansi.ReplaceAllString(s, "") }
-
-func TestStyle_OffLeavesTextUntouched(t *testing.T) {
-	off := style{on: false}
-	sql := "SELECT id FROM organization WHERE code = $1"
-	if got := off.sql(sql); got != sql {
-		t.Errorf("sql with color off = %q", got)
-	}
-	doc := "{\n  \"a\": 1\n}"
-	if got := off.jsonColor(doc); got != doc {
-		t.Errorf("jsonColor with color off = %q", got)
-	}
-	if got := off.bold("x"); got != "x" {
-		t.Errorf("bold with color off = %q", got)
-	}
-}
-
-func TestStyle_SQLBoldsWholeWordKeywordsOnly(t *testing.T) {
-	on := style{on: true}
-	got := on.sql("SELECT settings FROM t ORDER BY id")
-	want := ansiBold + "SELECT" + ansiReset + " settings " +
-		ansiBold + "FROM" + ansiReset + " t " +
-		ansiBold + "ORDER" + ansiReset + " " + ansiBold + "BY" + ansiReset + " id"
-	if got != want {
-		t.Errorf("sql = %q\nwant %q", got, want)
-	}
-	if strip(got) != "SELECT settings FROM t ORDER BY id" {
-		t.Errorf("sql changed the text under the escapes: %q", strip(got))
-	}
-}
-
-func TestStyle_JSONColorColorsKeysAndValuesAndKeepsTheText(t *testing.T) {
-	on := style{on: true}
-	doc := "{\n" +
-		"  \"name\": \"a <b> c\",\n" +
-		"  \"count\": 3,\n" +
-		"  \"ok\": true,\n" +
-		"  \"none\": null,\n" +
-		"  \"items\": [\n" +
-		"    \"x\",\n" +
-		"    {\n" +
-		"      \"deep\": 1.5\n" +
-		"    }\n" +
-		"  ]\n" +
-		"}"
-	got := on.jsonColor(doc)
-	if strip(got) != doc {
-		t.Fatalf("jsonColor changed the text under the escapes:\n%s", strip(got))
-	}
-	for _, key := range []string{`"name"`, `"count"`, `"ok"`, `"none"`, `"items"`, `"deep"`} {
-		if !strings.Contains(got, ansiBlue+key+ansiReset) {
-			t.Errorf("key %s is not colored as a key", key)
-		}
-	}
-	for _, val := range []string{`"a <b> c"`, `3`, `"x"`, `1.5`} {
-		if !strings.Contains(got, ansiGreen+val+ansiReset) {
-			t.Errorf("value %s is not colored as a value", val)
-		}
-	}
-	for _, lit := range []string{"true", "null"} {
-		if strings.Contains(got, ansiGreen+lit) || strings.Contains(got, ansiBlue+lit) {
-			t.Errorf("literal %s is colored", lit)
-		}
-	}
-}
 
 func TestReporter_RequestPrintsLineHeadersAndEncodedBody(t *testing.T) {
 	var out bytes.Buffer
@@ -208,21 +145,23 @@ func TestReporter_ColorOnWrapsEveryChannel(t *testing.T) {
 	r.Trace("http://grafana", "svc", "abc")
 	r.Tick("tick %d", 1)
 	got := out.String()
-	if !strings.Contains(got, ansiBold+ansiCyan+"do a thing"+ansiReset) {
+
+	on := style.New(true)
+	if !strings.Contains(got, on.Heading("do a thing")) {
 		t.Error("Intent is not styled as a heading")
 	}
-	if !strings.Contains(got, ansiBold+"SELECT"+ansiReset) {
+	if !strings.Contains(got, on.Bold("SELECT")) {
 		t.Error("SQL did not bold its keyword")
 	}
 	for _, want := range []string{
-		ansiBold + ansiYellow + "POST /x" + ansiReset,
-		ansiBold + ansiYellow + "HTTP 200 OK" + ansiReset,
-		ansiBold + ansiYellow + "Observability" + ansiReset,
-		ansiBlue + "If-Match" + ansiReset + `: "1"`,
-		ansiBlue + "Location" + ansiReset + ": /x/1",
-		ansiBlue + `"n"` + ansiReset + ": " + ansiGreen + "1" + ansiReset,
-		ansiBlue + `"id"` + ansiReset + ": " + ansiGreen + `"1"` + ansiReset,
-		ansiBlue + "Trace ID" + ansiReset + "    : abc",
+		on.Status("POST /x"),
+		on.Status("HTTP 200 OK"),
+		on.Status("Observability"),
+		on.Key("If-Match") + `: "1"`,
+		on.Key("Location") + ": /x/1",
+		on.Key(`"n"`) + ": " + on.Value("1"),
+		on.Key(`"id"`) + ": " + on.Value(`"1"`),
+		on.Key("Trace ID") + "    : abc",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output lacks %q", want)

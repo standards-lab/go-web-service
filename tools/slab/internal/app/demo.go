@@ -7,6 +7,7 @@ import (
 
 	"github.com/standards-lab/go-web-service/tools/slab/demo"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
+	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
 // mountDemo builds the demo mount over cfg: each scenario reads the
@@ -17,7 +18,7 @@ import (
 // needs (the service, Grafana, Tempo) by name.
 func mountDemo(cfg *Config) *cobra.Command {
 	return demo.Commands(cfg.runEnv, func(w io.Writer) *scenario.Reporter {
-		return scenario.NewReporter(w, scenario.ColorEnabled(cfg.NoColor))
+		return scenario.NewReporter(w, style.ColorEnabled(cfg.NoColor))
 	})
 }
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
+	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
 // Reporter is the observation channels every scenario narrates through. Each
@@ -16,13 +17,13 @@ import (
 // reporter was built with color on.
 type Reporter struct {
 	w       io.Writer
-	st      style
+	st      style.Style
 	atBlank bool // whether the line just written was blank
 }
 
 // NewReporter returns a Reporter writing to w, with ANSI color on or off.
 func NewReporter(w io.Writer, color bool) *Reporter {
-	return &Reporter{w: w, st: style{on: color}}
+	return &Reporter{w: w, st: style.New(color)}
 }
 
 // shownHeaders are the response headers Response prints when present, in
@@ -41,7 +42,7 @@ const columns = 80
 // Intent prints step i of n's intent sentence as a heading.
 func (r *Reporter) Intent(i, n int, intent string) {
 	r.blank()
-	r.printf("%s %s\n", r.st.dim(fmt.Sprintf("[%d/%d]", i, n)), r.st.heading(intent))
+	r.printf("%s %s\n", r.st.Dim(fmt.Sprintf("[%d/%d]", i, n)), r.st.Heading(intent))
 }
 
 // Note prints prose, wrapped at columns with every line indented: one call
@@ -62,7 +63,7 @@ func (r *Reporter) Note(format string, args ...any) {
 func (r *Reporter) SQL(caption, text string) {
 	r.blank()
 	r.caption(caption)
-	r.block(r.st.sql(strings.TrimRight(text, "\n")))
+	r.block(r.st.SQL(strings.TrimRight(text, "\n")))
 	r.blank()
 }
 
@@ -73,7 +74,7 @@ func (r *Reporter) SQL(caption, text string) {
 func (r *Reporter) JSON(caption string, raw []byte) {
 	r.blank()
 	r.caption(caption)
-	r.block(r.st.jsonColor(string(bytes.TrimSpace(raw))))
+	r.block(r.st.JSON(string(bytes.TrimSpace(raw))))
 	r.blank()
 }
 
@@ -86,7 +87,7 @@ func (r *Reporter) Table(caption string, rows [][2]string) {
 	}
 	for _, row := range rows {
 		pad := strings.Repeat(" ", width-len(row[0]))
-		r.printf("%s%s%s%s  %s\n", indent, indent, r.st.key(row[0]), pad, row[1])
+		r.printf("%s%s%s%s  %s\n", indent, indent, r.st.Key(row[0]), pad, row[1])
 	}
 }
 
@@ -98,7 +99,7 @@ func (r *Reporter) Table(caption string, rows [][2]string) {
 // Do encodes it to, indented and colored.
 func (r *Reporter) Request(method, path string, headers []httpx.Header, body any) {
 	r.blank()
-	r.printf("%s%s\n", indent, r.st.status(method+" "+path))
+	r.printf("%s%s\n", indent, r.st.Status(method+" "+path))
 	if body != nil && !hasHeader(headers, contentType) {
 		r.header(contentType, "application/json")
 	}
@@ -127,7 +128,7 @@ func (r *Reporter) Request(method, path string, headers []httpx.Header, body any
 func (r *Reporter) Response(res *httpx.Response) {
 	r.blank()
 	status := fmt.Sprintf("HTTP %d %s", res.Status, http.StatusText(res.Status))
-	r.printf("%s%s\n", indent, r.st.status(status))
+	r.printf("%s%s\n", indent, r.st.Status(status))
 	r.body(res.Body)
 	shown := false
 	for _, name := range shownHeaders {
@@ -151,7 +152,7 @@ func (r *Reporter) Response(res *httpx.Response) {
 // than the three lines and no easier to follow.
 func (r *Reporter) Trace(grafanaBase, serviceName, traceID string) {
 	r.blank()
-	r.printf("%s%s\n", indent, r.st.status("Observability"))
+	r.printf("%s%s\n", indent, r.st.Status("Observability"))
 	rows := [][2]string{
 		{"Grafana", strings.TrimRight(grafanaBase, "/") + "/explore"},
 		{"Service Name", serviceName},
@@ -163,14 +164,14 @@ func (r *Reporter) Trace(grafanaBase, serviceName, traceID string) {
 	}
 	for _, row := range rows {
 		pad := strings.Repeat(" ", width-len(row[0]))
-		r.printf("%s%s%s%s: %s\n", indent, indent, r.st.key(row[0]), pad, row[1])
+		r.printf("%s%s%s%s: %s\n", indent, indent, r.st.Key(row[0]), pad, row[1])
 	}
 	r.blank()
 }
 
 // Tick prints one line from a repeating action.
 func (r *Reporter) Tick(format string, args ...any) {
-	r.printf(indent+indent+r.st.dim("·")+" "+format+"\n", args...)
+	r.printf(indent+indent+r.st.Dim("·")+" "+format+"\n", args...)
 }
 
 // printf is the one write every channel goes through; a reporter has no way
@@ -192,12 +193,12 @@ func (r *Reporter) blank() {
 }
 
 func (r *Reporter) caption(text string) {
-	r.printf("%s%s\n", indent, r.st.caption(text))
+	r.printf("%s%s\n", indent, r.st.Caption(text))
 }
 
 // header prints one header line at block depth.
 func (r *Reporter) header(name, value string) {
-	r.printf("%s%s%s: %s\n", indent, indent, r.st.key(name), value)
+	r.printf("%s%s%s: %s\n", indent, indent, r.st.Key(name), value)
 }
 
 // body prints an HTTP body at block depth, set off by a blank line: a JSON
@@ -219,7 +220,7 @@ func (r *Reporter) jsonText(raw []byte) string {
 	if err := json.Indent(&buf, raw, "", "  "); err != nil {
 		return string(raw)
 	}
-	return r.st.jsonColor(buf.String())
+	return r.st.JSON(buf.String())
 }
 
 // hasHeader reports whether headers names name, compared as HTTP does.

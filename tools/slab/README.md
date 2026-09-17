@@ -11,6 +11,8 @@ themselves.
 It is its own Go module, rooted here, so cobra and its command machinery never enter
 `cmd/server`'s dependency graph. Anyone with `go-web-service` cloned already has it.
 
+[`usage.md`](usage.md) walks through every command by hand against the real running stack.
+
 ## Running it
 
 From the repository root:
@@ -49,7 +51,10 @@ scenario's narrated tour: a command sends one real request and returns its resul
 - **admin database** — the database admin service's twelve endpoints: `schema status`, `verify`,
   `up`, `down` (`--steps`, optional — one migration when unset), `steps` (`--steps`, required),
   and `force` (`--version`, required) under `schema`; `seed` (`--state`, optional — the service's
-  configured set when unset) and `state` (`--state`, required); and `diagnostics`, `patterns`,
+  configured set when unset — additive, never a reset: it inserts a set's rows idempotently over
+  the schema as it stands, so seeding an empty set onto a populated database changes nothing) and
+  `state` (`--state`, required — reverts every migration, reapplies the schema, then seeds; the
+  one that actually clears first); and `diagnostics`, `patterns`,
   `statements`, `states`, which take no input at all. Every body-taking command also accepts
   `--body <json>` in place of its flags.
 

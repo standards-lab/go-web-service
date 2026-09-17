@@ -198,12 +198,15 @@ func forceCommand(newClient func() *Client) *cobra.Command {
 // seedCommand is POST Database/seed. The body is --body verbatim, State
 // built from --state when it is set, and otherwise nothing: the service
 // applies its configured set when the request carries no body, and refuses
-// when it configures none.
+// when it configures none. Seed is additive, never a reset: it inserts a
+// named set's rows idempotently over the schema as it stands, so seeding
+// an empty set onto a populated database leaves the existing rows in
+// place. stateCommand is the one that clears first.
 func seedCommand(newClient func() *Client) *cobra.Command {
 	var raw, state string
 	cmd := &cobra.Command{
 		Use:   "seed",
-		Short: "Apply a named set's rows, or the service's configured set when --state is unset",
+		Short: "Apply a named set's rows on top of the schema as it stands (additive, never a reset); the service's configured set when --state is unset",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var body []byte

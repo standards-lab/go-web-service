@@ -39,8 +39,8 @@ github.com/standards-lab/go-observability v0.1.0 h1:SCyA0F2SGpeX8b7SQL5mA4UugVrW
 github.com/standards-lab/go-observability v0.1.0/go.mod h1:rThoLBWUpH54JbDLPw3c5ZN2bQ5h74OHO0j4w4dWMao=
 github.com/standards-lab/go-observability/otlp v0.1.0 h1:1ZELq61NLytSXPYKYgQOC8QKIHeQ4Q3bPex68TePc/E=
 github.com/standards-lab/go-observability/otlp v0.1.0/go.mod h1:krvO1aVDMoqT6hYCW5CLrrtVC/DUSTUApGI+7xp6TU4=
-github.com/standards-lab/go-web-sdk v0.8.0 h1:zdmwgCUxt418a2EyTvwLif/hRXAFpJ9VkdLBNj7PX7U=
-github.com/standards-lab/go-web-sdk v0.8.0/go.mod h1:VFuvBXB2W+5RIoIXK3djgGvcPQapjg2Mzq8gJMftuv4=
+github.com/standards-lab/go-web-sdk v0.9.0 h1:b32BVUlLvLd6W81FgvRnGurxUx1XBOMYeqZICjWx3Sg=
+github.com/standards-lab/go-web-sdk v0.9.0/go.mod h1:VFuvBXB2W+5RIoIXK3djgGvcPQapjg2Mzq8gJMftuv4=
 github.com/standards-lab/sqlate v0.1.1 h1:P/q0GUHfLVeLsM215LvKDpaGH1JSjU41XY28wqjzcQw=
 github.com/standards-lab/sqlate v0.1.1/go.mod h1:pikNmGf/z3x46SBWFXgt/xKIDZuquSgCoXy5OWBFFR4=
 github.com/standards-lab/sqlate/postgres v0.1.1 h1:sUocs23QaRP7WQlIiHZSDHKSD8+fDXMFfFRjvEVwFNc=

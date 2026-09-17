@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/standards-lab/go-web-service/tools/slab/admin/database"
+	"github.com/standards-lab/go-web-service/tools/slab/output"
 )
 
 // Admin composes the admin clients, one field per admin domain: the
@@ -25,9 +26,9 @@ func newAdmin(infra *Infrastructure) *Admin {
 }
 
 // mountAdmin builds the admin mount, the admin command, with each admin
-// domain's commands mounted under it. Run without a subcommand, it prints
-// its help.
-func mountAdmin(adm *Admin) *cobra.Command {
+// domain's commands mounted under it, each rendering through out. Run
+// without a subcommand, it prints its help.
+func mountAdmin(adm *Admin, out *output.Output) *cobra.Command {
 	admin := &cobra.Command{
 		Use:   "admin",
 		Short: "Call the admin services' endpoints",
@@ -36,6 +37,6 @@ func mountAdmin(adm *Admin) *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	admin.AddCommand(database.Commands(adm.Database))
+	admin.AddCommand(database.Commands(adm.Database, out))
 	return admin
 }

@@ -10,17 +10,30 @@ import (
 	"testing"
 
 	"github.com/standards-lab/go-web-sdk"
+
+	"github.com/standards-lab/go-web-service/tools/slab/internal/termtest"
+	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
 // execute runs the app with args in place of the process's own and returns
 // what it wrote to stdout and stderr and the exit code.
 func execute(t *testing.T, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
-	var out, errOut bytes.Buffer
-	a := New(&out, &errOut)
+	var out bytes.Buffer
+	errOut, code := executeTo(t, &out, args...)
+	return out.String(), errOut, code
+}
+
+// executeTo is execute with stdout supplied by the caller, for a test that
+// needs it to be something other than a buffer. It returns what the app
+// wrote to stderr and the exit code.
+func executeTo(t *testing.T, stdout io.Writer, args ...string) (stderr string, code int) {
+	t.Helper()
+	var errOut bytes.Buffer
+	a := New(stdout, &errOut)
 	a.root.SetArgs(args)
 	code = a.Run(context.Background())
-	return out.String(), errOut.String(), code
+	return errOut.String(), code
 }
 
 // exchange is one request as the fake service received it.
@@ -160,6 +173,58 @@ func TestCommands_BindTheClientToTheBaseFlagAsParsed(t *testing.T) {
 				t.Errorf("stdout lacks the rendered body:\n%s", out)
 			}
 		})
+	}
+}
+
+// --no-color is a persistent flag parsed during execution, after New has
+// built the tree and the output the commands render through. Color on a
+// terminal without the flag, and none with it, proves the output reads the
+// flag when a command renders, from the parsed value, not at construction
+// from the default. The terminal is the test's own: under go test the
+// process's stdout is never one, so a color decision taken there would be
+// off in both cases and tell the two apart from nothing.
+func TestCommands_ColorTheResultAsTheNoColorFlagSays(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	on := style.New(true)
+	colored := on.Key(`"code"`) + ": " + on.Value(`"acme"`)
+	for name, tc := range map[string]struct {
+		args    []string
+		colored bool
+	}{
+		"org":                       {[]string{"org", "get", "1"}, true},
+		"org --no-color":            {[]string{"org", "get", "1", "--no-color"}, false},
+		"admin database":            {[]string{"admin", "database", "diagnostics"}, true},
+		"admin database --no-color": {[]string{"admin", "database", "diagnostics", "--no-color"}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, srv := newService(t, http.StatusOK, `{"code":"acme"}`)
+			term := termtest.Open(t)
+			errOut, code := executeTo(t, term.Writer(), append(tc.args, "--base", srv.URL)...)
+			if code != 0 {
+				t.Fatalf("exited %d: %s", code, errOut)
+			}
+			out := term.Output()
+			if got := strings.Contains(out, colored); got != tc.colored {
+				t.Errorf("stdout colored = %v, want %v:\n%q", got, tc.colored, out)
+			}
+			if !strings.Contains(out, `"code"`) {
+				t.Errorf("stdout lacks the rendered body:\n%q", out)
+			}
+		})
+	}
+}
+
+// The same run through a buffer, which is no terminal, is never colored
+// whatever the flag says: the decision is about the stream written to.
+func TestCommands_NeverColorAStreamThatIsNoTerminal(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	_, srv := newService(t, http.StatusOK, `{"code":"acme"}`)
+	out, errOut, code := execute(t, "org", "get", "1", "--base", srv.URL)
+	if code != 0 {
+		t.Fatalf("exited %d: %s", code, errOut)
+	}
+	if want := "{\n  \"code\": \"acme\"\n}\n"; out != want {
+		t.Errorf("stdout = %q, want the plain body %q", out, want)
 	}
 }
 

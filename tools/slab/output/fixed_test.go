@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -14,12 +15,12 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/output"
 )
 
-// fixed runs a FixedCommand built over op with args and returns what it
-// wrote to stdout and the error it returned.
+// fixed runs a FixedCommand built over op with args, color off, and returns
+// what it wrote to stdout and the error it returned.
 func fixed(t *testing.T, status int, op func(context.Context) (*httpx.Response, error), args ...string) (string, error) {
 	t.Helper()
-	cmd := output.FixedCommand("thing", "Read the thing", status, op)
 	var out bytes.Buffer
+	cmd := output.New(&out, &out, nil).FixedCommand("thing", "Read the thing", status, op)
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SilenceUsage = true
@@ -38,7 +39,7 @@ func TestFixedCommand_CallsOpWhenItRunsAndPrintsTheReply(t *testing.T) {
 		}
 		return &httpx.Response{Status: http.StatusOK, Body: []byte(`{"version":2}`)}, nil
 	}
-	cmd := output.FixedCommand("thing", "Read the thing", http.StatusOK, op)
+	cmd := output.New(io.Discard, io.Discard, nil).FixedCommand("thing", "Read the thing", http.StatusOK, op)
 	if calls != 0 {
 		t.Fatalf("FixedCommand called op %d times while building the command", calls)
 	}
@@ -91,12 +92,12 @@ func TestFixedCommand_ExpectsTheStatusItIsGiven(t *testing.T) {
 	_, err := fixed(t, http.StatusOK, func(context.Context) (*httpx.Response, error) {
 		return problem, nil
 	})
-	var pe *output.ProblemError
-	if !errors.As(err, &pe) {
-		t.Fatalf("err = %v (%T), want a *output.ProblemError", err, err)
+	var p web.Problem
+	if !errors.As(err, &p) {
+		t.Fatalf("err = %v (%T), want a web.Problem", err, err)
 	}
-	if pe.Status != http.StatusConflict || pe.Detail != "dirty" {
-		t.Errorf("problem = %+v", pe.Problem)
+	if p.Status != http.StatusConflict || p.Detail != "dirty" {
+		t.Errorf("problem = %+v", p)
 	}
 
 	accepted := &httpx.Response{Status: http.StatusAccepted, Body: []byte(`{}`)}

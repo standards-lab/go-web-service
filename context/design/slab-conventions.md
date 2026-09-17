@@ -28,8 +28,8 @@ calls `app.New(os.Stdout, os.Stderr).Run(ctx)`.
   a black-box HTTP observer states the contract it expects, the way
   `integration/organization_test.go` already does, so a server-side rename breaks slab instead of
   silently following it), `client.go` (routes and one method per endpoint, the package's sole
-  importer of `httpx`), and `commands.go` (`Commands(newClient func() *Client) *cobra.Command`,
-  the domain's cobra subtree).
+  importer of `httpx`), and `commands.go` (`Commands(newClient func() *Client, out
+  *output.Output) *cobra.Command`, the domain's cobra subtree).
 - `admin/<name>` (today: `admin/database`) — the same four-file shape, for an admin service's
   exposure rather than a Domain Service. A sibling of `domain/`, never nested under it: the
   architecture distinguishes the two, and `go-web-service` itself keeps its own `domain/` and
@@ -44,13 +44,26 @@ calls `app.New(os.Stdout, os.Stderr).Run(ctx)`.
   identically (`Reset`, `List`, ...); a step whose value is showing its own literal request keeps
   that request in its scenario file, not here.
 - `output` — the shared result rendering every direct command (`org`, `admin`) needs and neither
-  domain owns: `Response` prints a success body pretty, or the status line alone when it's empty,
-  so a command like `org delete` is never silent; `Error` renders a failure, a `*ProblemError`'s
-  members one per line or a plain error's message; `Expect` turns a mismatched status into that
-  error, decoding the RFC 9457 document when there is one; `FixedCommand` builds a zero-input
-  subcommand from any domain client's bound no-argument method — no `Client` type or generics
-  needed, since a bound method value already has the shape `func(context.Context)
-  (*httpx.Response, error)`.
+  domain owns: `Output`, built once by the composition root over the two streams a command's
+  result and its failure go to, is what every command family renders through — no command names a
+  stream or a style itself. The streams are fixed at construction; the color decision is a
+  function `Output` asks each time it renders, since `--no-color` is a persistent flag cobra
+  parses during `Execute`, after the tree is built, and a render always happens from a command's
+  `RunE`, after that. `Output.Response` prints a success body pretty and colored, or the status
+  line alone when it's empty, so a command like `org delete` is never silent; `Output.Error`
+  renders a failure, a `web.Problem`'s members one per line (`web.Problem` implements `error`
+  directly, so no wrapper type carries it) or a plain error's message; `Expect` turns a mismatched
+  status into that error, decoding the RFC 9457 document when there is one, and stays a free
+  function since it needs no styling; `Output.FixedCommand` builds a zero-input subcommand from
+  any domain client's bound no-argument method — no `Client` type or generics needed, since a
+  bound method value already has the shape `func(context.Context) (*httpx.Response, error)`.
+- `style` — the ANSI styling `output` and `scenario` both color their output through. `style.go`
+  holds the core: the `Style` type and its semantic wrappers (`Bold`, `Heading`, `Key`, `Value`,
+  ...). A format's own file (`sql.go`, `json.go`) holds its coloring as one method built from the
+  core wrappers and nothing else, plus whatever only that format needs. `ColorEnabled` decides
+  whether a stream should carry color — a terminal, `NO_COLOR` unset, and the caller's own
+  `--no-color` not passed — asked of the stream actually written to, never `os.Stdout`
+  unconditionally, so a test can hand it a stream that answers however the case needs.
 - `input` — the shared request-input resolution every body-taking direct command needs: `Body`
   resolves `--body <json>` verbatim or a `fromFlags` value marshaled, the two mutually exclusive
   by cobra (one `MarkFlagsMutuallyExclusive("body", <field>)` call per field flag — a single call
@@ -109,8 +122,9 @@ scenario ever needs one — nothing built so far has.
 A direct command (`org`, `admin database`) sends one real request and prints its result — distinct
 in kind from a narrated scenario's tour, which shows what it is about to do before doing it. One
 subcommand per route, matched 1:1 (`org get-by-path`, `admin database schema force`); a
-zero-input route uses `output.FixedCommand`, everything else builds its request from
-`input.Body`/`input.GuardedBody` and renders it through `output.Response`/`output.Expect`. A
-domain's `Commands(newClient func() *Client)` never names `httpx.NewClient` itself — the
-composition root closes `newClient` over the base URL cobra parses during `Execute`, so
-construction happens the first time a subcommand actually runs, never when the tree is built.
+zero-input route uses the family's `Output.FixedCommand`, everything else builds its request from
+`input.Body`/`input.GuardedBody` and renders it through `Output.Response`/`output.Expect`. A
+domain's `Commands(newClient func() *Client, out *output.Output)` never names `httpx.NewClient`
+or a stream itself — the composition root closes `newClient` over the base URL cobra parses
+during `Execute`, so construction happens the first time a subcommand actually runs, never when
+the tree is built, and hands down the one `Output` it built over the process's own streams.

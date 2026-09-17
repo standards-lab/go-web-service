@@ -70,10 +70,10 @@ func (s *service) only(t *testing.T) exchange {
 // stdout and the error it returned.
 func run(t *testing.T, srv *httptest.Server, args ...string) (string, error) {
 	t.Helper()
+	var out, errOut bytes.Buffer
 	db := database.Commands(func() *database.Client {
 		return database.NewClient(httpx.NewClient(srv.URL))
-	})
-	var out, errOut bytes.Buffer
+	}, output.New(&out, &errOut, nil))
 	db.SetOut(&out)
 	db.SetErr(&errOut)
 	db.SilenceUsage = true
@@ -84,7 +84,7 @@ func run(t *testing.T, srv *httptest.Server, args ...string) (string, error) {
 }
 
 func TestCommands_MountsTheSchemaGroupAndOneSubcommandPerEndpoint(t *testing.T) {
-	db := database.Commands(nil)
+	db := database.Commands(nil, nil)
 	if db.Name() != "database" {
 		t.Errorf("Commands().Name() = %q; want database", db.Name())
 	}
@@ -114,7 +114,7 @@ func TestCommands_ConstructsTheClientWhenASubcommandRuns(t *testing.T) {
 	db := database.Commands(func() *database.Client {
 		calls++
 		return database.NewClient(httpx.NewClient(srv.URL))
-	})
+	}, output.New(io.Discard, io.Discard, nil))
 	if calls != 0 {
 		t.Fatalf("Commands constructed the client %d times while building the tree", calls)
 	}
@@ -389,12 +389,12 @@ func TestBody_IsExclusiveWithTheFieldFlag(t *testing.T) {
 func TestCommands_ReturnTheProblemAnErrorStatusCarries(t *testing.T) {
 	_, srv := newService(t, http.StatusConflict, `{"type":"about:blank","title":"Conflict","status":409,"detail":"dirty at version 2"}`)
 	_, err := run(t, srv, "schema", "up")
-	var pe *output.ProblemError
-	if !errors.As(err, &pe) {
-		t.Fatalf("err = %v (%T), want a *output.ProblemError", err, err)
+	var p web.Problem
+	if !errors.As(err, &p) {
+		t.Fatalf("err = %v (%T), want a web.Problem", err, err)
 	}
-	if pe.Status != 409 || pe.Detail != "dirty at version 2" {
-		t.Errorf("problem = %+v", pe.Problem)
+	if p.Status != 409 || p.Detail != "dirty at version 2" {
+		t.Errorf("problem = %+v", p)
 	}
 }
 

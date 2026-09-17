@@ -1,7 +1,11 @@
 package app
 
 import (
+	"io"
+
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
+	"github.com/standards-lab/go-web-service/tools/slab/output"
+	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
 // Infrastructure holds what the commands are composed on: the HTTP client to
@@ -26,4 +30,17 @@ func newInfrastructure(cfg *Config) *Infrastructure {
 // called from a subcommand's RunE, never at construction.
 func (i *Infrastructure) Client() *httpx.Client {
 	return httpx.NewClient(i.cfg.Base)
+}
+
+// newOutput constructs the output every direct command renders through:
+// results to stdout, failures to stderr, colored when stdout is a terminal
+// and neither NO_COLOR nor --no-color says otherwise. The streams are
+// bound here; the color decision is a closure over cfg that the output
+// asks when a command renders, since --no-color is a persistent flag cobra
+// parses during execution, after this runs. Reading cfg.NoColor here would
+// read it before it is set.
+func newOutput(stdout, stderr io.Writer, cfg *Config) *output.Output {
+	return output.New(stdout, stderr, func() bool {
+		return style.ColorEnabled(stdout, cfg.NoColor)
+	})
 }

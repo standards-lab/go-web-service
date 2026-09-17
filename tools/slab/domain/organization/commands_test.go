@@ -68,10 +68,10 @@ func (s *service) only(t *testing.T) exchange {
 // stdout and the error it returned.
 func run(t *testing.T, srv *httptest.Server, args ...string) (string, error) {
 	t.Helper()
+	var out, errOut bytes.Buffer
 	org := organization.Commands(func() *organization.Client {
 		return organization.NewClient(httpx.NewClient(srv.URL))
-	})
-	var out, errOut bytes.Buffer
+	}, output.New(&out, &errOut, nil))
 	org.SetOut(&out)
 	org.SetErr(&errOut)
 	org.SilenceUsage = true
@@ -82,7 +82,7 @@ func run(t *testing.T, srv *httptest.Server, args ...string) (string, error) {
 }
 
 func TestCommands_MountsOneSubcommandPerEndpoint(t *testing.T) {
-	org := organization.Commands(nil)
+	org := organization.Commands(nil, nil)
 	if org.Name() != "org" {
 		t.Errorf("Commands().Name() = %q; want org", org.Name())
 	}
@@ -101,7 +101,7 @@ func TestCommands_ConstructsTheClientWhenASubcommandRuns(t *testing.T) {
 	org := organization.Commands(func() *organization.Client {
 		calls++
 		return organization.NewClient(httpx.NewClient(srv.URL))
-	})
+	}, output.New(io.Discard, io.Discard, nil))
 	if calls != 0 {
 		t.Fatalf("Commands constructed the client %d times while building the tree", calls)
 	}
@@ -186,12 +186,12 @@ func TestGet_EscapesTheId(t *testing.T) {
 func TestGet_ReturnsTheProblemAnErrorStatusCarries(t *testing.T) {
 	_, srv := newService(t, http.StatusNotFound, `{"type":"about:blank","title":"Not Found","status":404,"detail":"no such row"}`)
 	_, err := run(t, srv, "get", "missing")
-	var pe *output.ProblemError
-	if !errors.As(err, &pe) {
-		t.Fatalf("err = %v (%T), want a *output.ProblemError", err, err)
+	var p web.Problem
+	if !errors.As(err, &p) {
+		t.Fatalf("err = %v (%T), want a web.Problem", err, err)
 	}
-	if pe.Status != 404 || pe.Detail != "no such row" {
-		t.Errorf("problem = %+v", pe.Problem)
+	if p.Status != 404 || p.Detail != "no such row" {
+		t.Errorf("problem = %+v", p)
 	}
 }
 

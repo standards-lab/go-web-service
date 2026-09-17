@@ -34,10 +34,6 @@ const (
 	statementName = "create"
 )
 
-func init() {
-	scenario.Add(compileScenario())
-}
-
 // state is what the steps hand forward: each step fills what a later one
 // reads. A scenario is built over one state, so its steps run in order over
 // the same filesystem and statements.
@@ -46,7 +42,8 @@ type state struct {
 	stmts *query.Statements
 }
 
-func compileScenario() scenario.Scenario {
+// Compile returns the sqlate scenario over fresh state.
+func Compile() scenario.Scenario {
 	s := &state{}
 	return scenario.Scenario{
 		Name:    "sqlate",

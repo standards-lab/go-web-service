@@ -1,42 +1,19 @@
 package cli
 
 import (
+	"io"
+
 	"github.com/spf13/cobra"
 
-	"github.com/standards-lab/go-web-service/tools/slab/env"
+	"github.com/standards-lab/go-web-service/tools/slab/internal/demo"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 
-// demoCommand builds demo with one subcommand per registered scenario, named
-// for the scenario.
+// demoCommand builds the demo subtree over the root's parsed flags: each
+// scenario reads the environment they resolve and narrates through a
+// reporter colored as they say.
 func demoCommand(opts *options) *cobra.Command {
-	demo := &cobra.Command{
-		Use:   "demo <scenario>",
-		Short: "Run one scenario",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return cmd.Help()
-		},
-	}
-	for _, s := range scenario.All() {
-		demo.AddCommand(scenarioCommand(opts, s))
-	}
-	return demo
-}
-
-func scenarioCommand(opts *options, s scenario.Scenario) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   s.Name,
-		Short: s.Summary,
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := env.WithContext(cmd.Context(), opts.runEnv())
-			r := scenario.NewReporter(cmd.OutOrStdout(), scenario.ColorEnabled(opts.noColor))
-			return scenario.Run(ctx, s, r)
-		},
-	}
-	if s.Flags != nil {
-		s.Flags(cmd.Flags())
-	}
-	return cmd
+	return demo.Commands(opts.runEnv, func(w io.Writer) *scenario.Reporter {
+		return scenario.NewReporter(w, scenario.ColorEnabled(opts.noColor))
+	})
 }

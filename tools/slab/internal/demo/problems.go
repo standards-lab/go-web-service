@@ -28,10 +28,6 @@ const (
 // rename of the seeded acme row, and none of them succeeds.
 const renamedName = "Acme Corporation, Inc."
 
-func init() {
-	scenario.Add(problemsScenario())
-}
-
 // problemState is what the steps hand forward: the client and the seeded
 // rows by code, both bound by Initialization. No condition writes a row, so
 // every id and version a later step sends is the one the list showed.
@@ -40,7 +36,8 @@ type problemState struct {
 	tree   api.Tree
 }
 
-func problemsScenario() scenario.Scenario {
+// Problems returns the problems scenario over fresh state.
+func Problems() scenario.Scenario {
 	s := &problemState{}
 	return scenario.Scenario{
 		Name:    "problems",

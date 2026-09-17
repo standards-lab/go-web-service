@@ -11,14 +11,13 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 	"github.com/standards-lab/go-web-service/tools/slab/internal/api"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/cli"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 
 // runProblems runs the problems scenario against the fake.
 func runProblems(t *testing.T) (*fakeService, string) {
 	t.Helper()
-	return runScenario(t, "problems")
+	return runScenario(t, Problems())
 }
 
 func TestProblems_RunsTwelveStepsInOrderAgainstTheFake(t *testing.T) {
@@ -192,13 +191,7 @@ func TestProblems_FailsTheStepWhenTheStatusIsNotTheOneNarrated(t *testing.T) {
 
 func TestList_ShowsTheProblemsScenarioWithItsFourNeeds(t *testing.T) {
 	var out bytes.Buffer
-	root := cli.Root()
-	root.SetOut(&out)
-	root.SetErr(&out)
-	root.SetArgs([]string{"list"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
-		t.Fatalf("list: %v", err)
-	}
+	scenario.WriteListing(&out, Scenarios())
 	listing := out.String()
 	at := strings.Index(listing, "problems  The service's problem-response contract (RFC 9457)")
 	if at < 0 {

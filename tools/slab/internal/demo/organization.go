@@ -28,10 +28,6 @@ const (
 	newParentCode = "engineering"
 )
 
-func init() {
-	scenario.Add(organizationScenario())
-}
-
 // orgState is what the steps hand forward: the client the first step binds,
 // the seeded rows by code from the first raw list, and the identity the
 // create step's response returns. Each command targets a different row,
@@ -44,7 +40,8 @@ type orgState struct {
 	created api.Identity
 }
 
-func organizationScenario() scenario.Scenario {
+// Organization returns the domain scenario over fresh state.
+func Organization() scenario.Scenario {
 	s := &orgState{}
 	return scenario.Scenario{
 		Name:    "domain",

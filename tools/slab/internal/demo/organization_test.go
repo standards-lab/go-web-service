@@ -19,7 +19,6 @@ import (
 
 	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/internal/api"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/cli"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 
@@ -425,18 +424,14 @@ func (f *fakeService) index(o *api.Organization) int {
 // runDomain runs the domain scenario against the fake.
 func runDomain(t *testing.T) (*fakeService, string) {
 	t.Helper()
-	return runScenario(t, "domain")
+	return runScenario(t, Organization())
 }
 
-// runScenario runs the named scenario against a fake of the service, Tempo,
-// and Grafana, from the working directory under the repository (so the
-// reset step reads the real seed file), and returns the narration.
-func runScenario(t *testing.T, name string) (*fakeService, string) {
+// runScenario runs s against a fake of the service, Tempo, and Grafana, from
+// the working directory under the repository (so the reset step reads the
+// real seed file), and returns the narration.
+func runScenario(t *testing.T, s scenario.Scenario) (*fakeService, string) {
 	t.Helper()
-	s, ok := scenario.Lookup(name)
-	if !ok {
-		t.Fatalf("%s is not registered", name)
-	}
 	fake := newFakeService()
 	srv := httptest.NewServer(fake)
 	t.Cleanup(srv.Close)
@@ -613,15 +608,11 @@ func contains(lines []string, want string) bool {
 }
 
 func TestScenario_StopsAtTheServiceNeedWhenNothingListens(t *testing.T) {
-	s, ok := scenario.Lookup("domain")
-	if !ok {
-		t.Fatal("domain is not registered")
-	}
 	srv := httptest.NewServer(http.NotFoundHandler())
 	srv.Close()
 	ctx := env.WithContext(context.Background(), env.Env{Base: srv.URL, Grafana: srv.URL, Tempo: srv.URL})
 	var out bytes.Buffer
-	err := scenario.Run(ctx, s, scenario.NewReporter(&out, false))
+	err := scenario.Run(ctx, Organization(), scenario.NewReporter(&out, false))
 	if err == nil {
 		t.Fatalf("run succeeded with nothing listening:\n%s", out.String())
 	}
@@ -639,14 +630,13 @@ func TestScenario_StopsAtTheServiceNeedWhenNothingListens(t *testing.T) {
 }
 
 func TestScenario_StopsAtTheGrafanaNeedWhenOnlyTheServiceAnswers(t *testing.T) {
-	s, _ := scenario.Lookup("domain")
 	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 	t.Cleanup(service.Close)
 	grafana := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }))
 	t.Cleanup(grafana.Close)
 	ctx := env.WithContext(context.Background(), env.Env{Base: service.URL, Grafana: grafana.URL, Tempo: grafana.URL})
 	var out bytes.Buffer
-	err := scenario.Run(ctx, s, scenario.NewReporter(&out, false))
+	err := scenario.Run(ctx, Organization(), scenario.NewReporter(&out, false))
 	if err == nil || !strings.Contains(err.Error(), `need "Grafana"`) {
 		t.Fatalf("run = %v, want the Grafana need to fail:\n%s", err, out.String())
 	}
@@ -657,13 +647,7 @@ func TestScenario_StopsAtTheGrafanaNeedWhenOnlyTheServiceAnswers(t *testing.T) {
 
 func TestList_ShowsTheScenarioWithItsFourNeeds(t *testing.T) {
 	var out bytes.Buffer
-	root := cli.Root()
-	root.SetOut(&out)
-	root.SetErr(&out)
-	root.SetArgs([]string{"list"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
-		t.Fatalf("list: %v", err)
-	}
+	scenario.WriteListing(&out, Scenarios())
 	for _, want := range []string{
 		"domain    The organization domain's full CRUD surface against the running service",
 		"needs postgres (mise run db-up)",

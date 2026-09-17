@@ -11,10 +11,6 @@ import (
 	"syscall"
 
 	"github.com/standards-lab/go-web-service/tools/slab/internal/cli"
-
-	// Each scenario package registers its scenarios from an init function;
-	// the import is for that side effect, and nothing here calls it.
-	_ "github.com/standards-lab/go-web-service/tools/slab/internal/demo"
 )
 
 func main() {

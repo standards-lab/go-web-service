@@ -1,5 +1,5 @@
 // Package scenario defines what a slab scenario is, the reporter it narrates
-// through, and the registry the command tree is built from.
+// through, the cobra command that runs one, and the listing that prints them.
 package scenario
 
 import (

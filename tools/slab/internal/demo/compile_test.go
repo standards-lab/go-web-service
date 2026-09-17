@@ -8,18 +8,13 @@ import (
 	"testing"
 
 	"github.com/standards-lab/go-web-service/tools/slab/env"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/cli"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 
 func run(t *testing.T, ctx context.Context) (string, error) {
 	t.Helper()
-	s, ok := scenario.Lookup("sqlate")
-	if !ok {
-		t.Fatal("sqlate is not registered")
-	}
 	var out bytes.Buffer
-	err := scenario.Run(ctx, s, scenario.NewReporter(&out, false))
+	err := scenario.Run(ctx, Compile(), scenario.NewReporter(&out, false))
 	return out.String(), err
 }
 
@@ -73,13 +68,7 @@ func TestScenario_StopsAtTheFirstStepWhenTheRepoIsNotARoot(t *testing.T) {
 
 func TestList_ShowsTheScenarioWithNoNeeds(t *testing.T) {
 	var out bytes.Buffer
-	root := cli.Root()
-	root.SetOut(&out)
-	root.SetErr(&out)
-	root.SetArgs([]string{"list"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
-		t.Fatalf("list: %v", err)
-	}
+	scenario.WriteListing(&out, Scenarios())
 	summary := "sqlate    One pattern, one statement that includes it, the two calls that register them, and the compiled result (no compose stack needed)"
 	lines := strings.Split(out.String(), "\n")
 	at := slices.IndexFunc(lines, func(line string) bool { return strings.Contains(line, summary) })

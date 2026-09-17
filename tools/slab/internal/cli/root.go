@@ -1,5 +1,5 @@
 // Package cli is slab's command tree: the root with its persistent flags,
-// list, and one demo subcommand per registered scenario.
+// list, and the demo subtree with one subcommand per scenario.
 package cli
 
 import (
@@ -9,6 +9,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/standards-lab/go-web-service/tools/slab/env"
+	"github.com/standards-lab/go-web-service/tools/slab/internal/demo"
+	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 
 // options are the root command's persistent flags after parsing.
@@ -24,8 +26,8 @@ func (o *options) runEnv() env.Env {
 	return env.Env{Base: o.base, Grafana: o.grafana, Tempo: o.tempo, Repo: o.repo}
 }
 
-// Root builds the command tree. Each call builds a fresh tree over the
-// scenarios registered at that moment.
+// Root builds the command tree. Each call builds a fresh tree, its scenarios
+// constructed anew.
 func Root() *cobra.Command {
 	opts := &options{}
 	root := &cobra.Command{
@@ -42,7 +44,7 @@ func Root() *cobra.Command {
 			}
 			_, _ = fmt.Fprintln(cmd.OutOrStdout())
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Scenarios:")
-			writeListing(cmd.OutOrStdout())
+			scenario.WriteListing(cmd.OutOrStdout(), demo.Scenarios())
 			return nil
 		},
 	}

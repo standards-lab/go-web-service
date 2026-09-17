@@ -91,12 +91,12 @@ func TestFixedCommand_ExpectsTheStatusItIsGiven(t *testing.T) {
 	_, err := fixed(t, http.StatusOK, func(context.Context) (*httpx.Response, error) {
 		return problem, nil
 	})
-	var pe *output.ProblemError
-	if !errors.As(err, &pe) {
-		t.Fatalf("err = %v (%T), want a *output.ProblemError", err, err)
+	var p web.Problem
+	if !errors.As(err, &p) {
+		t.Fatalf("err = %v (%T), want a web.Problem", err, err)
 	}
-	if pe.Status != http.StatusConflict || pe.Detail != "dirty" {
-		t.Errorf("problem = %+v", pe.Problem)
+	if p.Status != http.StatusConflict || p.Detail != "dirty" {
+		t.Errorf("problem = %+v", p)
 	}
 
 	accepted := &httpx.Response{Status: http.StatusAccepted, Body: []byte(`{}`)}

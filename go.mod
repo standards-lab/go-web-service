@@ -8,7 +8,7 @@ require (
 	github.com/standards-lab/go-database/postgres v0.3.0
 	github.com/standards-lab/go-observability v0.1.0
 	github.com/standards-lab/go-observability/otlp v0.1.0
-	github.com/standards-lab/go-web-sdk v0.8.0
+	github.com/standards-lab/go-web-sdk v0.9.0
 	github.com/standards-lab/sqlate v0.1.1
 	github.com/standards-lab/sqlate/postgres v0.1.1
 	go.opentelemetry.io/otel/sdk/metric v1.46.0

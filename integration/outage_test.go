@@ -45,9 +45,9 @@ func TestOutage(t *testing.T) {
 	if ready.Detail == "" {
 		t.Error("readyz 503 carries no detail")
 	}
-	c.Get(t, organizations).Problem(t, http.StatusServiceUnavailable)
-	c.Get(t, organizations+"/"+fin.ID).Problem(t, http.StatusServiceUnavailable)
-	c.Put(t, organizations+"/"+fin.ID, edit, webtest.IfMatch(fin.Version)).Problem(t, http.StatusServiceUnavailable)
+	_ = c.Get(t, organizations).Problem(t, http.StatusServiceUnavailable)
+	_ = c.Get(t, organizations+"/"+fin.ID).Problem(t, http.StatusServiceUnavailable)
+	_ = c.Put(t, organizations+"/"+fin.ID, edit, webtest.IfMatch(fin.Version)).Problem(t, http.StatusServiceUnavailable)
 	c.Get(t, "/healthz").Expect(t, http.StatusOK) // the process is up; only the dependency is down
 
 	f.Restore(t)

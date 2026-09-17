@@ -13,7 +13,6 @@ import (
 
 	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
-	"github.com/standards-lab/go-web-service/tools/slab/output"
 )
 
 // exchange is one request as the fake service received it.
@@ -186,12 +185,12 @@ func TestGet_EscapesTheId(t *testing.T) {
 func TestGet_ReturnsTheProblemAnErrorStatusCarries(t *testing.T) {
 	_, srv := newService(t, http.StatusNotFound, `{"type":"about:blank","title":"Not Found","status":404,"detail":"no such row"}`)
 	_, err := run(t, srv, "get", "missing")
-	var pe *output.ProblemError
-	if !errors.As(err, &pe) {
-		t.Fatalf("err = %v (%T), want a *output.ProblemError", err, err)
+	var p web.Problem
+	if !errors.As(err, &p) {
+		t.Fatalf("err = %v (%T), want a web.Problem", err, err)
 	}
-	if pe.Status != 404 || pe.Detail != "no such row" {
-		t.Errorf("problem = %+v", pe.Problem)
+	if p.Status != 404 || p.Detail != "no such row" {
+		t.Errorf("problem = %+v", p)
 	}
 }
 

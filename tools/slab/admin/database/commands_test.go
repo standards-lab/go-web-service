@@ -13,7 +13,6 @@ import (
 
 	"github.com/standards-lab/go-web-service/tools/slab/admin/database"
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
-	"github.com/standards-lab/go-web-service/tools/slab/output"
 )
 
 // exchange is one request as the fake service received it.
@@ -389,12 +388,12 @@ func TestBody_IsExclusiveWithTheFieldFlag(t *testing.T) {
 func TestCommands_ReturnTheProblemAnErrorStatusCarries(t *testing.T) {
 	_, srv := newService(t, http.StatusConflict, `{"type":"about:blank","title":"Conflict","status":409,"detail":"dirty at version 2"}`)
 	_, err := run(t, srv, "schema", "up")
-	var pe *output.ProblemError
-	if !errors.As(err, &pe) {
-		t.Fatalf("err = %v (%T), want a *output.ProblemError", err, err)
+	var p web.Problem
+	if !errors.As(err, &p) {
+		t.Fatalf("err = %v (%T), want a web.Problem", err, err)
 	}
-	if pe.Status != 409 || pe.Detail != "dirty at version 2" {
-		t.Errorf("problem = %+v", pe.Problem)
+	if p.Status != 409 || p.Detail != "dirty at version 2" {
+		t.Errorf("problem = %+v", p)
 	}
 }
 

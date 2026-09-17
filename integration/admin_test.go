@@ -167,16 +167,16 @@ func TestAdmin(t *testing.T) {
 	})
 
 	t.Run("steps", func(t *testing.T) {
-		c.Post(t, admin+"/schema/steps", map[string]int{"steps": 0}).Problem(t, http.StatusBadRequest)
-		c.Post(t, admin+"/schema/down", map[string]int{"steps": 0}).Problem(t, http.StatusBadRequest)
-		c.Post(t, admin+"/schema/steps", map[string]int{"step": 1}).Problem(t, http.StatusBadRequest) // unknown field
+		_ = c.Post(t, admin+"/schema/steps", map[string]int{"steps": 0}).Problem(t, http.StatusBadRequest)
+		_ = c.Post(t, admin+"/schema/down", map[string]int{"steps": 0}).Problem(t, http.StatusBadRequest)
+		_ = c.Post(t, admin+"/schema/steps", map[string]int{"step": 1}).Problem(t, http.StatusBadRequest) // unknown field
 		assertEmptySchema(t, schema(t, c.Post(t, admin+"/schema/steps", map[string]int{"steps": -1})))
 		assertCurrentSchema(t, schema(t, c.Post(t, admin+"/schema/steps", map[string]int{"steps": 1})))
 	})
 
 	t.Run("force", func(t *testing.T) {
-		c.Post(t, admin+"/schema/force", map[string]int{"version": -1}).Problem(t, http.StatusBadRequest)
-		c.Post(t, admin+"/schema/force", map[string]int{"version": 7}).Problem(t, http.StatusBadRequest) // outside the set
+		_ = c.Post(t, admin+"/schema/force", map[string]int{"version": -1}).Problem(t, http.StatusBadRequest)
+		_ = c.Post(t, admin+"/schema/force", map[string]int{"version": 7}).Problem(t, http.StatusBadRequest) // outside the set
 		// Force sets the history without touching the schema: to 0 the set
 		// reads as pending though the table stands; back to 1 it is current.
 		assertEmptySchema(t, schema(t, c.Post(t, admin+"/schema/force", map[string]int{"version": 0})))

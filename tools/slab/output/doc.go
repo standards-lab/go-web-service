@@ -7,8 +7,8 @@
 // Response writes a success to the command's stdout: the body pretty-printed
 // when there is one, or the status line (204 No Content) when there is not,
 // so a command is never silent. Error writes a failure to the command's
-// stderr: the members of a problem document when the error carries one (a
-// *ProblemError), or the error's message otherwise. Expect turns a response
+// stderr: the members of a problem document when the error is or wraps a
+// web.Problem, or the error's message otherwise. Expect turns a response
 // with the wrong status into that error, decoding the RFC 9457 problem
 // document the service answers with. The exit code is the composition
 // root's concern, not this package's: a command returns the error, and the

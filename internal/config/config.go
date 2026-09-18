@@ -10,6 +10,7 @@ import (
 	"github.com/standards-lab/go-database"
 	"github.com/standards-lab/go-observability"
 	"github.com/standards-lab/go-web-sdk"
+	"github.com/standards-lab/go-web-sdk/middleware/rate-limit"
 )
 
 // envPrefix namespaces the service's environment variables ("app" →
@@ -26,6 +27,7 @@ type Config struct {
 	Server          web.Config           `json:"server"`
 	Database        database.Config      `json:"database"`
 	Observability   observability.Config `json:"observability"`
+	RateLimit       ratelimit.Config     `json:"rate_limit"`
 	Reads           ReadsConfig          `json:"reads"`
 	Admin           AdminConfig          `json:"admin"`
 	ShutdownTimeout libconfig.Duration   `json:"shutdown_timeout"`
@@ -44,6 +46,7 @@ func (c *Config) Merge(src *Config) {
 	c.Server.Merge(&src.Server)
 	c.Database.Merge(&src.Database)
 	c.Observability.Merge(&src.Observability)
+	c.RateLimit.Merge(&src.RateLimit)
 	c.Reads.Merge(&src.Reads)
 	c.Admin.Merge(&src.Admin)
 }
@@ -81,6 +84,9 @@ func (c *Config) Finalize(envPrefix string) error {
 	}
 	if err := c.Observability.Finalize(envPrefix); err != nil {
 		return fmt.Errorf("observability: %w", err)
+	}
+	if err := c.RateLimit.Finalize(envPrefix); err != nil {
+		return fmt.Errorf("rate_limit: %w", err)
 	}
 	if err := c.Reads.Finalize(envPrefix); err != nil {
 		return fmt.Errorf("reads: %w", err)

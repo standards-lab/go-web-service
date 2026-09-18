@@ -16,11 +16,15 @@ func TestConfig_MergeOverlaysSetFields(t *testing.T) {
 	base.Log.Level = logging.LevelInfo
 	base.Server.Host = "0.0.0.0"
 	base.Database.Name = "app"
+	baseRequests := 300
+	base.RateLimit.Requests = &baseRequests
 
 	overlay := &config.Config{}
 	overlay.Log.Level = logging.LevelDebug
 	overlay.Server.Host = "127.0.0.1"
 	overlay.Database.Host = "db.internal"
+	overlayRequests := 50
+	overlay.RateLimit.Requests = &overlayRequests
 
 	base.Merge(overlay)
 
@@ -40,6 +44,9 @@ func TestConfig_MergeOverlaysSetFields(t *testing.T) {
 	if got := base.ShutdownTimeout.Duration(); got != 10*time.Second {
 		t.Errorf("ShutdownTimeout = %s, want 10s", got)
 	}
+	if base.RateLimit.Requests == nil || *base.RateLimit.Requests != 50 {
+		t.Errorf("RateLimit.Requests = %v, want 50", base.RateLimit.Requests)
+	}
 }
 
 func TestConfig_FinalizeDefaults(t *testing.T) {
@@ -57,6 +64,12 @@ func TestConfig_FinalizeDefaults(t *testing.T) {
 	}
 	if got := cfg.Server.Addr(); got != "0.0.0.0:8080" {
 		t.Errorf("Server.Addr() = %s, want 0.0.0.0:8080", got)
+	}
+	if cfg.RateLimit.Requests == nil || *cfg.RateLimit.Requests != 300 {
+		t.Errorf("RateLimit.Requests = %v, want 300", cfg.RateLimit.Requests)
+	}
+	if cfg.RateLimit.Window == nil || cfg.RateLimit.Window.Duration() != time.Minute {
+		t.Errorf("RateLimit.Window = %v, want 1m", cfg.RateLimit.Window)
 	}
 }
 
@@ -78,12 +91,16 @@ func TestConfig_FinalizeSeedsEnvNamesFromPrefix(t *testing.T) {
 	if got := cfg.Database.Env.Name; got != "APP_DATABASE_NAME" {
 		t.Errorf("Database.Env.Name = %s, want APP_DATABASE_NAME", got)
 	}
+	if got := cfg.RateLimit.Env.Requests; got != "APP_RATE_LIMIT_REQUESTS" {
+		t.Errorf("RateLimit.Env.Requests = %s, want APP_RATE_LIMIT_REQUESTS", got)
+	}
 }
 
 func TestConfig_FinalizeEnvOverrides(t *testing.T) {
 	t.Setenv("APP_SHUTDOWN_TIMEOUT", "30s")
 	t.Setenv("APP_LOG_LEVEL", "debug")
 	t.Setenv("APP_SERVER_PORT", "9090")
+	t.Setenv("APP_RATE_LIMIT_REQUESTS", "50")
 
 	cfg := configtest.Minimal()
 	if err := cfg.Finalize("app"); err != nil {
@@ -98,6 +115,9 @@ func TestConfig_FinalizeEnvOverrides(t *testing.T) {
 	}
 	if cfg.Server.Port == nil || *cfg.Server.Port != 9090 {
 		t.Errorf("Server.Port = %v, want 9090", cfg.Server.Port)
+	}
+	if cfg.RateLimit.Requests == nil || *cfg.RateLimit.Requests != 50 {
+		t.Errorf("RateLimit.Requests = %v, want 50", cfg.RateLimit.Requests)
 	}
 }
 

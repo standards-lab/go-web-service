@@ -8,7 +8,8 @@ require (
 	github.com/standards-lab/go-database/postgres v0.3.0
 	github.com/standards-lab/go-observability v0.1.0
 	github.com/standards-lab/go-observability/otlp v0.1.0
-	github.com/standards-lab/go-web-sdk v0.9.0
+	github.com/standards-lab/go-web-sdk v0.10.0
+	github.com/standards-lab/go-web-sdk/middleware/rate-limit v0.1.0
 	github.com/standards-lab/sqlate v0.1.1
 	github.com/standards-lab/sqlate/postgres v0.1.1
 	go.opentelemetry.io/otel/sdk/metric v1.46.0
@@ -19,6 +20,7 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
+	github.com/go-chi/httprate v0.16.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -27,7 +29,9 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/pgx/v5 v5.10.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/standards-lab/sqlate/sqlint v0.1.0 // indirect
+	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.71.0 // indirect
 	go.opentelemetry.io/otel v1.46.0 // indirect

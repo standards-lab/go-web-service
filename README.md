@@ -167,7 +167,8 @@ Configuration layers in a fixed precedence, later sources winning:
 4. `APP_*` environment variables, the final override: the log, server, and shutdown variables,
    the `APP_DATABASE_*` family (`APP_DATABASE_HOST`, `APP_DATABASE_NAME`,
    `APP_DATABASE_USER`, `APP_DATABASE_PASSWORD`, `APP_DATABASE_PORT`, and the pool settings),
-   `APP_OBSERVABILITY_ENDPOINT` and `APP_OBSERVABILITY_SAMPLE_RATIO`, the reads paging policy
+   `APP_OBSERVABILITY_ENDPOINT` and `APP_OBSERVABILITY_SAMPLE_RATIO`, the rate limit
+   (`APP_RATE_LIMIT_REQUESTS`, `APP_RATE_LIMIT_WINDOW`), the reads paging policy
    (`APP_READS_DEFAULT_SIZE`, `APP_READS_MAX_SIZE`), and the admin seed set (`APP_ADMIN_SEED`, a
    state name).
 

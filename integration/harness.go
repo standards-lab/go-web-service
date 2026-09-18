@@ -21,6 +21,13 @@ const (
 	defaultObservabilityEndpoint = "127.0.0.1:4317"
 )
 
+// defaultRateLimitRequests overrides the service's own default (300 per
+// minute) generously upward, so no scenario's own request volume against
+// one process trips the limit; a scenario that means to exercise the limit
+// itself sets Options.Env to a tighter value, which wins as the later
+// entry.
+const defaultRateLimitRequests = "1000"
+
 // Main is the suite's TestMain: it builds cmd/server once, with the race
 // detector so the service runs under it too, runs the tests, and removes
 // the build. A build failure ends the run before any test starts.
@@ -122,6 +129,7 @@ func environment(opts Options, addr, dbHost, dbPort string) []string {
 		"APP_DATABASE_PASSWORD=" + password,
 		"APP_OBSERVABILITY_ENDPOINT=" + endpoint,
 		"APP_ADMIN_SEED=" + opts.Seed,
+		"APP_RATE_LIMIT_REQUESTS=" + defaultRateLimitRequests,
 	}
 	return append(env, opts.Env...)
 }

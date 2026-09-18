@@ -21,6 +21,10 @@
   "observability": {
     "endpoint": "127.0.0.1:4317"
   },
+  "rate_limit": {
+    "requests": 300,
+    "window": "1m"
+  },
   "admin": {
     "seed": ""
   },

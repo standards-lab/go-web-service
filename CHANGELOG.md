@@ -9,6 +9,10 @@ accumulate under [Unreleased] until the first cut.
 
 ### Added
 
+- Rate limiting on the router-level middleware stack, over
+  `github.com/standards-lab/go-web-sdk/middleware/rate-limit`: a client over the configured limit
+  (300 requests per minute by default, `APP_RATE_LIMIT_REQUESTS`/`APP_RATE_LIMIT_WINDOW`) gets a
+  429 problem document with `Retry-After`; the liveness and readiness probes are exempt.
 - `tools/slab`, a narrated-scenario CLI in its own module (`mise run slab -- list`/
   `demo <scenario>`; see [`tools/slab/README.md`](tools/slab/README.md)): `sqlate` runs the
   library's compile pipeline in process over the repository's own sources; `domain` drives the

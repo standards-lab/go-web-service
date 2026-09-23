@@ -8,14 +8,65 @@ Initialized from the [go-web-sdk-template](https://github.com/standards-lab/go-w
 
 ## Stack
 
-- SQL: Postgres, through [go-database](https://github.com/standards-lab/go-database) for the pool
-  and its administration and [sqlate](https://github.com/standards-lab/sqlate) for the authored
-  SQL.
+The service is one composition on one declared stack, with one provider per capability. A variant
+on another engine or identity provider would be a separate repository, never a switch inside
+this one.
+
+- SQL: Postgres 18, through [go-database](https://github.com/standards-lab/go-database) for the
+  pool and its administration and [sqlate](https://github.com/standards-lab/sqlate) for the
+  authored SQL. Locally it runs from the compose file. A managed deployment is planned on
+  Azure Database for PostgreSQL or Amazon RDS through the same provider, changing only the
+  configuration.
 - Observability: OpenTelemetry, reached through a `docker compose` profile (`mise run otel-up`)
   that runs the collector and a local Loki, Tempo, Mimir, and Grafana stack — see
   [`compose/README.md`](compose/README.md). The service exports traces and metrics over OTLP and
   structured JSON logs correlated to them by trace id, all through
   [go-observability](https://github.com/standards-lab/go-observability).
+
+### Standard and native tiers
+
+Each use of a capability runs at one of two tiers, chosen per use. The standard tier uses the
+technology's common standard: ISO/IEC 9075 SQL in an authored `.sql` file that declares
+`--| tier: standard`, and RFC 9110 and RFC 9457 through go-web-sdk's `web` package. Domain
+statements, handlers, and the composition root use the standard tier by default. The native
+tier uses the provider's own features, in a `.sql` file that declares `--| tier: native` and
+names the feature and how another engine expresses it. Native use is first-class, because the
+point of choosing Postgres is to use it, and it is contained: each file declares its own tier,
+`sqlint` fails a standard file that uses a native form, and the admin mount reports each
+statement's tier.
+
+Only the composition root, `internal/app/infrastructure.go`, imports a provider: it builds the
+pool through go-database's provider and takes the dialect from sqlate's. Every other package is
+provider-free, and native use stays in SQL files. The boundary is a convention; no linter
+enforces it.
+
+### What a provider swap changes
+
+Moving to another SQL engine is a port, because the service owns a schema written for
+Postgres. A port changes the two provider imports and the files below, and never the
+configuration or the code around the statements:
+
+- `data/migrations/0001_organization`, engine DDL by nature: `uuidv7()` as the id default (a
+  Postgres 18 builtin; elsewhere the application or the engine mints ids), `UNIQUE NULLS NOT
+  DISTINCT` for the sibling-scoped code (a partial unique index or a coalesced key elsewhere),
+  and the `~` regular-expression `CHECK` on `code`.
+- `data/patterns/identity.sql`: `RETURNING` for the identity every create returns (`OUTPUT
+  INSERTED`, `RETURNING INTO`, or an insert and a read elsewhere).
+- `data/statements/lock.sql`: `pg_advisory_xact_lock` over `hashtext` (the engine's application
+  lock, or a `FOR UPDATE` mutex row, elsewhere).
+- `data/statements/seed_organization.sql`: `ON CONFLICT ON CONSTRAINT ... DO NOTHING` with
+  `RETURNING` for the idempotent seed (`MERGE` or `INSERT IGNORE` elsewhere).
+- `domain/organization/statements/create.sql`: native through the identity pattern only.
+
+The read path, the lineage CTE, and the guarded commands use the standard tier. This command
+lists the native files:
+
+```sh
+grep -rl --include='*.sql' -- '--| tier: native' .
+```
+
+HTTP has no provider, and OpenTelemetry adds nothing to the list: the service uses only the
+OpenTelemetry API, SDK, and OTLP, so a backend swap changes only the collector's configuration.
 
 ## Getting started
 

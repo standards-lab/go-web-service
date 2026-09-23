@@ -1,11 +1,7 @@
 # Domain architecture
 
-The service's domain-layer layout standard, settled in the `organization-reads` session
-(2026-08-26), carried through the writes slice, and rewritten onto authored SQL at
-`v1.data.sql.integration.service` (2026-09-06) by the organization package, the template every
-domain layer follows. The code expresses the organization instance; this note carries the rules
-the next layer is built by, and decays per rule as the code comes to express each one more than
-once.
+This note holds the rules every domain layer is built by. The organization package is the only
+domain layer; a rule leaves this note once the code expresses it in more than one layer.
 
 ## The domain layer
 
@@ -34,8 +30,8 @@ layer:
   domain's name, binds each statement to a typed handle (a projection for the read model, rows
   for a scan, a guard for a version-checked command), and exposes each operation as a store
   method that reads as what it does. Translation files are capability-named, one per
-  infrastructure integration (`storage.go`, `messaging.go`, `ai.go` to come). A service never
-  touches an infrastructure API outside its translation file.
+  infrastructure integration (`storage.go`, `messaging.go`, and `ai.go` are planned). A
+  service never touches an infrastructure API outside its translation file.
 - `service.go`: the single domain service, a concrete type constructed from the `data` package,
   registering its statement verification at the domains' lifecycle stage, its methods the direct
   map from endpoint to operation, every operation delegated whole to the store after the
@@ -59,8 +55,6 @@ at the engine, never a 500. Which statuses carry a problem's detail on the wire 
 `ErrorWriter.Detail`, plus whatever statuses a layer's writer adds.
 
 ## The command side
-
-Settled at `v1.data.writes.organization` and restated on go-web-sdk v0.6.0:
 
 - A guarded command handler reads its inputs in one order, the path id, the If-Match
   precondition, then the strictly decoded body (`sdk.Command`), then calls the service. Commands
@@ -112,10 +106,8 @@ Per-layer policy variation is different values at different construction sites.
 Library promotion candidates stage in the base `sdk` package: flat, a package meant to empty out
 accumulates no sub-packages, with each file named for the library its contents are bound for.
 Staging is cheap and deliberate; the `v1.data.evaluation` task rules on every tenant. The
-reads-era inventory landed in the libraries and the template, and the If-Match parse and the
-strict body decode landed in go-web-sdk v0.6.0. The tenants now are `PathID`, the typed
-path-value parse, and `Command`, the guarded-command read composing it with the SDK's
-`IfMatch` and `DecodeJSON`, both bound for go-web-sdk.
+tenants are `PathID`, the typed path-value parse, and `Command`, the guarded-command read
+composing it with the SDK's `IfMatch` and `DecodeJSON`, both bound for go-web-sdk.
 
 ## The operation-shape principle
 
@@ -125,28 +117,23 @@ job is what SQL cannot express: binding, composing the collection read against t
 fields, mapping rows, verifying the text against the schema, and owning the transaction. A
 shared SQL shape is a pattern the application publishes (`data/patterns`, the `app` namespace)
 or the library does (`sql`), spliced at compile time; a domain defines no patterns. The test for
-any Go around a statement: would it change the SQL I would have written by hand? The strategy
-record is `standards-lab context/design/dsl-driven-services.md`.
+any Go around a statement: would it change the SQL I would have written by hand?
 
 A library change is worth pausing a session for only when the consumer cannot correctly express
 the operation through exported API; an inelegant-but-expressible shape stages in `sdk`.
 
-## Elemental Architecture implications
+## Promotion candidates
 
-Held here until promoted to the architecture repository:
+Two rules are candidates for the architecture repository once a second domain layer proves
+them:
 
-- The domain layer as a compositional grouping, one package, one Domain Service, one handler, is
-  a Go Elemental expression candidate.
-- The capability-named translation file is the in-package counterpart of EA's
-  downward-dependency rule.
-- Resolved (2026-09-03): EA's element definition said a Domain Service "anchors exactly one
-  Entity". The `v1.data.sql.prototype` review amended it: a Domain Service anchors a domain, a
-  composition of one or more Entities, and "exactly one" was the single-entity special case. The
-  architecture's definition carries the amendment since 2026-09-08, with the anchor named the
-  root Entity.
+- The domain layer as a compositional grouping (one package, one Domain Service, one handler)
+  is a candidate Go Elemental expression.
+- The capability-named translation file is the in-package counterpart of the Elemental
+  Architecture's downward-dependency rule.
 
 ## Deferred by design
 
 Multi-entity role refinements belong to the first multi-entity layer. Soft delete as the
-standard's convention (`concepts/data-layer.md`) waits for the first domain that needs it. The
+standard's convention (`data-layer.md`) waits for the first domain that needs it. The
 holistic operation pass over the whole architecture is `v1.data.evaluation`.

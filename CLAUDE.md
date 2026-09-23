@@ -27,10 +27,20 @@ workflow; start from `context/README.md`.
   service; `sqlint.toml` at the root names the sources and roles the lint checks.
 - **Stack.** Postgres is the declared SQL engine, run locally through `compose.yml`. A provider
   variant is never a switch inside this service; it would be a separate focused reference.
-- **Documented layers.** The documented layer is the unit of change: each capability lands
-  complete before the next begins (`context/design/documented-layers.md`). The service is
-  versionless until its first release: no tags yet; `CHANGELOG.md` accumulates under
-  `[Unreleased]` until the first cut, which `release.yml` turns into a GitHub release.
+- **Documented layers.** The documented layer is the unit of change: a capability lands its
+  code, its README section, and its tests in one change, and is complete before the next
+  begins. A documentation section that no longer matches the code is a defect, fixed in the same
+  change. A change is additive (a new layer) or modifying (a new provider, a CQRS change), and it
+  also touches the boundaries the layer shares with other layers. Every change runs as a
+  marathon session.
+- **Releases.** The service is the repository's only releasable artifact. It has no version
+  until its first release: no tag exists, and `CHANGELOG.md` accumulates under `[Unreleased]`
+  until the first cut, which `release.yml` turns into a GitHub release. The architecture
+  repository's
+  [release-and-ci](https://github.com/standards-lab/architecture/blob/main/standards/go-elemental/principles/release-and-ci.md)
+  and [independent-releases](https://github.com/standards-lab/architecture/blob/main/principles/independent-releases.md)
+  principles set the release discipline: coherent snapshots with their pins, prerelease tags,
+  and a library change released together with the service change that proves it.
 - **Tests.** Two tiers, documented in the README: the unit tier hermetic over sqlate's
   scripted driver, with `internal/config/configtest` the single source of valid test
   configuration, and the integration tier in the root `integration` package over the SDKs'

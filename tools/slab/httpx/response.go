@@ -1,6 +1,3 @@
-// Package httpx is the HTTP client the scenarios call the service through:
-// the Client that sends a request, the Response the reporter renders, and
-// the Live probe a scenario's Need checks the service with.
 package httpx
 
 import (

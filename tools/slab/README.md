@@ -90,23 +90,23 @@ A new scenario, command, or domain follows these rules. Each package's `doc.go` 
 that are its own.
 
 - **Its own module.** slab depends on sqlate, go-web-sdk, and cobra, never on go-web-service's
-  root module. The service is versionless, so a dependency on it would pin a pseudo-version that
-  goes stale in a fresh clone or CI; local cross-module work goes through the gitignored
-  `go.work`.
-- **The service's layout.** `internal/app` is the composition root, one file per layer, and the
-  only package that constructs a dependency or names a mount. `cmd/slab` is process entry alone.
-  `domain/<name>` is the client-side counterpart of the service's domain package, and
-  `admin/<name>` of an admin service: siblings, never nested, as in the service. Both have the
-  same four files, `doc.go`, `entities.go`, `client.go`, and `commands.go`. An admin package's
-  `entities.go` restates request bodies only, because its responses print as raw JSON and nothing
-  decodes them.
-- **Shared layers.** `output` renders every direct command's result, `input` resolves every
-  request body, `style` holds all ANSI styling, and `httpx` is the protocol layer. `env` depends
-  on no other slab package, so every layer can read it.
-- **Direct commands** map one subcommand to one route. A command's field flags name the wire
-  field they build (`--code`, `--parent-id`), and `--body` and `--version` mean the same on every
-  command. A domain's `Commands` takes a client constructor and the one `Output`, and never names
-  `httpx.NewClient` or a stream.
+  root module. The service has no release version, so a dependency on it would pin a
+  pseudo-version that goes stale in a fresh clone or CI; local cross-module work goes through the
+  gitignored `go.work`.
+- **The service's layout.** slab mirrors the service's layout. `internal/app` is the composition
+  root, one file per layer, and the only package that constructs a dependency or names a mount.
+  `cmd/slab` holds process entry and nothing else. `domain/<name>` is the client-side counterpart
+  of a service domain package, and `admin/<name>` of an admin service; the two trees are
+  siblings, never nested, as in the service. Each package holds the same four files: `doc.go`,
+  `entities.go`, `client.go`, and `commands.go`. An admin package's `entities.go` restates
+  request bodies only, because its responses print as raw JSON and nothing decodes them.
+- **Shared packages.** `output` renders every direct command's result, `input` resolves every
+  request body, `style` holds all ANSI styling, and `httpx` holds everything about HTTP that is
+  not specific to the service. `env` imports no other slab package, so every package can read it.
+- **Direct commands.** Each direct command maps to one route. A command's field flags name the
+  wire field they build (`--code`, `--parent-id`), and `--body` and `--version` mean the same on
+  every command. A domain's `Commands` takes a client constructor and the one `Output`, and never
+  names `httpx.NewClient` or a stream.
 - **Naming.** A root subcommand is bare, never capability-prefixed: `demo domain`, not
-  `demo domain-crud`. `admin database` nests the admin mount's one domain under its own word, so a
-  second arrives without renaming the first.
+  `demo domain-crud`. `admin database` nests the admin mount's one domain under the `admin`
+  command, so a second admin domain can arrive without renaming the first.

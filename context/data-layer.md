@@ -1,15 +1,15 @@
 # The data layer
 
-Design direction for the data composition and CQRS layer, `v1.data` in the workspace roadmap,
-which holds the tasks and their order. This note holds the layer's strategy and the planned
-domain model. Direction here is a candidate until a task's session settles it; a section the
-code comes to express is deleted.
+This note holds the design direction for the data composition and CQRS layer: its strategy and
+its planned domain model. The layer is goal `v1.data` in the workspace roadmap, which holds the
+tasks and their order. Direction here is a candidate until a task's session settles it; a
+section the code comes to express is deleted.
 
 ## Strategy
 
 - The service demonstrates both tiers of the database capability on purpose: standard SQL
   in authored files throughout, and native Postgres features where they earn it, each in a
-  file that declares it in its header and so enters the port list (the README's Stack).
+  file that declares it in its header and so enters the port list (the README's Stack section).
   Standard SQL is preferred where it costs nothing; a native choice is a choice, named as such.
 - Library-bound infrastructure is prototyped natively in the SDK repository that owns it:
   go-database for the persistence surface, go-web-sdk for the web surface. It's linked into
@@ -24,11 +24,11 @@ code comes to express is deleted.
 
 ## Reads and writes
 
-The organization domain runs on authored SQL; the rules the next layer is built by are
-`domain-architecture.md` and `internal/app/doc.go`. Ids are database-minted (`uuidv7()`) and
-`RETURNING` is the application's identity pattern, both on the port list. Base packages outside
-`internal/` are importable by other modules, a deliberate choice for a reference service, with
-the wiring kept compiler-private under `internal/`.
+The organization domain runs on authored SQL; `domain-architecture.md` and `internal/app/doc.go`
+hold the rules the next layer is built by. Ids are database-minted (`uuidv7()`) and `RETURNING` is
+the application's identity pattern, both on the port list. Base packages outside `internal/` are
+importable by other modules, a deliberate choice for a reference service, with the wiring kept
+compiler-private under `internal/`.
 
 ## Domain direction (candidate until a task settles it)
 
@@ -37,7 +37,8 @@ catalog templates with owned instances, and category branches composed over a ge
 
 - **organization**: a self-referencing `parent_id`, sibling-scoped unique slug codes (the
   property that makes paths unique), and the path a read-time projection from a recursive CTE.
-  The closure table that authorization needs is planned in the coordinator's auth strategy.
+  The closure table that authorization needs is planned in the auth strategy at the coordinator repository,
+  standards-lab.
 - **people** (`v1.data.people`): `person` is the stable UUID anchor, with a record-status enum
   other domains react to, a unit FK, and activate, deactivate, and transfer-unit action
   commands.
@@ -68,16 +69,17 @@ surfaces, routes, constraint names, and enum vocabularies are settled per task.
 
 ## Evaluation evidence (`v1.data.evaluation`)
 
-For the cross-board evaluation: the `sdk` package stages two tenants for go-web-sdk, `PathID`
-and `Command`. The `data` package holds the
-shared status matcher and the directives lowering, which the template cannot scaffold while it
-stays engine-free. A generic seed helper is a fit question for the evaluation: it promotes to
-go-database when its shape is the library's own, not when a second service repeats the
-per-table loop.
+The `v1.data.evaluation` task weighs this evidence. The `sdk` package stages two tenants for go-web-
+sdk, `PathID` and `Command`. The `data` package holds the shared status matcher and the directives
+lowering, which the template cannot scaffold while it stays engine-free. A generic seed helper is a
+fit question for the evaluation: it promotes to go-database when its shape is the library's own, not
+when a second service repeats the per-table loop. It also decides whether a linter (`depguard`,
+denying the provider modules outside the composition root) enforces the provider import boundary the
+README's Stack section states.
 
 ## Prior R&D
 
-`personnel-service-demo`, cataloged at the coordinator, is the input for the CQRS shape, the four-tier
-business-logic placement, the error model, and the projection-driven data layer. It is input to
-re-derive from, not a baseline to inherit. This reference stays in volatile context; the design
-notes and the README justify every convention on its own merit.
+`personnel-service-demo`, cataloged in standards-lab's references, is the input for the CQRS shape, the
+four-tier business-logic placement, the error model, and the projection-driven data layer. It
+is input to re-derive from, not a baseline to inherit. This reference stays in volatile
+context; the design notes and the README justify every convention on its own merit.

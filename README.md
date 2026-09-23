@@ -14,34 +14,36 @@ this one.
 
 - SQL: Postgres 18, through [go-database](https://github.com/standards-lab/go-database) for the
   pool and its administration and [sqlate](https://github.com/standards-lab/sqlate) for the
-  authored SQL. Locally it runs from the compose file; managed, it is Azure Database for
-  PostgreSQL or Amazon RDS, the same provider pointed elsewhere by configuration.
+  authored SQL. Locally it runs from the compose file. A managed deployment runs Azure Database
+  for PostgreSQL or Amazon RDS through the same provider; only the configuration changes.
 - Observability: OpenTelemetry, reached through a `docker compose` profile (`mise run otel-up`)
   that runs the collector and a local Loki, Tempo, Mimir, and Grafana stack — see
   [`compose/README.md`](compose/README.md). The service exports traces and metrics over OTLP and
   structured JSON logs correlated to them by trace id, all through
   [go-observability](https://github.com/standards-lab/go-observability).
 
-### Standard and native
+### Standard and native tiers
 
-Each use of a capability picks its resolution. The standard tier is the technology's common
-standard: ISO/IEC 9075 in an authored `.sql` file declaring `--| tier: standard`, and RFC 9110
-and 9457 through go-web-sdk's `web`. Domain statements, handlers, and the composition root work
-there by default. The native tier is the provider's own features, in a `.sql` file declaring
-`--| tier: native` with the feature and how another engine expresses it. Native use is
-first-class, since the point of choosing Postgres is to use it, and it is contained: the
-declaration is per file, `sqlint` fails a standard file that uses a native form, and the admin
-mount reports each statement's tier.
+Each use of a capability runs at one of two tiers, chosen per use. The standard tier uses the
+technology's common standard: ISO/IEC 9075 SQL in an authored `.sql` file that declares
+`--| tier: standard`, and RFC 9110 and RFC 9457 through go-web-sdk's `web` package. Domain
+statements, handlers, and the composition root use the standard tier by default. The native
+tier uses the provider's own features, in a `.sql` file that declares `--| tier: native` and
+names the feature and how another engine expresses it. Native use is first-class, because the
+point of choosing Postgres is to use it, and it is contained: each file declares its own tier,
+`sqlint` fails a standard file that uses a native form, and the admin mount reports each
+statement's tier.
 
 Only the composition root, `internal/app/infrastructure.go`, imports a provider: it builds the
 pool through go-database's provider and takes the dialect from sqlate's. Every other package is
-provider-free, and native use lives in SQL files. The boundary is a convention; no linter
-enforces it yet.
+provider-free, and native use stays in SQL files. The boundary is a convention; no linter
+enforces it.
 
 ### What a provider swap changes
 
-SQL is schema-bearing, so moving to another engine is a port. It changes the two provider
-imports and the files below, never the configuration or the code around the statements:
+Moving to another SQL engine is a port, because the service owns a schema written for
+Postgres. A port changes the two provider imports and the files below, and never the
+configuration or the code around the statements:
 
 - `data/migrations/0001_organization`, engine DDL by nature: `uuidv7()` as the id default (a
   Postgres 18 builtin; elsewhere the application or the engine mints ids), `UNIQUE NULLS NOT
@@ -55,10 +57,15 @@ imports and the files below, never the configuration or the code around the stat
   `RETURNING` for the idempotent seed (`MERGE` or `INSERT IGNORE` elsewhere).
 - `domain/organization/statements/create.sql`: native through the identity pattern only.
 
-The read path, the lineage CTE, and the guarded commands stay standard. `grep -rl --include='*.sql' --
-'--| tier: native' .` lists the current set. HTTP has no provider. OpenTelemetry adds nothing to the list:
-the service speaks only the OpenTelemetry API, SDK, and OTLP, and a backend swap is a change to
-the collector's configuration.
+The read path, the lineage CTE, and the guarded commands use the standard tier. This command
+lists the native files:
+
+```sh
+grep -rl --include='*.sql' -- '--| tier: native' .
+```
+
+HTTP has no provider, and OpenTelemetry adds nothing to the list: the service uses only the
+OpenTelemetry API, SDK, and OTLP, so a backend swap changes only the collector's configuration.
 
 ## Getting started
 

@@ -1,7 +1,7 @@
 # Domain architecture
 
-The rules every domain layer is built by. The organization package is the one instance; a rule
-leaves this note once the code expresses it in more than one layer.
+This note holds the rules every domain layer is built by. The organization package is the only
+domain layer; a rule leaves this note once the code expresses it in more than one layer.
 
 ## The domain layer
 
@@ -30,8 +30,8 @@ layer:
   domain's name, binds each statement to a typed handle (a projection for the read model, rows
   for a scan, a guard for a version-checked command), and exposes each operation as a store
   method that reads as what it does. Translation files are capability-named, one per
-  infrastructure integration (`storage.go`, `messaging.go`, and `ai.go` are planned). A service never
-  touches an infrastructure API outside its translation file.
+  infrastructure integration (`storage.go`, `messaging.go`, and `ai.go` are planned). A
+  service never touches an infrastructure API outside its translation file.
 - `service.go`: the single domain service, a concrete type constructed from the `data` package,
   registering its statement verification at the domains' lifecycle stage, its methods the direct
   map from endpoint to operation, every operation delegated whole to the store after the
@@ -124,11 +124,12 @@ the operation through exported API; an inelegant-but-expressible shape stages in
 
 ## Promotion candidates
 
-Candidates for the architecture repository once a second domain layer proves them:
+Two rules are candidates for the architecture repository once a second domain layer proves
+them:
 
-- The domain layer as a compositional grouping, one package, one Domain Service, one handler, as
-  a Go Elemental expression.
-- The capability-named translation file as the in-package counterpart of the Elemental
+- The domain layer as a compositional grouping (one package, one Domain Service, one handler)
+  is a candidate Go Elemental expression.
+- The capability-named translation file is the in-package counterpart of the Elemental
   Architecture's downward-dependency rule.
 
 ## Deferred by design

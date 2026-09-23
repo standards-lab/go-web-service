@@ -83,3 +83,30 @@ Both share the persistent flags below with `demo`.
 `SLAB_BASE`, `SLAB_GRAFANA`, `SLAB_TEMPO`; they default to the compose stack's local ports).
 `--repo` names the repository root, when `slab` is not run from inside it. `--no-color` prints
 without ANSI color even on a terminal.
+
+## Conventions
+
+A new scenario, command, or domain follows these rules. Each package's `doc.go` states the rules
+that are its own.
+
+- **Its own module.** slab depends on sqlate, go-web-sdk, and cobra, never on go-web-service's
+  root module. The service is versionless, so a dependency on it would pin a pseudo-version that
+  goes stale in a fresh clone or CI; local cross-module work goes through the gitignored
+  `go.work`.
+- **The service's layout.** `internal/app` is the composition root, one file per layer, and the
+  only package that constructs a dependency or names a mount. `cmd/slab` is process entry alone.
+  `domain/<name>` is the client-side counterpart of the service's domain package, and
+  `admin/<name>` of an admin service: siblings, never nested, as in the service. Both have the
+  same four files, `doc.go`, `entities.go`, `client.go`, and `commands.go`. An admin package's
+  `entities.go` restates request bodies only, because its responses print as raw JSON and nothing
+  decodes them.
+- **Shared layers.** `output` renders every direct command's result, `input` resolves every
+  request body, `style` holds all ANSI styling, and `httpx` is the protocol layer. `env` depends
+  on no other slab package, so every layer can read it.
+- **Direct commands** map one subcommand to one route. A command's field flags name the wire
+  field they build (`--code`, `--parent-id`), and `--body` and `--version` mean the same on every
+  command. A domain's `Commands` takes a client constructor and the one `Output`, and never names
+  `httpx.NewClient` or a stream.
+- **Naming.** A root subcommand is bare, never capability-prefixed: `demo domain`, not
+  `demo domain-crud`. `admin database` nests the admin mount's one domain under its own word, so a
+  second arrives without renaming the first.

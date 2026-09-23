@@ -1,5 +1,3 @@
-// Package scenario defines what a slab scenario is, the reporter it narrates
-// through, the cobra command that runs one, and the listing that prints them.
 package scenario
 
 import (

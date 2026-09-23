@@ -7,7 +7,7 @@ applies, its `profiles:` gate.
 
 ## Postgres
 
-`compose/postgres.yml` runs Postgres 18, the service's declared SQL engine (`context/design/stack.md`).
+`compose/postgres.yml` runs Postgres 18, the service's declared SQL engine (the README's [Stack](../README.md#stack) section).
 It carries no profile, so every compose invocation starts it. `mise run db-up` brings it up and
 waits for health; `mise run db-down` stops it; `mise run db-reset` also drops its volume.
 

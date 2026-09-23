@@ -89,8 +89,8 @@ without ANSI color even on a terminal.
 A new scenario, command, or domain follows these rules. Each package's `doc.go` states the rules
 that are its own.
 
-- **Its own module.** slab depends on sqlate, go-web-sdk, and cobra, never on go-web-service's
-  root module. The service has no release version, so a dependency on it would pin a
+- **Its own module.** slab's `go.mod` requires the workspace libraries it uses and cobra, never
+  go-web-service's root module. The service has no release version, so a dependency on it would pin a
   pseudo-version that goes stale in a fresh clone or CI; local cross-module work goes through the
   gitignored `go.work`.
 - **The service's layout.** slab mirrors the service's layout. `internal/app` is the composition

@@ -19,8 +19,8 @@ section the code comes to express is deleted.
   sessions — a library slice and the service slice that proves it, planned together, each
   repository on its own branch with its own pull request. The domain slices are service-only.
 - Documentation waits for the effort to close: integration documentation lands in the root
-  `docs/` tier once the surfaces stop churning. The README carries only identity,
-  getting-started, tasks, and configuration.
+  `docs/` tier once the surfaces stop churning. Until then the README carries identity, the
+  stack, getting-started, the API and admin surfaces, tasks, tests, and configuration.
 
 ## Reads and writes
 
@@ -37,8 +37,8 @@ catalog templates with owned instances, and category branches composed over a ge
 
 - **organization**: a self-referencing `parent_id`, sibling-scoped unique slug codes (the
   property that makes paths unique), and the path a read-time projection from a recursive CTE.
-  The closure table that authorization needs is planned in the auth strategy at the coordinator repository,
-  standards-lab.
+  The closure table that authorization needs is planned in the auth strategy at the
+  coordinator repository, standards-lab.
 - **people** (`v1.data.people`): `person` is the stable UUID anchor, with a record-status enum
   other domains react to, a unit FK, and activate, deactivate, and transfer-unit action
   commands.
@@ -79,7 +79,7 @@ README's Stack section states.
 
 ## Prior R&D
 
-`personnel-service-demo`, cataloged in standards-lab's references, is the input for the CQRS shape, the
-four-tier business-logic placement, the error model, and the projection-driven data layer. It
-is input to re-derive from, not a baseline to inherit. This reference stays in volatile
+Prior R&D in the organization's private references annex is the input for the CQRS shape, the
+four-tier business-logic placement, the error model, and the projection-driven data layer. It is
+input to re-derive from, not a baseline to inherit. This reference stays in volatile
 context; the design notes and the README justify every convention on its own merit.

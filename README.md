@@ -14,8 +14,9 @@ this one.
 
 - SQL: Postgres 18, through [go-database](https://github.com/standards-lab/go-database) for the
   pool and its administration and [sqlate](https://github.com/standards-lab/sqlate) for the
-  authored SQL. Locally it runs from the compose file. A managed deployment runs Azure Database
-  for PostgreSQL or Amazon RDS through the same provider; only the configuration changes.
+  authored SQL. Locally it runs from the compose file. A managed deployment is planned on
+  Azure Database for PostgreSQL or Amazon RDS through the same provider, changing only the
+  configuration.
 - Observability: OpenTelemetry, reached through a `docker compose` profile (`mise run otel-up`)
   that runs the collector and a local Loki, Tempo, Mimir, and Grafana stack — see
   [`compose/README.md`](compose/README.md). The service exports traces and metrics over OTLP and

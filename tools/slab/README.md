@@ -40,14 +40,19 @@ printing the response as pretty JSON — or, for an empty body such as `org dele
 status line alone, so a command is never silent. This is distinct in kind from a `demo`
 scenario's narrated tour: a command sends one real request and returns its result.
 
-- **org** — the organization domain's seven endpoints: `list` (`--page`, `--size`, `--sort`, and a
-  repeatable `--filter field=value` or `field[op]=value`), `get <id>`, `get-by-path <path>`,
+- **org** — the organization domain's ten endpoints: `list` (`--page` or `--cursor`, `--size`,
+  `--sort`, and a repeatable `--filter field=value` or `field[op]=value`), `get <id>`,
+  `get-by-path <path>` (the service's `lookup?path=`),
   `create`, `edit <id>`, `transfer <id>`, and `delete <id>`. `create`/`edit`/`transfer` take named
   flags (`--code`, `--name`, `--parent-id`) or a `--body <json>` escape hatch sent verbatim,
   mutually exclusive with the flags. `edit`/`transfer`/`delete` need `--version` for the request's
   `If-Match`; on `edit`/`transfer`, a top-level `"version"` in `--body` stands in for the flag, so
   the value isn't given twice. `transfer --parent-id=` moves an organization to the root — the
   flag must be given, empty or not, since the service requires the key present in the body.
+  `logo put <id> <file>` sends a file's bytes as the logo, its media type from the extension
+  unless `--content-type` names one; `logo get <id>` prints the object headers and writes the
+  bytes to `--out` (never to the terminal), and `--if-none-match <etag>` revalidates, a 304 when
+  unchanged; `logo delete <id>` removes it.
 - **admin database** — the database admin service's twelve endpoints: `schema status`, `verify`,
   `up`, `down` (`--set`, required; `--steps`, optional — one migration when unset), `steps`
   (`--set` and `--steps`, required), and `force` (`--set` and `--version`, required) under

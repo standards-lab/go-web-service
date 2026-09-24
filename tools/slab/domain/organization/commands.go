@@ -3,7 +3,10 @@ package organization
 import (
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -46,6 +49,7 @@ func Commands(newClient func() *Client, out *output.Output) *cobra.Command {
 		d.editCommand(),
 		d.transferCommand(),
 		d.deleteCommand(),
+		d.logoCommands(),
 	)
 	return org
 }
@@ -295,6 +299,111 @@ func (d deps) deleteCommand() *cobra.Command {
 	cmd.Flags().Int64Var(&version, "version", 0, "the version the row was last seen at, sent as If-Match")
 	_ = cmd.MarkFlagRequired("version")
 	return cmd
+}
+
+// logoCommands builds the logo subcommand over the organization's logo
+// sub-resource: put, get, and delete.
+func (d deps) logoCommands() *cobra.Command {
+	logo := &cobra.Command{
+		Use:   "logo",
+		Short: "Store, read, and remove an organization's logo",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
+		},
+	}
+	logo.AddCommand(d.logoPutCommand(), d.logoGetCommand(), d.logoDeleteCommand())
+	return logo
+}
+
+// logoPutCommand is PUT Organizations/{id}/logo with the file's bytes as
+// the raw body, its Content-Type taken from the file's extension unless
+// --content-type names one. The service decides which types it accepts.
+func (d deps) logoPutCommand() *cobra.Command {
+	var contentType string
+	cmd := &cobra.Command{
+		Use:   "put <id> <file>",
+		Short: "Store a file as the organization's logo, replacing any",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			body, err := os.ReadFile(args[1])
+			if err != nil {
+				return err
+			}
+			if contentType == "" {
+				if contentType = mime.TypeByExtension(filepath.Ext(args[1])); contentType == "" {
+					return fmt.Errorf("%s: no media type for its extension; name one with --content-type", args[1])
+				}
+			}
+			res, err := d.newClient().PutLogo(cmd.Context(), args[0], contentType, body)
+			if err != nil {
+				return err
+			}
+			if err := output.Expect(res, http.StatusCreated); err != nil {
+				return err
+			}
+			d.out.Response(res.Status, res.Body)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&contentType, "content-type", "", "the media type sent; the file extension's when unset")
+	return cmd
+}
+
+// logoGetCommand is GET Organizations/{id}/logo. It prints the status and
+// the object headers, and writes the bytes to --out rather than to the
+// terminal. --if-none-match sends a revalidation, answered 304 when the
+// logo is unchanged.
+func (d deps) logoGetCommand() *cobra.Command {
+	var out, etag string
+	cmd := &cobra.Command{
+		Use:   "get <id>",
+		Short: "Read the organization's logo: its headers, and its bytes to --out",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			res, err := d.newClient().Logo(cmd.Context(), args[0], etag)
+			if err != nil {
+				return err
+			}
+			if res.Status != http.StatusNotModified {
+				if err := output.Expect(res, http.StatusOK); err != nil {
+					return err
+				}
+			}
+			saved := ""
+			if out != "" && res.Status == http.StatusOK {
+				if err := os.WriteFile(out, res.Body, 0o644); err != nil {
+					return err
+				}
+				saved = out
+			}
+			d.out.Object(res.Status, res.Header, len(res.Body), saved)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&out, "out", "", "the file the logo's bytes are written to")
+	cmd.Flags().StringVar(&etag, "if-none-match", "", "an ETag a previous get printed; 304 when the logo is unchanged")
+	return cmd
+}
+
+// logoDeleteCommand is DELETE Organizations/{id}/logo.
+func (d deps) logoDeleteCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "delete <id>",
+		Short: "Remove the organization's logo",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			res, err := d.newClient().DeleteLogo(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			if err := output.Expect(res, http.StatusNoContent); err != nil {
+				return err
+			}
+			d.out.Response(res.Status, res.Body)
+			return nil
+		},
+	}
 }
 
 // optionalParent is the parent_id a flag value stands for: null when the

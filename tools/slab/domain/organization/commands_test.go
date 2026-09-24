@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -90,7 +92,7 @@ func TestCommands_MountsOneSubcommandPerEndpoint(t *testing.T) {
 	for _, cmd := range org.Commands() {
 		names = append(names, cmd.Name())
 	}
-	if got := strings.Join(names, ","); got != "create,delete,edit,get,get-by-path,list,transfer" {
+	if got := strings.Join(names, ","); got != "create,delete,edit,get,get-by-path,list,logo,transfer" {
 		t.Errorf("Commands() subcommands = %s", got)
 	}
 }
@@ -471,5 +473,90 @@ func TestPositionalArguments_AreRequiredWhereTheRouteHasAnId(t *testing.T) {
 		if _, err := run(t, srv, name); err == nil || !strings.Contains(err.Error(), "accepts 1 arg(s), received 0") {
 			t.Errorf("%s without an argument: err = %v", name, err)
 		}
+	}
+}
+
+// logoOrg is an organization id the logo commands address.
+const logoOrg = "00000000-0000-7000-8000-000000000001"
+
+// logo put sends the file's bytes under the media type its extension
+// names, or the one --content-type gives.
+func TestLogoPut_SendsTheFileUnderItsMediaType(t *testing.T) {
+	dir := t.TempDir()
+	png := filepath.Join(dir, "acme.png")
+	if err := os.WriteFile(png, []byte("\x89PNG"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		args        []string
+		contentType string
+	}{
+		"by extension": {[]string{"logo", "put", logoOrg, png}, "image/png"},
+		"named":        {[]string{"logo", "put", logoOrg, png, "--content-type", "image/webp"}, "image/webp"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, srv := newService(t, http.StatusCreated, `{"id":"f","version":2}`)
+			if _, err := run(t, srv, tc.args...); err != nil {
+				t.Fatal(err)
+			}
+			got := s.only(t)
+			if got.method != http.MethodPut || got.uri != "/api/organizations/"+logoOrg+"/logo" || got.contentType != tc.contentType || got.body != "\x89PNG" {
+				t.Errorf("sent %s %s as %q: %q", got.method, got.uri, got.contentType, got.body)
+			}
+		})
+	}
+}
+
+func TestLogoPut_RefusesAnUnknownExtension(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "logo.nope")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, srv := newService(t, http.StatusCreated, `{}`)
+	if _, err := run(t, srv, "logo", "put", logoOrg, file); err == nil || !strings.Contains(err.Error(), "--content-type") {
+		t.Errorf("err = %v, want the refusal naming --content-type", err)
+	}
+	if len(s.received) != 0 {
+		t.Error("the request fired anyway")
+	}
+}
+
+// logo get never prints the bytes: it prints the headers and writes the
+// bytes to --out; a revalidation is a 304, not an error.
+func TestLogoGet_WritesTheBytesToOut(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("If-None-Match") == `"e1"` {
+			w.Header().Set("ETag", `"e1"`)
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("ETag", `"e1"`)
+		_, _ = w.Write([]byte("\x89PNG"))
+	}))
+	defer srv.Close()
+	file := filepath.Join(t.TempDir(), "out.png")
+
+	out, err := run(t, srv, "logo", "get", logoOrg, "--out", file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(file); string(b) != "\x89PNG" || !strings.Contains(out, "ETag: \"e1\"") || !strings.Contains(out, "4 bytes written to") || strings.Contains(out, "PNG") {
+		t.Errorf("out = %q, file = %q", out, b)
+	}
+	out, err = run(t, srv, "logo", "get", logoOrg, "--if-none-match", `"e1"`)
+	if err != nil || !strings.HasPrefix(out, "304 Not Modified") {
+		t.Errorf("revalidation = %q, %v", out, err)
+	}
+}
+
+func TestLogoDelete_ExpectsNoContent(t *testing.T) {
+	s, srv := newService(t, http.StatusNoContent, "")
+	out, err := run(t, srv, "logo", "delete", logoOrg)
+	if err != nil || out != "204 No Content\n" {
+		t.Fatalf("out = %q, %v", out, err)
+	}
+	if got := s.only(t); got.method != http.MethodDelete || got.uri != "/api/organizations/"+logoOrg+"/logo" {
+		t.Errorf("sent %s %s", got.method, got.uri)
 	}
 }

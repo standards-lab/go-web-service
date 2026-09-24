@@ -48,6 +48,27 @@ func (c *Client) FindByPath(ctx context.Context, path string) (*httpx.Response, 
 	return c.http.Get(ctx, Organizations+"/lookup?"+httpx.RawQuery([2]string{"path", "/" + strings.TrimLeft(path, "/")}))
 }
 
+// PutLogo sends PUT Organizations/{id}/logo with body as the raw request
+// body under contentType.
+func (c *Client) PutLogo(ctx context.Context, id, contentType string, body []byte) (*httpx.Response, error) {
+	return c.http.Put(ctx, Organizations+"/"+url.PathEscape(id)+"/logo", body, httpx.Header{Name: "Content-Type", Value: contentType})
+}
+
+// Logo sends GET Organizations/{id}/logo, with If-None-Match when etag is
+// set.
+func (c *Client) Logo(ctx context.Context, id, etag string) (*httpx.Response, error) {
+	var headers []httpx.Header
+	if etag != "" {
+		headers = append(headers, httpx.Header{Name: "If-None-Match", Value: etag})
+	}
+	return c.http.Get(ctx, Organizations+"/"+url.PathEscape(id)+"/logo", headers...)
+}
+
+// DeleteLogo sends DELETE Organizations/{id}/logo.
+func (c *Client) DeleteLogo(ctx context.Context, id string) (*httpx.Response, error) {
+	return c.http.Delete(ctx, Organizations+"/"+url.PathEscape(id)+"/logo")
+}
+
 // Create sends POST Organizations with body as the request body, verbatim.
 func (c *Client) Create(ctx context.Context, body []byte) (*httpx.Response, error) {
 	return c.http.Post(ctx, Organizations, body)

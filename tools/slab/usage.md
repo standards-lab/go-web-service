@@ -28,6 +28,16 @@ mise run slab -- org get-by-path acme/engineering
 ```
 
 ```sh
+# the logo: store, read back, revalidate, replace, remove
+mise run slab -- org logo put <acme-id> acme.png                   # 201, the new file's id and version
+mise run slab -- org logo get <acme-id> --out /tmp/acme.png        # headers; bytes to the file
+mise run slab -- org logo get <acme-id> --if-none-match '"<etag>"' # 304 Not Modified
+mise run slab -- org logo put <acme-id> other.png                  # replaces; the old file is retired
+mise run slab -- org logo put <acme-id> logo.svg                   # 415: not an accepted type
+mise run slab -- org logo delete <acme-id>                         # 204; then get is 404
+```
+
+```sh
 mise run slab -- org create --code sales --name "Sales" --parent-id <acme-id>
 ```
 

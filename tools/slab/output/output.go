@@ -69,6 +69,30 @@ func (o *Output) Response(status int, body []byte) {
 	_, _ = fmt.Fprintf(o.stdout, "%s\n", st.JSON(pretty.String()))
 }
 
+// objectHeaders are the headers an object response carries that Object
+// shows, in the order it shows them.
+var objectHeaders = []string{"Content-Type", "Content-Length", "ETag", "Last-Modified", "Cache-Control", "X-Content-Type-Options"}
+
+// Object writes a proxied object's response to stdout: the status line, the
+// object headers it carries, and what became of the bytes, since a binary
+// body is never written to a terminal. saved is the file the bytes went to,
+// or empty when they were only counted.
+func (o *Output) Object(status int, header http.Header, n int, saved string) {
+	st := o.Style()
+	_, _ = fmt.Fprintf(o.stdout, "%s\n", st.Status(fmt.Sprintf("%d %s", status, http.StatusText(status))))
+	for _, name := range objectHeaders {
+		if v := header.Get(name); v != "" {
+			_, _ = fmt.Fprintf(o.stdout, "%s: %s\n", name, v)
+		}
+	}
+	switch {
+	case saved != "":
+		_, _ = fmt.Fprintf(o.stdout, "%d bytes written to %s\n", n, saved)
+	case n > 0:
+		_, _ = fmt.Fprintf(o.stdout, "%d bytes (--out saves them)\n", n)
+	}
+}
+
 // Expect returns nil when res carries status, and otherwise the error that
 // reports the response: the decoded web.Problem itself when the body is an
 // RFC 9457 document — web.Problem implements error directly, so a command

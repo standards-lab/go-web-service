@@ -56,9 +56,11 @@ scenario's narrated tour: a command sends one real request and returns its resul
   set's rows idempotently over the schema as it stands, so seeding an empty set onto a populated
   database changes nothing) and `state` (`--state` and `--confirm`, required — reverts every
   migration set, reapplies them, then seeds; the one that actually clears first); and
-  `diagnostics`, `patterns`,
-  `statements`, `states`, which take no input at all. Every body-taking command also accepts
-  `--body <json>` in place of its flags.
+  `diagnostics`, `patterns`, `statements`, `states`, which take no input at all. Every
+  body-taking command also accepts `--body <json>` in place of its flags.
+- **admin storage** — the object store's admin endpoints: `diagnostics` (whether a live probe
+  succeeds, the container, and the key length bound) and `container` (creates the configured
+  container, succeeding when it exists). Neither takes input.
 
 Both share the persistent flags below with `demo`.
 

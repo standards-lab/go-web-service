@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/standards-lab/go-web-service/tools/slab/admin/database"
+	"github.com/standards-lab/go-web-service/tools/slab/admin/storage"
 	"github.com/standards-lab/go-web-service/tools/slab/output"
 )
 
@@ -13,6 +14,7 @@ import (
 // are.
 type Admin struct {
 	Database func() *database.Client
+	Storage  func() *storage.Client
 }
 
 // newAdmin wires the admin layer over infra, each admin package's client
@@ -21,6 +23,9 @@ func newAdmin(infra *Infrastructure) *Admin {
 	return &Admin{
 		Database: func() *database.Client {
 			return database.NewClient(infra.Client())
+		},
+		Storage: func() *storage.Client {
+			return storage.NewClient(infra.Client())
 		},
 	}
 }
@@ -37,6 +42,6 @@ func mountAdmin(adm *Admin, out *output.Output) *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	admin.AddCommand(database.Commands(adm.Database, out))
+	admin.AddCommand(database.Commands(adm.Database, out), storage.Commands(adm.Storage, out))
 	return admin
 }

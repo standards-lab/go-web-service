@@ -102,6 +102,13 @@ mise run slab -- admin database state --state default --confirm
 mise run slab -- org list      # total: 7 again
 ```
 
+## `admin storage` — the object store
+
+```sh
+mise run slab -- admin storage diagnostics     # ready, the container, the key length bound
+mise run slab -- admin storage container       # creates the container; succeeds when it exists
+```
+
 ## `demo` — the narrated scenarios
 
 ```sh

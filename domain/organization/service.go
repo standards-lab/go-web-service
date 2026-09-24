@@ -41,12 +41,12 @@ func (s *Service) Register(lc *lifecycle.Coordinator) {
 // migrated schema; startup runs it at the domains' stage.
 func (s *Service) Verify(ctx context.Context) error { return s.store.Verify(ctx) }
 
-// List returns one page of organizations and the total count, honoring the
-// parsed query's page, sort, and filters. An unknown sort or filter field,
+// List returns one page of organizations and the read's paging, honoring
+// the parsed query's page, sort, and filters. An unknown sort or filter field,
 // an operator the read model does not support, or a value the engine
 // cannot read unwraps to query.ErrDirectives.
-func (s *Service) List(ctx context.Context, q web.Query) ([]Organization, int, error) {
-	return s.store.list(ctx, data.Directives(q))
+func (s *Service) List(ctx context.Context, q web.Query) ([]Organization, web.Paging, error) {
+	return s.store.list(ctx, q)
 }
 
 // Find returns the organization with the given id, or sql.ErrNoRows.

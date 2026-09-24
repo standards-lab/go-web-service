@@ -1,14 +1,17 @@
 package data
 
 import (
+	"context"
+
 	"github.com/standards-lab/go-web-sdk"
+	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/query"
 )
 
 // Directives lowers a parsed request query to the library's read
 // directives. It lives here because go-web-sdk cannot import sqlate and
-// the lowering is too small for a package of its own. The page and the
-// sorts pass through as given. A filter with no operator is equality when
+// the lowering is too small for a package of its own. The sorts pass
+// through as given; the page or cursor the request addressed is [Read]'s. A filter with no operator is equality when
 // the parameter carried one value and membership when it carried several;
 // a bracketed operator maps to the library's operator of the same name,
 // one filter per value, so repeated parameters conjoin, and the in
@@ -19,7 +22,7 @@ import (
 // field is readable or an operator is one the read model supports is the
 // library's check.
 func Directives(q web.Query) query.Directives {
-	d := query.Directives{Page: query.Page{Number: q.Page, Size: q.Size}}
+	var d query.Directives
 	for _, s := range q.Sort {
 		d.Sort = append(d.Sort, query.Sort{Field: s.Field, Descending: s.Descending})
 	}
@@ -52,4 +55,24 @@ func filters(f web.Filter) []query.Filter {
 		out[i] = query.Filter{Field: f.Field, Op: op, Value: v}
 	}
 	return out
+}
+
+// Read runs a projection's collection read as the request addressed it:
+// continued past a cursor a previous page returned when the query names
+// one, and by page number otherwise. A cursor that did not come from this
+// read, or no longer continues it, unwraps to query.ErrDirectives or is a
+// *query.CursorError, both the request's error.
+func Read[T any](ctx context.Context, s sqlate.Session, p query.Projection[T], q web.Query, base ...query.Args) (query.Collection[T], error) {
+	d := Directives(q)
+	if q.Cursor != "" {
+		return p.Continue(ctx, s, d, query.Cursor(q.Cursor), q.Size, base...)
+	}
+	return p.List(ctx, s, d, query.Page{Number: q.Page, Size: q.Size}, base...)
+}
+
+// Paging reports a collection read's outcome in the envelope's terms: the
+// total (query.NoTotal is the envelope's web.NoTotal), whether a further
+// page exists, and the cursor to it.
+func Paging[T any](c query.Collection[T]) web.Paging {
+	return web.Paging{Total: c.Total, More: c.More, Next: string(c.Next)}
 }

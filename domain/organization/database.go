@@ -5,6 +5,7 @@ import (
 	"embed"
 	"fmt"
 
+	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/query"
 
@@ -57,8 +58,9 @@ func (s *store) Verify(ctx context.Context) error {
 	return query.Verify(ctx, s.db, s.stmts, s.view)
 }
 
-func (s *store) list(ctx context.Context, d query.Directives) ([]Organization, int, error) {
-	return s.view.List(ctx, s.db, d)
+func (s *store) list(ctx context.Context, q web.Query) ([]Organization, web.Paging, error) {
+	c, err := data.Read(ctx, s.db, s.view, q)
+	return c.Items, data.Paging(c), err
 }
 
 func (s *store) find(ctx context.Context, field, value string) (Organization, error) {

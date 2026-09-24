@@ -4,14 +4,14 @@ go 1.27
 
 require (
 	github.com/standards-lab/go-core v0.4.1
-	github.com/standards-lab/go-database v0.5.0
+	github.com/standards-lab/go-database v0.6.0
 	github.com/standards-lab/go-database/postgres v0.3.0
 	github.com/standards-lab/go-observability v0.1.0
 	github.com/standards-lab/go-observability/otlp v0.1.0
-	github.com/standards-lab/go-web-sdk v0.10.0
-	github.com/standards-lab/go-web-sdk/middleware/rate-limit v0.1.0
-	github.com/standards-lab/sqlate v0.1.1
-	github.com/standards-lab/sqlate/postgres v0.1.1
+	github.com/standards-lab/go-web-sdk v0.11.0
+	github.com/standards-lab/go-web-sdk/middleware/rate-limit v0.1.1
+	github.com/standards-lab/sqlate v0.4.0
+	github.com/standards-lab/sqlate/postgres v0.4.0
 	go.opentelemetry.io/otel/sdk/metric v1.46.0
 )
 
@@ -30,7 +30,7 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
-	github.com/standards-lab/sqlate/sqlint v0.1.0 // indirect
+	github.com/standards-lab/sqlate/sqlint v0.2.1 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.71.0 // indirect

@@ -50,11 +50,11 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	items, total, err := h.service.List(r.Context(), q)
+	items, paging, err := h.service.List(r.Context(), q)
 	if err != nil {
 		return err
 	}
-	return web.WriteJSON(w, http.StatusOK, web.NewPage(items, q, total))
+	return web.WriteJSON(w, http.StatusOK, web.NewPage(items, q, paging))
 }
 
 func (h *handler) find(w http.ResponseWriter, r *http.Request) error {

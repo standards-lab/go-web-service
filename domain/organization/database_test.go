@@ -58,7 +58,7 @@ func row() sqltest.Response {
 func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 	ctx := context.Background()
 	s, rec := service(t,
-		count(1), row(), // list
+		sqltest.WithTotal(row(), 1),   // list: the page and its window count in one statement
 		row(),                         // find by id
 		identity(validID, 1),          // create
 		sqltest.Response{Affected: 1}, // edit
@@ -68,8 +68,8 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 		sqltest.Response{Affected: 1}, // delete
 	)
 	q, _ := web.ParseQuery(url.Values{"code": {"acme"}, "sort": {"-path"}}, web.Limits{DefaultSize: 20, MaxSize: 100})
-	if items, total, err := s.List(ctx, q); err != nil || total != 1 || items[0].Path != "/acme" {
-		t.Fatalf("List = %v, %d, %v", items, total, err)
+	if items, paging, err := s.List(ctx, q); err != nil || paging.Total != 1 || paging.More || items[0].Path != "/acme" {
+		t.Fatalf("List = %v, %+v, %v", items, paging, err)
 	}
 	if o, err := s.Find(ctx, validID); err != nil || o.Code != "acme" || o.ParentID != nil {
 		t.Fatalf("Find = %+v, %v", o, err)
@@ -90,16 +90,16 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 		t.Errorf("pending = %d, leaked = %d", rec.Pending(), rec.RowsLeaked())
 	}
 	sqls := rec.SQL(sqltest.OpQuery)
-	if !strings.HasPrefix(sqls[0], "SELECT COUNT(*) FROM (WITH RECURSIVE lineage") || !strings.Contains(sqls[1], "WHERE q.code = CAST($1 AS text) ORDER BY q.path DESC, q.id OFFSET $2") {
-		t.Errorf("list = %q\n%q", sqls[0], sqls[1])
+	if !strings.Contains(sqls[0], "COUNT(*) OVER () AS sqlate_total FROM (WITH RECURSIVE lineage") || !strings.Contains(sqls[0], "WHERE q.code = CAST($1 AS text)) q ORDER BY q.path DESC, q.id DESC OFFSET $2") {
+		t.Errorf("list = %q; want the page and its window count in one statement", sqls[0])
 	}
-	if create := sqls[3]; !strings.HasSuffix(create, "RETURNING id, version") {
+	if create := sqls[2]; !strings.HasSuffix(create, "RETURNING id, version") {
 		t.Errorf("create = %q; want the identity pattern spliced", create)
 	}
 	if edit := rec.SQL(sqltest.OpExec)[0]; edit != "UPDATE organization\nSET code = $1, name = $2, updated_at = CURRENT_TIMESTAMP, version = version + 1\nWHERE id = $3 AND version = $4" {
 		t.Errorf("edit = %q", edit)
 	}
-	if lock := rec.Calls()[6]; lock.SQL != "SELECT pg_advisory_xact_lock(hashtext($1))" || lock.Args[0] != data.LockOrganizationTree {
+	if lock := rec.Calls()[5]; lock.SQL != "SELECT pg_advisory_xact_lock(hashtext($1))" || lock.Args[0] != data.LockOrganizationTree {
 		t.Errorf("transfer did not take the named tree lock first: %+v", lock)
 	}
 	ops := rec.Ops()
@@ -144,15 +144,17 @@ func TestStore_GuardDistinguishesAbsentFromStale(t *testing.T) {
 	}
 }
 
-// Verify prepares the seven statements and the read contract's probe.
+// Verify prepares the seven statements and the read contract's three
+// probes: the fields against their declared types, a page past a cursor,
+// and the same page counted.
 func TestStore_VerifyPreparesEveryStatement(t *testing.T) {
 	s, rec := service(t)
 	if err := s.Verify(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	prepared := rec.SQL(sqltest.OpPrepare)
-	if len(prepared) != 8 {
-		t.Errorf("prepared %d statements, want 7 + the contract probe", len(prepared))
+	if len(prepared) != 10 {
+		t.Errorf("prepared %d statements, want 7 + the contract's 3 probes", len(prepared))
 	}
 }
 

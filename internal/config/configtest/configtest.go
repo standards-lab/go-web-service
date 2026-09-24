@@ -19,6 +19,7 @@ import (
 func Minimal() *config.Config {
 	cfg := &config.Config{}
 	cfg.Database.Name = "app"
+	cfg.Storage.Container = "go-web-service"
 	cfg.Observability.Endpoint = "127.0.0.1:4317"
 	return cfg
 }
@@ -38,6 +39,9 @@ func Config(t *testing.T) *config.Config {
 	cfg.Database.Host = "127.0.0.1"
 	port := ClosedPort(t)
 	cfg.Database.Port = &port
+	cfg.Storage.Account = "devstoreaccount1"
+	cfg.Storage.Key = "a2V5"
+	cfg.Storage.Endpoint = fmt.Sprintf("http://127.0.0.1:%d/devstoreaccount1", ClosedPort(t))
 	cfg.Observability.Endpoint = fmt.Sprintf("127.0.0.1:%d", ClosedPort(t))
 	if err := cfg.Finalize(""); err != nil {
 		t.Fatalf("finalize hermetic config: %v", err)

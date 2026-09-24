@@ -5,6 +5,10 @@
   "server": {
     "host": "127.0.0.1"
   },
+  "storage": {
+    "endpoint": "http://127.0.0.1:10000/devstoreaccount1",
+    "account": "devstoreaccount1"
+  },
   "admin": {
     "seed": "default"
   }

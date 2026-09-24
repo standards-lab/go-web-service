@@ -43,6 +43,8 @@ github.com/standards-lab/go-observability v0.1.0 h1:SCyA0F2SGpeX8b7SQL5mA4UugVrW
 github.com/standards-lab/go-observability v0.1.0/go.mod h1:rThoLBWUpH54JbDLPw3c5ZN2bQ5h74OHO0j4w4dWMao=
 github.com/standards-lab/go-observability/otlp v0.1.0 h1:1ZELq61NLytSXPYKYgQOC8QKIHeQ4Q3bPex68TePc/E=
 github.com/standards-lab/go-observability/otlp v0.1.0/go.mod h1:krvO1aVDMoqT6hYCW5CLrrtVC/DUSTUApGI+7xp6TU4=
+github.com/standards-lab/go-storage v0.1.0 h1:F7Jhz/DhKPVUgTLYEbHA1HD5JV3fTzcnS5lxUPq06FE=
+github.com/standards-lab/go-storage v0.1.0/go.mod h1:CoLlKIvLgh7gzwhjZ3Apc8wPPdZX0hSMU3Ve3JGhkNo=
 github.com/standards-lab/go-web-sdk v0.11.0 h1:KoAZh8rrpwv7O35F8gwWVuWmEKHs7WfLkAD3gVyBvyo=
 github.com/standards-lab/go-web-sdk v0.11.0/go.mod h1:+Si1Zrn8e3bhpHgmBwyTlTWfepOADVDipDhIFgijc7c=
 github.com/standards-lab/go-web-sdk/middleware/rate-limit v0.1.1 h1:BH+GbsES6rlLubsVBww3/Hlw8hrdx4ZIY8XMjitdjkw=

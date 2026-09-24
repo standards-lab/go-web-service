@@ -100,15 +100,20 @@ func TestReads_NeedNoDatabase(t *testing.T) {
 }
 
 func TestSchema_ReportsAnEmptyHistoryAsPending(t *testing.T) {
-	// Version: the history table does not exist; Verify: the same.
-	h, rec := module(t, "", count(0), count(0))
+	// The set's history table does not exist: one probe reports it.
+	h, rec := module(t, "", count(0))
 
 	st := decode(t, send(t, h, "GET", "/database/schema", ""), 200)
-	if st["ready"] != false || st["version"] != float64(0) {
-		t.Errorf("status = %v; want not ready at version 0", st)
+	sets, _ := st["sets"].([]any)
+	if st["ready"] != false || len(sets) != 1 {
+		t.Fatalf("status = %v; want not ready with one set", st)
 	}
-	if pending, _ := st["pending"].([]any); len(pending) != 1 || pending[0] != float64(1) {
-		t.Errorf("pending = %v; want [1]", st["pending"])
+	app, _ := sets[0].(map[string]any)
+	if app["name"] != data.AppSet || app["version"] != float64(0) {
+		t.Errorf("set = %v; want the app set at version 0", app)
+	}
+	if pending, _ := app["pending"].([]any); len(pending) != 1 || pending[0] != float64(1) {
+		t.Errorf("pending = %v; want [1]", app["pending"])
 	}
 	if rec.Pending() != 0 {
 		t.Errorf("pending responses %d", rec.Pending())
@@ -167,16 +172,23 @@ func TestVerbs_RejectBadArgumentsBeforeIO(t *testing.T) {
 	cases := map[string]struct {
 		path, body, detail string
 	}{
-		"steps: zero":         {"/database/schema/steps", `{"steps":0}`, "non-zero"},
-		"steps: unknown key":  {"/database/schema/steps", `{"step":1}`, "unknown field"},
-		"steps: empty body":   {"/database/schema/steps", " ", "empty body"},
-		"down: negative":      {"/database/schema/down", `{"steps":-1}`, "positive"},
-		"force: negative":     {"/database/schema/force", `{"version":-1}`, "negative"},
-		"force: missing body": {"/database/schema/force", "", "empty body"},
-		"seed: unknown state": {"/database/seed", `{"state":"nope"}`, `unknown state: "nope"`},
-		"state: unknown":      {"/database/state", `{"state":"nope"}`, `unknown state: "nope"`},
-		"state: missing body": {"/database/state", "", "empty body"},
-		"state: unknown key":  {"/database/state", `{"name":"empty"}`, "unknown field"},
+		"steps: zero":          {"/database/schema/steps", `{"set":"app","steps":0}`, "non-zero"},
+		"steps: unknown key":   {"/database/schema/steps", `{"set":"app","step":1}`, "unknown field"},
+		"steps: empty body":    {"/database/schema/steps", " ", "empty body"},
+		"steps: no set":        {"/database/schema/steps", `{"steps":1}`, "set"},
+		"steps: unknown set":   {"/database/schema/steps", `{"set":"nope","steps":1}`, "nope"},
+		"down: negative":       {"/database/schema/down", `{"set":"app","steps":-1}`, "positive"},
+		"down: missing body":   {"/database/schema/down", "", "empty body"},
+		"down: unknown set":    {"/database/schema/down", `{"set":"nope"}`, "nope"},
+		"force: negative":      {"/database/schema/force", `{"set":"app","version":-1}`, "negative"},
+		"force: missing body":  {"/database/schema/force", "", "empty body"},
+		"force: unknown set":   {"/database/schema/force", `{"set":"nope","version":1}`, "nope"},
+		"seed: unknown state":  {"/database/seed", `{"state":"nope"}`, `unknown state: "nope"`},
+		"state: unknown":       {"/database/state", `{"state":"nope","confirm":true}`, `unknown state: "nope"`},
+		"state: unconfirmed":   {"/database/state", `{"state":"default"}`, `"confirm": true`},
+		"state: confirm false": {"/database/state", `{"state":"default","confirm":false}`, `"confirm": true`},
+		"state: missing body":  {"/database/state", "", "empty body"},
+		"state: unknown key":   {"/database/state", `{"name":"empty","confirm":true}`, "unknown field"},
 	}
 	h, rec := module(t, "default")
 	for name, c := range cases {

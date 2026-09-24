@@ -25,7 +25,7 @@ type Admin struct {
 // service owns a lifecycle stage: the database admin service verifies and
 // corrects the schema at stage 1, ahead of the domains that verify their
 // statements. The content it administers is the data package's: the
-// migration set behind the migrator, the seeder, the catalog, and the
+// migration sets behind the migrator, the seeder, the catalog, and the
 // statements registry.
 func newAdmin(
 	infra *Infrastructure,

@@ -112,8 +112,15 @@ func TestSchema_ReportsAnEmptyHistoryAsPending(t *testing.T) {
 	if app["name"] != data.AppSet || app["version"] != float64(0) {
 		t.Errorf("set = %v; want the app set at version 0", app)
 	}
-	if pending, _ := app["pending"].([]any); len(pending) != 1 || pending[0] != float64(1) {
-		t.Errorf("pending = %v; want [1]", app["pending"])
+	head := len(data.Migrations()[0].Migrations)
+	pending, _ := app["pending"].([]any)
+	for i, v := range pending {
+		if v != float64(i+1) {
+			t.Errorf("pending = %v; want every version, 1 through %d", pending, head)
+		}
+	}
+	if len(pending) != head {
+		t.Errorf("pending = %v; want every version, 1 through %d", pending, head)
 	}
 	if rec.Pending() != 0 {
 		t.Errorf("pending responses %d", rec.Pending())

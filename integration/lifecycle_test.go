@@ -56,8 +56,8 @@ func assertCurrent(t *testing.T, c *webtest.Client) {
 	t.Helper()
 	st := integration.Schema(t, c)
 	app := st.Set(integration.AppSet)
-	if app.Version != 1 || app.Dirty || len(app.Pending) != 0 || !st.Ready {
-		t.Errorf("schema = %+v, want the app set at version 1, clean, nothing pending, ready", st)
+	if app.Version != app.Latest || app.Dirty || len(app.Pending) != 0 || !st.Ready {
+		t.Errorf("schema = %+v, want the app set at its head, clean, nothing pending, ready", st)
 	}
 	if p := webtest.Decode[page](t, c.Get(t, organizations), http.StatusOK); p.total() != seededTotal {
 		t.Errorf("organizations total = %d, want %d", p.total(), seededTotal)

@@ -54,18 +54,20 @@ func TestAdmin(t *testing.T) {
 		t.Helper()
 		return webtest.Decode[integration.SchemaStatus](t, res, http.StatusOK)
 	}
+	// head is the app set's latest version, the one a current schema is at.
+	head := integration.Schema(t, c).Set(integration.AppSet).Latest
 	assertCurrentSchema := func(t *testing.T, st integration.SchemaStatus) {
 		t.Helper()
 		app := st.Set(integration.AppSet)
-		if app.Version != 1 || app.Dirty || len(app.Pending) != 0 || !st.Ready {
-			t.Errorf("schema = %+v, want the app set at version 1, clean, nothing pending, ready", st)
+		if app.Version != head || app.Dirty || len(app.Pending) != 0 || !st.Ready {
+			t.Errorf("schema = %+v, want the app set at version %d, clean, nothing pending, ready", st, head)
 		}
 	}
 	assertEmptySchema := func(t *testing.T, st integration.SchemaStatus) {
 		t.Helper()
 		app := st.Set(integration.AppSet)
-		if app.Version != 0 || app.Dirty || len(app.Pending) != 1 || app.Pending[0] != 1 || st.Ready {
-			t.Errorf("schema = %+v, want the app set at version 0 with 1 pending, not ready", st)
+		if app.Version != 0 || app.Dirty || len(app.Pending) != head || app.Pending[0] != 1 || st.Ready {
+			t.Errorf("schema = %+v, want the app set at version 0 with all %d pending, not ready", st, head)
 		}
 	}
 	appSet := func(body map[string]any) map[string]any {
@@ -94,7 +96,7 @@ func TestAdmin(t *testing.T) {
 			t.Errorf("blobfs set = %+v, want current at its head", bf)
 		}
 		ms := st.Set(integration.AppSet).Migrations
-		if len(ms) != 1 || ms[0].Version != 1 || ms[0].Name != "organization" || !ms[0].Applied || !ms[0].Transactional {
+		if len(ms) != head || ms[0].Version != 1 || ms[0].Name != "organization" || !ms[0].Applied || !ms[0].Transactional {
 			t.Errorf("migrations = %+v", ms)
 		}
 	})
@@ -162,7 +164,13 @@ func TestAdmin(t *testing.T) {
 	})
 
 	t.Run("down, verify pending, up", func(t *testing.T) {
-		assertEmptySchema(t, schema(t, c.Post(t, admin+"/schema/down", appSet(map[string]any{}))))
+		// Down without steps reverts one; the rest reverts the set.
+		if st := schema(t, c.Post(t, admin+"/schema/down", appSet(map[string]any{}))); st.Set(integration.AppSet).Version != head-1 {
+			t.Errorf("down one = %+v, want version %d", st, head-1)
+		}
+		if head > 1 {
+			assertEmptySchema(t, schema(t, c.Post(t, admin+"/schema/down", appSet(map[string]any{"steps": head - 1}))))
+		}
 		if p := c.Post(t, admin+"/schema/verify", nil).Problem(t, http.StatusConflict); !strings.Contains(p.Detail, "pending") {
 			t.Errorf("verify on a pending schema: detail = %q", p.Detail)
 		}
@@ -178,18 +186,18 @@ func TestAdmin(t *testing.T) {
 		if p := c.Post(t, admin+"/schema/steps", map[string]any{"set": "nope", "steps": 1}).Problem(t, http.StatusBadRequest); !strings.Contains(p.Detail, "nope") {
 			t.Errorf("an undeclared set: detail = %q, want it named", p.Detail)
 		}
-		assertEmptySchema(t, schema(t, c.Post(t, admin+"/schema/steps", appSet(map[string]any{"steps": -1}))))
-		assertCurrentSchema(t, schema(t, c.Post(t, admin+"/schema/steps", appSet(map[string]any{"steps": 1}))))
+		assertEmptySchema(t, schema(t, c.Post(t, admin+"/schema/steps", appSet(map[string]any{"steps": -head}))))
+		assertCurrentSchema(t, schema(t, c.Post(t, admin+"/schema/steps", appSet(map[string]any{"steps": head}))))
 	})
 
 	t.Run("force", func(t *testing.T) {
 		_ = c.Post(t, admin+"/schema/force", appSet(map[string]any{"version": -1})).Problem(t, http.StatusBadRequest)
-		_ = c.Post(t, admin+"/schema/force", appSet(map[string]any{"version": 7})).Problem(t, http.StatusBadRequest) // outside the set
+		_ = c.Post(t, admin+"/schema/force", appSet(map[string]any{"version": head + 1})).Problem(t, http.StatusBadRequest) // outside the set
 		_ = c.Post(t, admin+"/schema/force", map[string]any{"version": 1}).Problem(t, http.StatusBadRequest)         // the set is required
 		// Force sets the history without touching the schema: to 0 the set
 		// reads as pending though the table stands; back to 1 it is current.
 		assertEmptySchema(t, schema(t, c.Post(t, admin+"/schema/force", appSet(map[string]any{"version": 0}))))
-		assertCurrentSchema(t, schema(t, c.Post(t, admin+"/schema/force", appSet(map[string]any{"version": 1}))))
+		assertCurrentSchema(t, schema(t, c.Post(t, admin+"/schema/force", appSet(map[string]any{"version": head}))))
 	})
 
 	t.Run("seed", func(t *testing.T) {

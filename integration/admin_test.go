@@ -78,7 +78,7 @@ func TestAdmin(t *testing.T) {
 		if d.Dialect != "postgres" || d.Ping <= 0 || !strings.HasPrefix(d.ServerVersion, "PostgreSQL 18") || d.Pool.Open < 1 {
 			t.Errorf("diagnostics = %+v", d)
 		}
-		if !equal(d.Namespaces, []string{"app", "sql"}) {
+		if !equal(d.Namespaces, []string{"app", "blobfs", "sql"}) {
 			t.Errorf("namespaces = %v", d.Namespaces)
 		}
 	})
@@ -86,8 +86,12 @@ func TestAdmin(t *testing.T) {
 	t.Run("schema", func(t *testing.T) {
 		st := schema(t, c.Get(t, admin+"/schema"))
 		assertCurrentSchema(t, st)
-		if len(st.Sets) != 1 || st.Sets[0].Name != integration.AppSet {
-			t.Errorf("sets = %+v, want the app set alone", st.Sets)
+		// blobfs's set is declared beneath the service's own, and current.
+		if len(st.Sets) != 2 || st.Sets[0].Name != "blobfs" || st.Sets[1].Name != integration.AppSet {
+			t.Errorf("sets = %+v, want blobfs then app", st.Sets)
+		}
+		if bf := st.Set("blobfs"); bf.Version != bf.Latest || bf.Latest < 2 || bf.Dirty {
+			t.Errorf("blobfs set = %+v, want current at its head", bf)
 		}
 		ms := st.Set(integration.AppSet).Migrations
 		if len(ms) != 1 || ms[0].Version != 1 || ms[0].Name != "organization" || !ms[0].Applied || !ms[0].Transactional {
@@ -97,7 +101,7 @@ func TestAdmin(t *testing.T) {
 
 	t.Run("patterns", func(t *testing.T) {
 		cat := webtest.Decode[catalog](t, c.Get(t, admin+"/patterns"), http.StatusOK)
-		if !equal(cat.Namespaces, []string{"app", "sql"}) {
+		if !equal(cat.Namespaces, []string{"app", "blobfs", "sql"}) {
 			t.Errorf("namespaces = %v", cat.Namespaces)
 		}
 		found := false

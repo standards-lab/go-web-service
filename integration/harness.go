@@ -11,15 +11,27 @@ import (
 )
 
 // The compose stack's defaults, the values config.json and
-// secrets.example.json pair with. The harness reads the same APP_DATABASE_*
-// and APP_OBSERVABILITY_ENDPOINT variables the service does, so a stack
-// moved off the defaults follows one setting.
+// secrets.example.json pair with. The harness reads the same APP_DATABASE_*,
+// APP_STORAGE_*, and APP_OBSERVABILITY_ENDPOINT variables the service does,
+// so a stack moved off the defaults follows one setting. The storage
+// account and key are Azurite's published development credential.
 const (
 	defaultDatabaseHost          = "127.0.0.1"
 	defaultDatabasePort          = "5432"
 	defaultDatabasePassword      = "app"
+	defaultStorageEndpoint       = "http://127.0.0.1:10000/devstoreaccount1"
+	defaultStorageAccount        = "devstoreaccount1"
+	defaultStorageKey            = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
 	defaultObservabilityEndpoint = "127.0.0.1:4317"
 )
+
+// getenv is the parent's value of name, or def when it sets none.
+func getenv(name, def string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return def
+}
 
 // defaultRateLimitRequests overrides the service's own default (300 per
 // minute) generously upward, so no scenario's own request volume against
@@ -127,6 +139,9 @@ func environment(opts Options, addr, dbHost, dbPort string) []string {
 		"APP_DATABASE_HOST=" + host,
 		"APP_DATABASE_PORT=" + port,
 		"APP_DATABASE_PASSWORD=" + password,
+		"APP_STORAGE_ENDPOINT=" + getenv("APP_STORAGE_ENDPOINT", defaultStorageEndpoint),
+		"APP_STORAGE_ACCOUNT=" + getenv("APP_STORAGE_ACCOUNT", defaultStorageAccount),
+		"APP_STORAGE_KEY=" + getenv("APP_STORAGE_KEY", defaultStorageKey),
 		"APP_OBSERVABILITY_ENDPOINT=" + endpoint,
 		"APP_ADMIN_SEED=" + opts.Seed,
 		"APP_RATE_LIMIT_REQUESTS=" + defaultRateLimitRequests,

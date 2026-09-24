@@ -3,6 +3,7 @@ package data
 import (
 	"database/sql"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/standards-lab/blobfs"
@@ -20,7 +21,9 @@ import (
 //   - an absent row is not found
 //   - a unique or foreign-key violation is a conflict with the current state
 //   - a stale version is a failed precondition
-//   - a database that is not ready or cannot be reached is a temporary outage
+//   - a database that is not ready or cannot be reached is a temporary outage,
+//     a pooled connection lost in the middle of a read included: sqlate's
+//     engine leaves that unexpected EOF unclassified, so it is matched here
 //
 // and the storage vocabulary, blobfs's sentinels and go-storage's, which
 // comes first because a blobfs violation also unwraps to the constraint
@@ -67,7 +70,8 @@ func Status(err error) (web.Problem, bool) {
 		return web.Problem{Status: http.StatusPreconditionFailed}, true
 	case errors.Is(err, database.ErrNotReady),
 		errors.Is(err, database.ErrConnectionFailed),
-		errors.Is(err, sqlate.ErrConnectionFailed):
+		errors.Is(err, sqlate.ErrConnectionFailed),
+		errors.Is(err, io.ErrUnexpectedEOF):
 		return web.Problem{Status: http.StatusServiceUnavailable}, true
 	}
 	return web.Problem{}, false

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"testing"
 
 	"github.com/standards-lab/blobfs"
@@ -32,6 +33,7 @@ func TestStatus(t *testing.T) {
 		{"not ready", database.ErrNotReady, 503, true},
 		{"pool connection failed", fmt.Errorf("%w: refused", database.ErrConnectionFailed), 503, true},
 		{"session connection failed", fmt.Errorf("%w: refused", sqlate.ErrConnectionFailed), 503, true},
+		{"connection lost mid-read", fmt.Errorf("query: %w", io.ErrUnexpectedEOF), 503, true},
 		{"blobfs invalid name", &blobfs.NameError{Name: "a/b", Reason: "contains a slash"}, 400, true},
 		{"blobfs root", blobfs.ErrRootDirectory, 400, true},
 		{"blobfs not found", fmt.Errorf("find: %w", blobfs.ErrNotFound), 404, true},

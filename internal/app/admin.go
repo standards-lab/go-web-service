@@ -32,7 +32,7 @@ func newAdmin(
 	cfg *config.Config,
 	lc *lifecycle.Coordinator,
 ) (*Admin, error) {
-	migrator, err := migrate.New(infra.SQL.DB, data.Migrations(), migrate.Options{Logger: infra.Logger})
+	migrator, err := migrate.New(infra.SQL.DB, infra.Sets, migrate.Options{Logger: infra.Logger})
 	if err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}

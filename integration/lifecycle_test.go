@@ -82,7 +82,7 @@ func TestLifecycle_StartupMigratesSeedsAndDrains(t *testing.T) {
 	if ready.Status != "ready" {
 		t.Errorf("readyz status = %q", ready.Status)
 	}
-	want := map[string]bool{"lifecycle": false, "database": false, "schema": false}
+	want := map[string]bool{"lifecycle": false, "database": false, "storage": false, "schema": false}
 	for _, ch := range ready.Checks {
 		if _, known := want[ch.Name]; !known || !ch.Ready {
 			t.Errorf("readyz check %s ready=%t", ch.Name, ch.Ready)

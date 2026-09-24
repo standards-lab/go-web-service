@@ -42,10 +42,10 @@ run = "go test -race ./... && cd tools/slab && go test -race ./..."
 description = "Start an isolated compose stack, run the integration tier against it, and tear it down"
 run = '''
 set -e
-export COMPOSE_PROJECT_NAME=go-web-service-integration POSTGRES_PORT=5433
+export COMPOSE_PROJECT_NAME=go-web-service-integration POSTGRES_PORT=5433 AZURITE_BLOB_PORT=10001
 trap 'docker compose down -v' EXIT
 docker compose up -d --wait
-APP_DATABASE_PORT=5433 go test -race -count=1 -tags integration ./integration/
+APP_DATABASE_PORT=5433 APP_STORAGE_ENDPOINT=http://127.0.0.1:10001/devstoreaccount1 go test -race -count=1 -tags integration ./integration/
 '''
 
 [tasks.fmt]

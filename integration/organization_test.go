@@ -98,12 +98,12 @@ func TestOrganization(t *testing.T) {
 		if eng.Path != "/acme/engineering" || eng.ParentID == nil || *eng.ParentID != all["acme"].ID {
 			t.Errorf("engineering = %+v", eng)
 		}
-		byPath := webtest.Decode[organization](t, c.Get(t, organizations+"/path/acme/engineering/platform"), http.StatusOK)
+		byPath := webtest.Decode[organization](t, c.Get(t, organizations+"/lookup?path=/acme/engineering/platform"), http.StatusOK)
 		if byPath.ID != all["platform"].ID {
 			t.Errorf("path read = %+v", byPath)
 		}
 		_ = c.Get(t, organizations+"/"+absentID).Problem(t, http.StatusNotFound)
-		_ = c.Get(t, organizations+"/path/acme/nowhere").Problem(t, http.StatusNotFound)
+		_ = c.Get(t, organizations+"/lookup?path=/acme/nowhere").Problem(t, http.StatusNotFound)
 		_ = c.Get(t, organizations+"/not-a-uuid").Problem(t, http.StatusBadRequest)
 	})
 
@@ -177,7 +177,7 @@ func TestOrganization(t *testing.T) {
 		if ident.Version != 1 || res.Header.Get("Location") != organizations+"/"+ident.ID {
 			t.Errorf("created = %+v, Location %q", ident, res.Header.Get("Location"))
 		}
-		created := webtest.Decode[organization](t, c.Get(t, organizations+"/path/acme/engineering/security"), http.StatusOK)
+		created := webtest.Decode[organization](t, c.Get(t, organizations+"/lookup?path=/acme/engineering/security"), http.StatusOK)
 		if created.ID != ident.ID {
 			t.Errorf("created row not readable by path: %+v", created)
 		}
@@ -235,11 +235,11 @@ func TestOrganization(t *testing.T) {
 		if ident.Version != platform.Version+1 {
 			t.Errorf("transferred = %+v", ident)
 		}
-		moved := webtest.Decode[organization](t, c.Get(t, organizations+"/path/acme/operations/platform"), http.StatusOK)
+		moved := webtest.Decode[organization](t, c.Get(t, organizations+"/lookup?path=/acme/operations/platform"), http.StatusOK)
 		if moved.ID != platform.ID {
 			t.Errorf("moved row = %+v", moved)
 		}
-		_ = c.Get(t, organizations+"/path/acme/engineering/platform").Problem(t, http.StatusNotFound)
+		_ = c.Get(t, organizations+"/lookup?path=/acme/engineering/platform").Problem(t, http.StatusNotFound)
 
 		// Moving a subtree recomposes every descendant's path.
 		eng := all["engineering"]
@@ -250,7 +250,7 @@ func TestOrganization(t *testing.T) {
 
 		// The root move: null parent.
 		ident = webtest.Decode[identity](t, c.Post(t, path, map[string]any{"parent_id": nil}, webtest.IfMatch(ident.Version)), http.StatusOK)
-		root := webtest.Decode[organization](t, c.Get(t, organizations+"/path/platform"), http.StatusOK)
+		root := webtest.Decode[organization](t, c.Get(t, organizations+"/lookup?path=/platform"), http.StatusOK)
 		if root.ParentID != nil || root.Path != "/platform" || root.Version != ident.Version {
 			t.Errorf("root move = %+v", root)
 		}

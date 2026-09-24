@@ -42,11 +42,10 @@ func (c *Client) Find(ctx context.Context, id string) (*httpx.Response, error) {
 	return c.http.Get(ctx, Organizations+"/"+url.PathEscape(id))
 }
 
-// FindByPath sends GET Organizations/path/{path}. The service reads the
-// remainder after /path/ and prefixes a slash to make the hierarchy path, so
-// a leading slash on path is dropped here rather than doubled.
+// FindByPath sends GET Organizations/lookup?path={path}, the hierarchy path
+// with its leading slash, which is added here when path omits it.
 func (c *Client) FindByPath(ctx context.Context, path string) (*httpx.Response, error) {
-	return c.http.Get(ctx, Organizations+"/path/"+strings.TrimLeft(path, "/"))
+	return c.http.Get(ctx, Organizations+"/lookup?"+httpx.RawQuery([2]string{"path", "/" + strings.TrimLeft(path, "/")}))
 }
 
 // Create sends POST Organizations with body as the request body, verbatim.

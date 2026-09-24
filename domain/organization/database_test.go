@@ -11,6 +11,9 @@ import (
 	"testing"
 	"time"
 
+	bfdata "github.com/standards-lab/blobfs/data"
+	"github.com/standards-lab/go-storage"
+	"github.com/standards-lab/go-storage/storagetest"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/query"
@@ -30,9 +33,33 @@ const (
 // bound at construction, no I/O.
 func service(t *testing.T, responses ...sqltest.Response) (*organization.Service, *sqltest.Recorder) {
 	t.Helper()
+	svc, rec, _ := serviceOver(t, sqltest.Dialect{}, responses...)
+	return svc, rec
+}
+
+// serviceOver builds the domain over the scripted driver in dialect, with
+// blobfs's store compiled against the same catalog, and the object store
+// over the fake, started as the composition root starts the real one.
+func serviceOver(t *testing.T, dialect sqlate.Dialect, responses ...sqltest.Response) (*organization.Service, *sqltest.Recorder, *storagetest.Fake) {
+	t.Helper()
 	pool, rec := sqltest.Open(t, responses...)
-	db := data.New(sqlate.Wrap(pool, sqltest.Dialect{}), query.MustCatalog(query.Patterns(), data.Patterns()))
-	return organization.New(db), rec
+	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
+	fs, err := bfdata.New(catalog, dialect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := storagetest.NewFake()
+	cfg := storage.Config{Container: "test"}
+	if err := cfg.Finalize(""); err != nil {
+		t.Fatal(err)
+	}
+	objects := storage.New(fake, cfg)
+	if err := objects.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = objects.Shutdown(context.Background()) })
+	db := data.New(sqlate.Wrap(pool, dialect), catalog)
+	return organization.New(db, data.NewStorage(fs, objects)), rec, fake
 }
 
 func identity(id string, version int64) sqltest.Response {
@@ -145,7 +172,7 @@ func TestStore_GuardDistinguishesAbsentFromStale(t *testing.T) {
 	}
 }
 
-// Verify prepares the seven statements and the read contract's three
+// Verify prepares the twelve statements and the read contract's three
 // probes: the fields against their declared types, a page past a cursor,
 // and the same page counted.
 func TestStore_VerifyPreparesEveryStatement(t *testing.T) {
@@ -154,8 +181,8 @@ func TestStore_VerifyPreparesEveryStatement(t *testing.T) {
 		t.Fatal(err)
 	}
 	prepared := rec.SQL(sqltest.OpPrepare)
-	if len(prepared) != 10 {
-		t.Errorf("prepared %d statements, want 7 + the contract's 3 probes", len(prepared))
+	if len(prepared) != 15 {
+		t.Errorf("prepared %d statements, want 12 + the contract's 3 probes", len(prepared))
 	}
 }
 

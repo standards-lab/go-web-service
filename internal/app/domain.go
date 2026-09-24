@@ -21,7 +21,7 @@ type Domain struct {
 // the Infrastructure struct itself, and registers its startup verification
 // on lc at the domains' stage, after the schema's.
 func newDomain(infra *Infrastructure, lc *lifecycle.Coordinator) *Domain {
-	org := organization.New(infra.SQL)
+	org := organization.New(infra.SQL, infra.Storage)
 	org.Register(lc)
 	return &Domain{Organization: org}
 }

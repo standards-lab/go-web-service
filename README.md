@@ -114,7 +114,7 @@ The organization domain is mounted under `/api`:
 |--------|------|--------------|
 | `GET` | `/api/organizations` | List organizations (paged, filtered, sorted) |
 | `GET` | `/api/organizations/{id}` | Find one by id |
-| `GET` | `/api/organizations/path/{path...}` | Find one by hierarchical path |
+| `GET` | `/api/organizations/lookup?path=/acme/engineering` | Find one by hierarchical path |
 | `POST` | `/api/organizations` | Create an organization |
 | `PUT` | `/api/organizations/{id}` | Replace its code and name |
 | `POST` | `/api/organizations/{id}/transfer` | Move it under a new parent (`parent_id`, null for the root) |
@@ -132,7 +132,7 @@ stale version 412. Every rejection is an RFC 9457 problem.
 
 ```sh
 curl localhost:8080/api/organizations                          # the seeded reference data, paged
-curl localhost:8080/api/organizations/path/acme/engineering    # lookup by hierarchical path
+curl 'localhost:8080/api/organizations/lookup?path=/acme/engineering'   # lookup by hierarchical path
 ```
 
 ## Admin

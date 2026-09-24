@@ -5,6 +5,7 @@ import (
 	"embed"
 	"fmt"
 
+	"github.com/standards-lab/blobfs"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/query"
@@ -21,34 +22,48 @@ var files embed.FS
 // the route share one name. The tree lock is the data package's, taken by
 // its registered name. The entities' tags are the scan and binding
 // contract, so no scan function or Args literal is written for an entity
-// here. It is the package's sole importer of the query library.
+// here. It is the package's sole importer of the query library. The image
+// statements are steps the logo's protocols in storage.go sequence around
+// blobfs's, so their methods take the session the protocol hands them.
 type store struct {
-	db            *data.Database
-	stmts         *query.Statements
-	view          query.Projection[Organization]
-	createRows    query.Rows[Identity]
-	inSubtree     query.Rows[int64]
-	editGuard     query.Guard
-	transferGuard query.Guard
-	deleteGuard   query.Guard
+	db              *data.Database
+	storage         *data.Storage
+	stmts           *query.Statements
+	view            query.Projection[Organization]
+	createRows      query.Rows[Identity]
+	inSubtree       query.Rows[int64]
+	editGuard       query.Guard
+	transferGuard   query.Guard
+	deleteGuard     query.Guard
+	activeLogoRows  query.Rows[blobfs.File]
+	attachImage     query.Statement
+	activateImage   query.Statement
+	deactivateImage query.Statement
+	detachImage     query.Statement
 }
 
 // newStore compiles the statements against the service's catalog, registers
 // the inventory under the domain's name, and binds the handles. A compile
 // failure is a wiring defect and panics; no I/O happens here.
-func newStore(db *data.Database) *store {
+func newStore(db *data.Database, st *data.Storage) *store {
 	stmts := db.Catalog.MustCompile(files, "statements", db.Dialect())
 	db.Register("organization", stmts)
 	check := stmts.Statement("version")
 	return &store{
-		db:            db,
-		stmts:         stmts,
-		view:          stmts.Statement("organization_view").Project(query.Scanner[Organization]()),
-		createRows:    stmts.Statement("create").Scan(query.Scanner[Identity]()),
-		inSubtree:     stmts.Statement("in_subtree").Scan(query.Scalar[int64]),
-		editGuard:     stmts.Statement("edit").Guarded(check, "version"),
-		transferGuard: stmts.Statement("transfer").Guarded(check, "version"),
-		deleteGuard:   stmts.Statement("delete").Guarded(check, "version"),
+		db:              db,
+		storage:         st,
+		stmts:           stmts,
+		view:            stmts.Statement("organization_view").Project(query.Scanner[Organization]()),
+		createRows:      stmts.Statement("create").Scan(query.Scanner[Identity]()),
+		inSubtree:       stmts.Statement("in_subtree").Scan(query.Scalar[int64]),
+		editGuard:       stmts.Statement("edit").Guarded(check, "version"),
+		transferGuard:   stmts.Statement("transfer").Guarded(check, "version"),
+		deleteGuard:     stmts.Statement("delete").Guarded(check, "version"),
+		activeLogoRows:  stmts.Statement("active_logo").Scan(query.Scanner[blobfs.File]()),
+		attachImage:     stmts.Statement("attach_image"),
+		activateImage:   stmts.Statement("activate_image"),
+		deactivateImage: stmts.Statement("deactivate_image"),
+		detachImage:     stmts.Statement("detach_image"),
 	}
 }
 
@@ -101,5 +116,33 @@ func (s *store) transfer(ctx context.Context, id string, version int64, t Transf
 
 func (s *store) delete(ctx context.Context, id string, version int64) error {
 	_, err := s.deleteGuard.Run(ctx, s.db, version, query.Args{"id": id})
+	return err
+}
+
+// activeLogo reads the file the organization's active image binds,
+// whatever its status, or sql.ErrNoRows.
+func (s *store) activeLogo(ctx context.Context, sess sqlate.Session, organizationID string) (blobfs.File, error) {
+	return s.activeLogoRows.One(ctx, sess, query.Args{"organization_id": organizationID})
+}
+
+// attach binds the file to the organization as an inactive image.
+func (s *store) attach(ctx context.Context, tx *sqlate.Tx, organizationID, fileID string) error {
+	_, err := s.attachImage.Exec(ctx, tx, query.Args{"organization_id": organizationID, "file_id": fileID})
+	return err
+}
+
+// activate makes the image binding the file its organization's only
+// active one: the current one cleared, then this one set.
+func (s *store) activate(ctx context.Context, tx *sqlate.Tx, organizationID, fileID string) error {
+	if _, err := s.deactivateImage.Exec(ctx, tx, query.Args{"organization_id": organizationID}); err != nil {
+		return err
+	}
+	_, err := s.activateImage.Exec(ctx, tx, query.Args{"file_id": fileID})
+	return err
+}
+
+// detach removes the image binding the file.
+func (s *store) detach(ctx context.Context, tx *sqlate.Tx, fileID string) error {
+	_, err := s.detachImage.Exec(ctx, tx, query.Args{"file_id": fileID})
 	return err
 }

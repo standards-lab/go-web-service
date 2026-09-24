@@ -126,7 +126,7 @@ func (d deps) getCommand() *cobra.Command {
 	}
 }
 
-// getByPathCommand is GET Organizations/path/{path}.
+// getByPathCommand is GET Organizations/lookup?path={path}.
 func (d deps) getByPathCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "get-by-path <path>",

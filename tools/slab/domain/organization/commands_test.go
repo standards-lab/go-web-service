@@ -202,7 +202,7 @@ func TestGetByPath_ReadsByHierarchyPath(t *testing.T) {
 		if _, err := run(t, srv, "get-by-path", path); err != nil {
 			t.Fatal(err)
 		}
-		if got := s.only(t); got.method != http.MethodGet || got.uri != "/api/organizations/path/acme/engineering" {
+		if got := s.only(t); got.method != http.MethodGet || got.uri != "/api/organizations/lookup?path=%2Facme%2Fengineering" {
 			t.Errorf("get-by-path %q sent %s %s", path, got.method, got.uri)
 		}
 	}

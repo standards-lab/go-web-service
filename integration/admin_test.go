@@ -193,7 +193,7 @@ func TestAdmin(t *testing.T) {
 	t.Run("force", func(t *testing.T) {
 		_ = c.Post(t, admin+"/schema/force", appSet(map[string]any{"version": -1})).Problem(t, http.StatusBadRequest)
 		_ = c.Post(t, admin+"/schema/force", appSet(map[string]any{"version": head + 1})).Problem(t, http.StatusBadRequest) // outside the set
-		_ = c.Post(t, admin+"/schema/force", map[string]any{"version": 1}).Problem(t, http.StatusBadRequest)         // the set is required
+		_ = c.Post(t, admin+"/schema/force", map[string]any{"version": 1}).Problem(t, http.StatusBadRequest)                // the set is required
 		// Force sets the history without touching the schema: to 0 the set
 		// reads as pending though the table stands; back to 1 it is current.
 		assertEmptySchema(t, schema(t, c.Post(t, admin+"/schema/force", appSet(map[string]any{"version": 0}))))

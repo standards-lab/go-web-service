@@ -26,10 +26,11 @@ type Service struct {
 	store *store
 }
 
-// New constructs the service over the database the domains share.
-// Construction compiles and binds the statements and performs no I/O.
-func New(db *data.Database) *Service {
-	return &Service{store: newStore(db)}
+// New constructs the service over the database and the object storage the
+// domains share. Construction compiles and binds the statements and
+// performs no I/O.
+func New(db *data.Database, st *data.Storage) *Service {
+	return &Service{store: newStore(db, st)}
 }
 
 // Register declares the domain's startup verification on lc.
@@ -94,4 +95,29 @@ func (s *Service) Transfer(ctx context.Context, id string, version int64, t Tran
 // deletion through the foreign key.
 func (s *Service) Delete(ctx context.Context, id string, version int64) error {
 	return s.store.delete(ctx, id, version)
+}
+
+// PutLogo stores the upload as the organization's logo and makes it the
+// active one, retiring the logo it replaces, and returns the new file's
+// identity. A media type outside the logo's allowlist is refused before any
+// I/O; a nonexistent organization is sql.ErrNoRows, and a concurrent
+// replacement that activated first is a unique violation.
+func (s *Service) PutLogo(ctx context.Context, id string, u web.Upload) (Identity, error) {
+	ext, err := logoExtension(u.MediaType)
+	if err != nil {
+		return Identity{}, err
+	}
+	return s.store.putLogo(ctx, id, u, ext)
+}
+
+// Logo returns the organization's active logo, or the missing row when it
+// has none.
+func (s *Service) Logo(ctx context.Context, id string) (Logo, error) {
+	return s.store.logo(ctx, id)
+}
+
+// DeleteLogo retires the organization's active logo, its row and its
+// object, or returns sql.ErrNoRows when it has none.
+func (s *Service) DeleteLogo(ctx context.Context, id string) error {
+	return s.store.deleteLogo(ctx, id)
 }

@@ -34,7 +34,7 @@ func TestScenario_NarratesFourStepsOverTheCheckout(t *testing.T) {
 		"{{> app.identity}}",
 		"//go:embed statements/*.sql",
 		"var statements embed.FS",
-		`query.NewCatalog(query.Patterns(), query.Publish("app", fsys, "data/patterns"))`,
+		`query.NewCatalog(query.Patterns(), bfdata.Patterns(), query.Publish("app", fsys, "data/patterns"))`,
 		`catalog.Compile(fsys, "domain/organization/statements", postgres.Dialect{})`,
 		"fsys, err := repo.FS(ctx)",
 		"create, compiled for execution by postgres",

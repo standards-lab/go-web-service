@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"time"
 	"uuid"
+
+	"github.com/standards-lab/go-web-sdk"
 )
 
 // ErrValidation classifies a command input rejection; wrapped with the
@@ -108,6 +111,38 @@ func (t TransferOrganization) Validate() error {
 type Identity struct {
 	ID      string `json:"id"`
 	Version int64  `json:"version"`
+}
+
+// logoTypes is the logo's allowlist: the raster image media types a
+// browser renders inertly, each with the extension its stored name takes.
+// SVG is left out because it is script-capable.
+var logoTypes = map[string]string{
+	"image/png":  ".png",
+	"image/jpeg": ".jpg",
+	"image/webp": ".webp",
+	"image/gif":  ".gif",
+}
+
+// logoExtension returns the stored name's extension for an upload of
+// mediaType, or refuses a type the allowlist does not hold as the web
+// SDK's Content-Type refusal, a 415.
+func logoExtension(mediaType string) (string, error) {
+	ext, ok := logoTypes[mediaType]
+	if !ok {
+		return "", &web.UploadError{
+			Header: "Content-Type",
+			Reason: fmt.Sprintf("a logo is PNG, JPEG, WebP, or GIF, not %q", mediaType),
+		}
+	}
+	return ext, nil
+}
+
+// Logo is the organization's active logo as the read serves it: the stored
+// object's description, which answers a revalidation alone, and Open, which
+// streams the bytes and runs only when they are sent.
+type Logo struct {
+	Object web.Object
+	Open   func() (io.ReadCloser, error)
 }
 
 // The field rules the commands share.

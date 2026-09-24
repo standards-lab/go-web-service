@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/standards-lab/blobfs"
 	"github.com/standards-lab/go-database"
+	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/query"
@@ -20,12 +22,41 @@ import (
 //   - a stale version is a failed precondition
 //   - a database that is not ready or cannot be reached is a temporary outage
 //
+// and the storage vocabulary, blobfs's sentinels and go-storage's, which
+// comes first because a blobfs violation also unwraps to the constraint
+// error beneath it:
+//
+//   - a malformed name, path, key, or id, or an operation on the root, is
+//     the request's fault
+//   - an absent entry or object is not found
+//   - a taken name or id, a non-empty directory, a referenced or deleting
+//     file, a move into its own subtree, or a transition the file's status
+//     does not allow is a conflict
+//   - an object over the store's size bound is too large
+//   - a store that is not ready, unreachable, or missing its container is a
+//     temporary outage
+//
 // A handler composes it after its own matcher so the domain's errors take
 // precedence. Check and not-null violations stay unmatched on purpose: a
 // command's validation owns those rules, so a breach is an invariant
 // failure, reported as a server fault.
 func Status(err error) (web.Problem, bool) {
 	switch {
+	case errors.Is(err, blobfs.ErrInvalidName), errors.Is(err, blobfs.ErrInvalidPath),
+		errors.Is(err, blobfs.ErrInvalidKey), errors.Is(err, blobfs.ErrInvalidID),
+		errors.Is(err, blobfs.ErrRootDirectory):
+		return web.Problem{Status: http.StatusBadRequest}, true
+	case errors.Is(err, blobfs.ErrNotFound), errors.Is(err, storage.ErrNotFound) && !errors.Is(err, ErrContainerGone):
+		return web.Problem{Status: http.StatusNotFound}, true
+	case errors.Is(err, blobfs.ErrNameTaken), errors.Is(err, blobfs.ErrIDTaken),
+		errors.Is(err, blobfs.ErrNotEmpty), errors.Is(err, blobfs.ErrReferenced),
+		errors.Is(err, blobfs.ErrDeleting), errors.Is(err, blobfs.ErrNotDeleting),
+		errors.Is(err, blobfs.ErrInvalidTransition), errors.Is(err, blobfs.ErrCycle):
+		return web.Problem{Status: http.StatusConflict}, true
+	case errors.Is(err, storage.ErrTooLarge):
+		return web.Problem{Status: http.StatusRequestEntityTooLarge}, true
+	case errors.Is(err, ErrContainerGone), errors.Is(err, storage.ErrNotReady), errors.Is(err, storage.ErrUnavailable):
+		return web.Problem{Status: http.StatusServiceUnavailable}, true
 	case errors.Is(err, query.ErrDirectives):
 		return web.Problem{Status: http.StatusBadRequest}, true
 	case errors.Is(err, sql.ErrNoRows):

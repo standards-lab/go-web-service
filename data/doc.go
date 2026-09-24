@@ -11,9 +11,17 @@
 // The content is the schema (migrations/), the application's pattern
 // namespace (patterns/), and the named states with their seed statements
 // (seeds/, statements/), each behind a function the admin service
-// triggers: Migrations, Patterns, and a Seeder. Beside them sit the three pieces
-// every domain would otherwise copy: the advisory-lock name registry, the
-// lowering from the web SDK's query to the library's directives, and the
-// status matcher over the library's error vocabulary. Domains and the
-// admin service are peers over this package; nothing here imports either.
+// triggers: Migrations, Patterns, and a Seeder. Migrations declares the sets
+// the libraries beneath the service ship, as the composition root passes
+// them, ahead of the service's own. Beside them sit the pieces every domain
+// would otherwise copy: the advisory-lock name registry, the lowering from
+// the web SDK's query to the library's directives and the collection read
+// it addresses, and the status matcher over the libraries' error
+// vocabulary, the storage libraries' included.
+//
+// Storage is the object storage infrastructure as the domains see it:
+// blobfs's store over the same session, and Objects, the adapter that is
+// the one place the service names its object-store library. Domains and
+// the admin service are peers over this package; nothing here imports
+// either.
 package data

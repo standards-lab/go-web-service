@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/standards-lab/blobfs"
 	"github.com/standards-lab/go-database"
+	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/query"
 
@@ -30,6 +32,18 @@ func TestStatus(t *testing.T) {
 		{"not ready", database.ErrNotReady, 503, true},
 		{"pool connection failed", fmt.Errorf("%w: refused", database.ErrConnectionFailed), 503, true},
 		{"session connection failed", fmt.Errorf("%w: refused", sqlate.ErrConnectionFailed), 503, true},
+		{"blobfs invalid name", &blobfs.NameError{Name: "a/b", Reason: "contains a slash"}, 400, true},
+		{"blobfs root", blobfs.ErrRootDirectory, 400, true},
+		{"blobfs not found", fmt.Errorf("find: %w", blobfs.ErrNotFound), 404, true},
+		{"object not found", storage.ErrNotFound, 404, true},
+		{"blobfs name taken wins over its unique violation", &blobfs.ViolationError{Sentinel: blobfs.ErrNameTaken, Constraint: "blobfs_uq_file_directory_name", Err: &sqlate.ConstraintError{Class: sqlate.ErrUniqueViolation, Err: errors.New("dup")}}, 409, true},
+		{"blobfs not empty", blobfs.ErrNotEmpty, 409, true},
+		{"blobfs referenced", blobfs.ErrReferenced, 409, true},
+		{"blobfs cycle", blobfs.ErrCycle, 409, true},
+		{"object too large", storage.ErrTooLarge, 413, true},
+		{"store not ready", storage.ErrNotReady, 503, true},
+		{"store unavailable", fmt.Errorf("%w: refused", storage.ErrUnavailable), 503, true},
+		{"container gone", fmt.Errorf("%w: %w", data.ErrContainerGone, storage.ErrNotFound), 503, true},
 		{"check violation is unmatched", &sqlate.ConstraintError{Constraint: "cc", Class: sqlate.ErrCheckViolation, Err: errors.New("cc")}, 0, false},
 		{"not-null violation is unmatched", sqlate.ErrNotNullViolation, 0, false},
 		{"other", errors.New("boom"), 0, false},

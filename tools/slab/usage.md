@@ -55,6 +55,13 @@ mise run slab -- org list --filter 'code[like]=%e%' --size 2 --page 1 --sort cod
 ```
 
 ```sh
+# a cursor walk: each page prints "next"; pass it back with the same sort to continue
+mise run slab -- org list --size 3 --sort -path                      # page 1, total 7, more, next
+mise run slab -- org list --size 3 --sort -path --cursor <next>      # no page number
+mise run slab -- org list --page 2 --cursor <next>                   # cobra usage error: exclusive
+```
+
+```sh
 # the --body/flags mutual exclusion, expect a cobra usage error:
 mise run slab -- org create --code x --name y --body '{}'
 ```

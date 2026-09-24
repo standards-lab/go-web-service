@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"testing"
@@ -167,4 +168,43 @@ func transferTo(t *testing.T, body string) organization.TransferOrganization {
 		t.Fatal(err)
 	}
 	return cmd
+}
+
+// A list addressed by cursor continues past the previous page's last row
+// with the keyset predicate, not by skipping rows, and is counted as the
+// first page is.
+func TestStore_ListContinuesByCursor(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	rows := func(codes ...string) sqltest.Response {
+		r := sqltest.Response{Columns: []string{"id", "parent_id", "code", "name", "version", "created_at", "updated_at", "path"}}
+		for i, code := range codes {
+			id := fmt.Sprintf("00000000-0000-7000-8000-00000000000%d", i+1)
+			r.Rows = append(r.Rows, []driver.Value{id, nil, code, code, int64(1), now, now, "/" + code})
+		}
+		return r
+	}
+	s, rec := service(t,
+		sqltest.WithTotal(rows("a", "b"), 3), // page 1 of size 1 reads one row past
+		sqltest.WithTotal(rows("b"), 3),      // continued: the last row, still counted
+	)
+	limits := web.Limits{DefaultSize: 1, MaxSize: 10, Cursor: true}
+
+	q, _ := web.ParseQuery(url.Values{"size": {"1"}, "sort": {"code"}}, limits)
+	first, paging, err := s.List(ctx, q)
+	if err != nil || len(first) != 1 || paging.Total != 3 || !paging.More || paging.Next == "" {
+		t.Fatalf("first page = %v, %+v, %v", first, paging, err)
+	}
+	q, err = web.ParseQuery(url.Values{"size": {"1"}, "sort": {"code"}, "cursor": {paging.Next}}, limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, paging, err := s.List(ctx, q)
+	if err != nil || len(next) != 1 || next[0].Code != "b" || paging.Total != 3 || paging.More {
+		t.Fatalf("continued page = %v, %+v, %v", next, paging, err)
+	}
+	sqls := rec.SQL(sqltest.OpQuery)
+	if !strings.Contains(sqls[1], "WHERE (q.code > CAST($1 AS text) OR (q.code = CAST($1 AS text) AND q.id > CAST($2 AS uuid)))") {
+		t.Errorf("continued = %q; want the standard tier's keyset predicate past the cursor's row", sqls[1])
+	}
 }

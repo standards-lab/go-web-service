@@ -122,7 +122,11 @@ The organization domain is mounted under `/api`:
 
 The list takes `page`, `size`, and `sort` (`sort=-path,code`), and every other parameter as a
 filter on a field of the read model: `code=acme` is equality, `code=acme&code=finance` is
-membership, and `name[like]=%25ing` names an operator in brackets. The guarded commands (`PUT`,
+membership, and `name[like]=%25ing` names an operator in brackets. Its envelope carries the
+filtered `total`, `more`, and a `next` cursor; sending `cursor=<next>` in place of `page` (with the
+same sort and filters) continues after the last row, so a tree that changes between requests
+neither skips nor repeats one. A continued page omits `page`; a sort on `parent_id`, the one
+nullable field, pages by number alone. The guarded commands (`PUT`,
 transfer, `DELETE`) take the row's version in `If-Match: "3"`; a missing header answers 428 and a
 stale version 412. Every rejection is an RFC 9457 problem.
 

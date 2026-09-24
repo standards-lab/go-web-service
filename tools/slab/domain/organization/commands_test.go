@@ -123,6 +123,7 @@ func TestList_BuildsTheQueryFromTheReadFlags(t *testing.T) {
 		"no flags":            {nil, "/api/organizations"},
 		"page and size":       {[]string{"--page", "3", "--size", "2"}, "/api/organizations?page=3&size=2"},
 		"sort":                {[]string{"--sort", "-code,name"}, "/api/organizations?sort=-code%2Cname"},
+		"cursor":              {[]string{"--cursor", "eyJrIjoxfQ", "--size", "3", "--sort", "-path"}, "/api/organizations?cursor=eyJrIjoxfQ&size=3&sort=-path"},
 		"one filter":          {[]string{"--filter", "code[like]=%o%"}, "/api/organizations?code[like]=%25o%25"},
 		"repeated filters":    {[]string{"--filter", "code[like]=%o%", "--filter", "parent_id[null]"}, "/api/organizations?code[like]=%25o%25&parent_id[null]="},
 		"filter with equals":  {[]string{"--filter", "name=a=b"}, "/api/organizations?name=a%3Db"},

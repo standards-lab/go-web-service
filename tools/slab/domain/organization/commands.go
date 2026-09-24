@@ -50,15 +50,16 @@ func Commands(newClient func() *Client, out *output.Output) *cobra.Command {
 	return org
 }
 
-// listCommand is GET Organizations under the read grammar: page, size, and
-// sort as their own flags, and each --filter a name=value pair passed
-// through as written, so the operator syntax (code[like]=%o%) is the
-// caller's to spell.
+// listCommand is GET Organizations under the read grammar: page or
+// cursor, size, and sort as their own flags, and each --filter a
+// name=value pair passed through as written, so the operator syntax
+// (code[like]=%o%) is the caller's to spell. --cursor is the next token a
+// previous page printed, sent with the same sort and filters.
 func (d deps) listCommand() *cobra.Command {
 	var (
-		page, size int
-		sort       string
-		filters    []string
+		page, size   int
+		sort, cursor string
+		filters      []string
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -68,6 +69,9 @@ func (d deps) listCommand() *cobra.Command {
 			var query [][2]string
 			if cmd.Flags().Changed("page") {
 				query = append(query, [2]string{"page", strconv.Itoa(page)})
+			}
+			if cmd.Flags().Changed("cursor") {
+				query = append(query, [2]string{"cursor", cursor})
 			}
 			if cmd.Flags().Changed("size") {
 				query = append(query, [2]string{"size", strconv.Itoa(size)})
@@ -94,9 +98,11 @@ func (d deps) listCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().IntVar(&page, "page", 0, "the 1-based page to return; the first when unset")
+	cmd.Flags().StringVar(&cursor, "cursor", "", "continue after the page whose next token this is, in place of --page")
 	cmd.Flags().IntVar(&size, "size", 0, fmt.Sprintf("the page size, up to the configured maximum; the service's default (%d) when unset", DefaultPageSize))
 	cmd.Flags().StringVar(&sort, "sort", "", "comma-separated field names, each with a leading - for descending")
 	cmd.Flags().StringArrayVar(&filters, "filter", nil, "a filter, field=value or field[op]=value; repeatable")
+	cmd.MarkFlagsMutuallyExclusive("page", "cursor")
 	return cmd
 }
 

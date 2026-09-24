@@ -35,6 +35,7 @@ type organizationPage struct {
 	Size  int            `json:"size"`
 	Total *int           `json:"total"`
 	More  bool           `json:"more"`
+	Next  string         `json:"next"`
 }
 
 // total is the page's counted total, or -1 when the page omitted it.
@@ -117,6 +118,33 @@ func TestOrganization(t *testing.T) {
 		}
 		_ = c.Get(t, organizations+"?page=x").Problem(t, http.StatusBadRequest)
 		_ = c.Get(t, organizations+"?size=1000").Problem(t, http.StatusBadRequest)
+	})
+
+	run("cursor walk", func(t *testing.T) {
+		// Follow next from the first page to the end: every row once, in
+		// the sort's order, and no page number after the first.
+		p := webtest.Decode[organizationPage](t, c.Get(t, organizations+"?size=3&sort=-path"), http.StatusOK)
+		walked := codes(p.Items)
+		first := p
+		for p.More {
+			if p.Next == "" {
+				t.Fatalf("a page with more carried no next: %+v", p)
+			}
+			p = webtest.Decode[organizationPage](t, c.Get(t, organizations+"?size=3&sort=-path&cursor="+url.QueryEscape(p.Next)), http.StatusOK)
+			if p.Page != 0 {
+				t.Errorf("a continued page carried page %d", p.Page)
+			}
+			walked = append(walked, codes(p.Items)...)
+		}
+		want := []string{"logistics", "operations", "finance", "product", "platform", "engineering", "acme"}
+		if !equal(walked, want) || first.total() != seededTotal {
+			t.Errorf("walk by -path = %v (first total %d), want %v", walked, first.total(), want)
+		}
+		// A cursor with a page, one sent under another sort, and one that
+		// is not a cursor at all are each the request's error.
+		_ = c.Get(t, organizations+"?page=2&cursor="+url.QueryEscape(first.Next)).Problem(t, http.StatusBadRequest)
+		_ = c.Get(t, organizations+"?size=3&sort=code&cursor="+url.QueryEscape(first.Next)).Problem(t, http.StatusBadRequest)
+		_ = c.Get(t, organizations+"?cursor=not-a-cursor").Problem(t, http.StatusBadRequest)
 	})
 
 	run("filter grammar", func(t *testing.T) {

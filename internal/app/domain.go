@@ -31,6 +31,10 @@ func newDomain(infra *Infrastructure, lc *lifecycle.Coordinator) *Domain {
 // construction site (cfg.Reads.Limits() for a collection read).
 func mountAPI(dom *Domain, cfg *config.Config) *web.Group {
 	api := web.NewGroup("/api")
-	api.Mount(organization.Routes(dom.Organization, cfg.Reads.Limits()))
+	// The organization list continues by cursor: its read model's keyset
+	// continuation holds on every sort it accepts.
+	orgReads := cfg.Reads.Limits()
+	orgReads.Cursor = true
+	api.Mount(organization.Routes(dom.Organization, orgReads))
 	return api
 }

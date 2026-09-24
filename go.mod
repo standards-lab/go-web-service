@@ -6,7 +6,7 @@ require (
 	github.com/standards-lab/blobfs v0.1.0
 	github.com/standards-lab/blobfs/postgres v0.1.0
 	github.com/standards-lab/go-core v0.4.1
-	github.com/standards-lab/go-database v0.6.0
+	github.com/standards-lab/go-database v0.6.1
 	github.com/standards-lab/go-database/postgres v0.3.0
 	github.com/standards-lab/go-observability v0.1.0
 	github.com/standards-lab/go-observability/otlp v0.1.0

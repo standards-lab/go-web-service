@@ -22,7 +22,15 @@ type readiness struct {
 }
 
 type page struct {
-	Total int `json:"total"`
+	Total *int `json:"total"`
+}
+
+// total is the page's counted total, or -1 when the page omitted it.
+func (p page) total() int {
+	if p.Total == nil {
+		return -1
+	}
+	return *p.Total
 }
 
 const organizations = "/api/organizations"
@@ -36,7 +44,7 @@ func revert(t *testing.T) {
 	t.Helper()
 	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	integration.Revert(t, s.Client())
-	if st := integration.Schema(t, s.Client()); st.Version != 0 || st.Ready {
+	if st := integration.Schema(t, s.Client()); st.Set(integration.AppSet).Version != 0 || st.Ready {
 		t.Fatalf("schema after revert = %+v", st)
 	}
 	s.Stop(t)
@@ -47,11 +55,12 @@ func revert(t *testing.T) {
 func assertCurrent(t *testing.T, c *webtest.Client) {
 	t.Helper()
 	st := integration.Schema(t, c)
-	if st.Version != 1 || st.Dirty || len(st.Pending) != 0 || !st.Ready {
-		t.Errorf("schema = %+v, want version 1, clean, nothing pending, ready", st)
+	app := st.Set(integration.AppSet)
+	if app.Version != 1 || app.Dirty || len(app.Pending) != 0 || !st.Ready {
+		t.Errorf("schema = %+v, want the app set at version 1, clean, nothing pending, ready", st)
 	}
-	if p := webtest.Decode[page](t, c.Get(t, organizations), http.StatusOK); p.Total != seededTotal {
-		t.Errorf("organizations total = %d, want %d", p.Total, seededTotal)
+	if p := webtest.Decode[page](t, c.Get(t, organizations), http.StatusOK); p.total() != seededTotal {
+		t.Errorf("organizations total = %d, want %d", p.total(), seededTotal)
 	}
 }
 

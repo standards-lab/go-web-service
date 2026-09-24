@@ -55,8 +55,8 @@ func TestOutage(t *testing.T) {
 	processtest.WaitFor(t, "readiness after the database returns", func() bool {
 		return c.Get(t, "/readyz").Status == http.StatusOK
 	})
-	if p := webtest.Decode[organizationPage](t, c.Get(t, organizations), http.StatusOK); p.Total != seededTotal {
-		t.Errorf("total after recovery = %d", p.Total)
+	if p := webtest.Decode[organizationPage](t, c.Get(t, organizations), http.StatusOK); p.total() != seededTotal {
+		t.Errorf("total after recovery = %d", p.total())
 	}
 	ident := webtest.Decode[identity](t, c.Put(t, organizations+"/"+fin.ID, edit, webtest.IfMatch(fin.Version)), http.StatusOK)
 	if ident.Version != fin.Version+1 {

@@ -33,7 +33,16 @@ type organizationPage struct {
 	Items []organization `json:"items"`
 	Page  int            `json:"page"`
 	Size  int            `json:"size"`
-	Total int            `json:"total"`
+	Total *int           `json:"total"`
+	More  bool           `json:"more"`
+}
+
+// total is the page's counted total, or -1 when the page omitted it.
+func (p organizationPage) total() int {
+	if p.Total == nil {
+		return -1
+	}
+	return *p.Total
 }
 
 // absentID is a well-formed id no row carries.
@@ -99,8 +108,8 @@ func TestOrganization(t *testing.T) {
 
 	run("paging and sort", func(t *testing.T) {
 		p := webtest.Decode[organizationPage](t, c.Get(t, organizations+"?size=3&sort=-path"), http.StatusOK)
-		if p.Total != seededTotal || p.Page != 1 || p.Size != 3 || !equal(codes(p.Items), []string{"logistics", "operations", "finance"}) {
-			t.Errorf("page 1 by -path = %v (total %d)", codes(p.Items), p.Total)
+		if p.total() != seededTotal || p.Page != 1 || p.Size != 3 || !p.More || !equal(codes(p.Items), []string{"logistics", "operations", "finance"}) {
+			t.Errorf("page 1 by -path = %v (total %d)", codes(p.Items), p.total())
 		}
 		p = webtest.Decode[organizationPage](t, c.Get(t, organizations+"?size=3&page=3&sort=code"), http.StatusOK)
 		if !equal(codes(p.Items), []string{"product"}) {
@@ -120,8 +129,8 @@ func TestOrganization(t *testing.T) {
 		}
 		for query, want := range cases {
 			p := webtest.Decode[organizationPage](t, c.Get(t, organizations+"?"+query), http.StatusOK)
-			if !equal(codes(p.Items), want) || p.Total != len(want) {
-				t.Errorf("?%s = %v (total %d), want %v", query, codes(p.Items), p.Total, want)
+			if !equal(codes(p.Items), want) || p.total() != len(want) {
+				t.Errorf("?%s = %v (total %d), want %v", query, codes(p.Items), p.total(), want)
 			}
 		}
 		for _, query := range []string{"nope=1", "code[between]=a", "created_at=not-a-time", "id=not-a-uuid"} {
@@ -275,8 +284,8 @@ func TestOrganization(t *testing.T) {
 		c.Delete(t, organizations+"/"+leaf.ID, webtest.IfMatch(leaf.Version)).Expect(t, http.StatusNoContent)
 		_ = c.Get(t, organizations+"/"+leaf.ID).Problem(t, http.StatusNotFound)
 		c.Delete(t, organizations+"/"+parent.ID, webtest.IfMatch(parent.Version)).Expect(t, http.StatusNoContent) // now a leaf
-		if p := webtest.Decode[organizationPage](t, c.Get(t, organizations), http.StatusOK); p.Total != seededTotal-2 {
-			t.Errorf("total after deletes = %d", p.Total)
+		if p := webtest.Decode[organizationPage](t, c.Get(t, organizations), http.StatusOK); p.total() != seededTotal-2 {
+			t.Errorf("total after deletes = %d", p.total())
 		}
 	})
 

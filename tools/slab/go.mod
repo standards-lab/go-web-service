@@ -5,10 +5,10 @@ go 1.27
 require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9
-	github.com/standards-lab/go-core v0.4.0
-	github.com/standards-lab/go-web-sdk v0.9.0
-	github.com/standards-lab/sqlate v0.1.1
-	github.com/standards-lab/sqlate/postgres v0.1.1
+	github.com/standards-lab/go-core v0.4.1
+	github.com/standards-lab/go-web-sdk v0.11.0
+	github.com/standards-lab/sqlate v0.4.0
+	github.com/standards-lab/sqlate/postgres v0.4.0
 	golang.org/x/sys v0.48.0
 	golang.org/x/term v0.46.0
 )

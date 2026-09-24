@@ -39,9 +39,7 @@ func (c *Client) Up(ctx context.Context) (*httpx.Response, error) {
 	return c.http.Post(ctx, Database+"/schema/up", nil)
 }
 
-// Down sends POST Database/schema/down with body verbatim, or with no body
-// when body is empty (httpx.Client.Do sends nothing for an empty []byte),
-// which the service reads as one step.
+// Down sends POST Database/schema/down with body verbatim.
 func (c *Client) Down(ctx context.Context, body []byte) (*httpx.Response, error) {
 	return c.http.Post(ctx, Database+"/schema/down", body)
 }

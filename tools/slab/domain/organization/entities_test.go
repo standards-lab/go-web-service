@@ -70,7 +70,7 @@ func TestPage_IsTheSDKEnvelope(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"items":[{"id":"x","parent_id":null,"code":"acme","name":"Acme","version":1,"path":"/acme"}],"page":1,"size":20,"total":1}`), &p); err != nil {
 		t.Fatal(err)
 	}
-	if p.Page != 1 || p.Size != 20 || p.Total != 1 || len(p.Items) != 1 || p.Items[0].Path != "/acme" {
+	if p.Page != 1 || p.Size != 20 || p.Total == nil || *p.Total != 1 || len(p.Items) != 1 || p.Items[0].Path != "/acme" {
 		t.Errorf("Page = %+v", p)
 	}
 }

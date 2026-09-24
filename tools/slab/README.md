@@ -49,12 +49,14 @@ scenario's narrated tour: a command sends one real request and returns its resul
   the value isn't given twice. `transfer --parent-id=` moves an organization to the root — the
   flag must be given, empty or not, since the service requires the key present in the body.
 - **admin database** — the database admin service's twelve endpoints: `schema status`, `verify`,
-  `up`, `down` (`--steps`, optional — one migration when unset), `steps` (`--steps`, required),
-  and `force` (`--version`, required) under `schema`; `seed` (`--state`, optional — the service's
-  configured set when unset — additive, never a reset: it inserts a set's rows idempotently over
-  the schema as it stands, so seeding an empty set onto a populated database changes nothing) and
-  `state` (`--state`, required — reverts every migration, reapplies the schema, then seeds; the
-  one that actually clears first); and `diagnostics`, `patterns`,
+  `up`, `down` (`--set`, required; `--steps`, optional — one migration when unset), `steps`
+  (`--set` and `--steps`, required), and `force` (`--set` and `--version`, required) under
+  `schema`, the set being one of the migration sets `schema status` lists; `seed` (`--state`,
+  optional — the service's configured set when unset — additive, never a reset: it inserts a
+  set's rows idempotently over the schema as it stands, so seeding an empty set onto a populated
+  database changes nothing) and `state` (`--state` and `--confirm`, required — reverts every
+  migration set, reapplies them, then seeds; the one that actually clears first); and
+  `diagnostics`, `patterns`,
   `statements`, `states`, which take no input at all. Every body-taking command also accepts
   `--body <json>` in place of its flags.
 

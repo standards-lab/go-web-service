@@ -72,7 +72,7 @@ func Reset(ctx context.Context, c *httpx.Client, r *scenario.Reporter) error {
 		return err
 	}
 	r.JSON(file, text)
-	body := database.State{State: SeedState}
+	body := database.Reset{State: SeedState, Confirm: true}
 	r.Request(http.MethodPost, stateRoute, nil, body)
 	res, err := c.Post(ctx, stateRoute, body)
 	if err != nil {

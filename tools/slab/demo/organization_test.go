@@ -286,7 +286,7 @@ func (f *fakeService) list(w http.ResponseWriter, r *http.Request) error {
 	}
 	start := min((q.Page-1)*q.Size, len(items))
 	end := min(start+q.Size, len(items))
-	writeJSON(w, http.StatusOK, organization.Page{Items: items[start:end], Page: q.Page, Size: q.Size, Total: len(f.rows)})
+	writeJSON(w, http.StatusOK, web.NewPage(items[start:end], q, web.Paging{Total: len(f.rows), More: end < len(items)}))
 	return nil
 }
 

@@ -87,28 +87,27 @@ func (d deps) schemaCommands() *cobra.Command {
 }
 
 // downCommand is POST Database/schema/down. The body is --body verbatim,
-// Steps built from --steps when it is set, and otherwise nothing: the
-// service reverts one migration when the request carries no body, and the
-// default is left to it rather than restated here.
+// or Down built from --set, which must be given, and --steps, omitted when
+// unset: the service reverts one migration of the set then, and the default
+// is left to it rather than restated here.
 func (d deps) downCommand() *cobra.Command {
 	var (
-		raw   string
-		steps int
+		raw, set string
+		steps    int
 	)
 	cmd := &cobra.Command{
 		Use:   "down",
-		Short: "Revert the most recent migrations, one when --steps is unset",
+		Short: "Revert a set's most recent migrations, one when --steps is unset",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			var body []byte
-			if cmd.Flags().Changed("body") || cmd.Flags().Changed("steps") {
-				var err error
-				body, err = input.Body(cmd, raw, func() (any, error) {
-					return Steps{Steps: steps}, nil
-				})
-				if err != nil {
-					return err
+			body, err := input.Body(cmd, raw, func() (any, error) {
+				if !cmd.Flags().Changed("set") {
+					return nil, errSetRequired
 				}
+				return Down{Set: set, Steps: steps}, nil
+			})
+			if err != nil {
+				return err
 			}
 			res, err := d.newClient().Down(cmd.Context(), body)
 			if err != nil {
@@ -121,30 +120,45 @@ func (d deps) downCommand() *cobra.Command {
 			return nil
 		},
 	}
+	setFlag(cmd, &set)
 	cmd.Flags().IntVar(&steps, "steps", 0, "how many migrations to revert; the service's default (1) when unset")
 	cmd.Flags().StringVar(&raw, "body", "", "the request body as JSON, sent verbatim in place of the field flags")
+	cmd.MarkFlagsMutuallyExclusive("body", "set")
 	cmd.MarkFlagsMutuallyExclusive("body", "steps")
 	return cmd
 }
 
+// errSetRequired refuses a schema operation's flags path with no --set:
+// the service refuses an empty set name, so the request is not sent.
+var errSetRequired = errors.New("--set is required unless --body is given; schema status lists the sets")
+
+// setFlag declares --set, the migration set a schema operation acts on.
+func setFlag(cmd *cobra.Command, set *string) {
+	cmd.Flags().StringVar(set, "set", "", "the migration set to act on, one of the names schema status lists")
+}
+
 // stepsCommand is POST Database/schema/steps. The body is --body verbatim,
-// or Steps built from --steps, which must be given: the service rejects
-// zero, so an unset flag is refused here rather than sent as one.
+// or Steps built from --set and --steps, both of which must be given: the
+// service rejects an empty set and zero steps, so an unset flag is refused
+// here rather than sent.
 func (d deps) stepsCommand() *cobra.Command {
 	var (
-		raw   string
-		steps int
+		raw, set string
+		steps    int
 	)
 	cmd := &cobra.Command{
 		Use:   "steps",
-		Short: "Apply --steps pending migrations, or revert that many when negative",
+		Short: "Apply --steps of a set's pending migrations, or revert that many when negative",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			body, err := input.Body(cmd, raw, func() (any, error) {
+				if !cmd.Flags().Changed("set") {
+					return nil, errSetRequired
+				}
 				if !cmd.Flags().Changed("steps") {
 					return nil, errors.New("--steps is required unless --body is given")
 				}
-				return Steps{Steps: steps}, nil
+				return Steps{Set: set, Steps: steps}, nil
 			})
 			if err != nil {
 				return err
@@ -160,30 +174,36 @@ func (d deps) stepsCommand() *cobra.Command {
 			return nil
 		},
 	}
+	setFlag(cmd, &set)
 	cmd.Flags().IntVar(&steps, "steps", 0, "how many migrations to apply when positive, or revert when negative")
 	cmd.Flags().StringVar(&raw, "body", "", "the request body as JSON, sent verbatim in place of the field flags")
+	cmd.MarkFlagsMutuallyExclusive("body", "set")
 	cmd.MarkFlagsMutuallyExclusive("body", "steps")
 	return cmd
 }
 
 // forceCommand is POST Database/schema/force. The body is --body verbatim,
-// or Force built from --version, which must be given: 0 is a meaningful
-// value (an empty history), so an unset flag is refused rather than sent.
+// or Force built from --set and --version, both of which must be given: 0
+// is a meaningful version (an empty history), so an unset flag is refused
+// rather than sent.
 func (d deps) forceCommand() *cobra.Command {
 	var (
-		raw     string
-		version int
+		raw, set string
+		version  int
 	)
 	cmd := &cobra.Command{
 		Use:   "force",
-		Short: "Set the migration history to --version without running any file",
+		Short: "Set a set's migration history to --version without running any file",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			body, err := input.Body(cmd, raw, func() (any, error) {
+				if !cmd.Flags().Changed("set") {
+					return nil, errSetRequired
+				}
 				if !cmd.Flags().Changed("version") {
 					return nil, errors.New("--version is required unless --body is given")
 				}
-				return Force{Version: version}, nil
+				return Force{Set: set, Version: version}, nil
 			})
 			if err != nil {
 				return err
@@ -199,8 +219,10 @@ func (d deps) forceCommand() *cobra.Command {
 			return nil
 		},
 	}
+	setFlag(cmd, &set)
 	cmd.Flags().IntVar(&version, "version", 0, "the version the history is set to; 0 empties it")
 	cmd.Flags().StringVar(&raw, "body", "", "the request body as JSON, sent verbatim in place of the field flags")
+	cmd.MarkFlagsMutuallyExclusive("body", "set")
 	cmd.MarkFlagsMutuallyExclusive("body", "version")
 	return cmd
 }
@@ -247,20 +269,25 @@ func (d deps) seedCommand() *cobra.Command {
 }
 
 // stateCommand is POST Database/state. The body is --body verbatim, or
-// State built from --state, which must be given: the service refuses an
+// Reset built from --state, which must be given: the service refuses an
 // empty name, so an unset flag is refused here before the request fires.
+// --confirm is sent as given: the service refuses an unconfirmed reset, and
+// that refusal is the service's to state, not restated here.
 func (d deps) stateCommand() *cobra.Command {
-	var raw, state string
+	var (
+		raw, state string
+		confirm    bool
+	)
 	cmd := &cobra.Command{
 		Use:   "state",
-		Short: "Reset the database to a named state: revert every migration, apply the set, and seed it",
+		Short: "Reset the database to a named state: revert every migration set, apply the sets, and seed; requires --confirm",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			body, err := input.Body(cmd, raw, func() (any, error) {
 				if !cmd.Flags().Changed("state") {
 					return nil, errors.New("--state is required unless --body is given")
 				}
-				return State{State: state}, nil
+				return Reset{State: state, Confirm: confirm}, nil
 			})
 			if err != nil {
 				return err
@@ -277,7 +304,9 @@ func (d deps) stateCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&state, "state", "", "the state to reset to, one of the names states lists")
+	cmd.Flags().BoolVar(&confirm, "confirm", false, "confirm the reset, which reverts every migration set and its rows")
 	cmd.Flags().StringVar(&raw, "body", "", "the request body as JSON, sent verbatim in place of the field flags")
 	cmd.MarkFlagsMutuallyExclusive("body", "state")
+	cmd.MarkFlagsMutuallyExclusive("body", "confirm")
 	return cmd
 }

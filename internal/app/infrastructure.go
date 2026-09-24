@@ -32,7 +32,8 @@ import (
 // the domains see it: the session over the same pool with the dialect,
 // grouped with the pattern catalog every statement compiles against.
 // Storage is the object store as the domains see it: blobfs's store over
-// the same session, and the started object store its keys name. Sets are
+// the same session, and the started object store its keys name; Objects is
+// that store itself, which the storage admin domain administers. Sets are
 // the migration sets the admin service's migrator runs, blobfs's beneath
 // the service's own. The struct stops at the composition root: the layer
 // files read its fields, and a package receives its dependencies as
@@ -42,6 +43,7 @@ type Infrastructure struct {
 	DB      *database.DB
 	SQL     *data.Database
 	Storage *data.Storage
+	Objects *storage.Store
 	Sets    []migrate.Set
 }
 
@@ -118,6 +120,7 @@ func newInfrastructure(
 		DB:      db,
 		SQL:     data.New(session, catalog),
 		Storage: data.NewStorage(fs, objects),
+		Objects: objects,
 		Sets:    data.Migrations(blobfsSet),
 	}, nil
 }

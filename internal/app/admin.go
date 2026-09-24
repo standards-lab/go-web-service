@@ -5,10 +5,12 @@ import (
 
 	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-database/admin"
+	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate/migrate"
 
 	dbadmin "github.com/standards-lab/go-web-service/admin/database"
+	storageadmin "github.com/standards-lab/go-web-service/admin/storage"
 	"github.com/standards-lab/go-web-service/data"
 	"github.com/standards-lab/go-web-service/internal/config"
 )
@@ -18,6 +20,7 @@ import (
 // infrastructure service over the library mechanisms it triggers.
 type Admin struct {
 	Database *admin.Service
+	Storage  *storage.Store
 }
 
 // newAdmin wires the admin layer over infra, each admin service handed its
@@ -43,7 +46,7 @@ func newAdmin(
 		Logger:   infra.Logger,
 	})
 	db.Register(lc)
-	return &Admin{Database: db}, nil
+	return &Admin{Database: db, Storage: infra.Objects}, nil
 }
 
 // mountAdmin builds the admin mount, /admin, with each admin domain's route
@@ -54,5 +57,6 @@ func newAdmin(
 func mountAdmin(adm *Admin) *web.Group {
 	g := web.NewGroup("/admin")
 	g.Mount(dbadmin.Routes(adm.Database))
+	g.Mount(storageadmin.Routes(adm.Storage))
 	return g
 }

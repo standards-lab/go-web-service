@@ -76,6 +76,39 @@ mise run slab -- org list --page 2 --cursor <next>                   # cobra usa
 mise run slab -- org create --code x --name y --body '{}'
 ```
 
+## `docs` — the document domain
+
+Every command takes the organization's id first; a directory is its id or `root`. The
+organization's document root is created by its first write.
+
+```sh
+mise run slab -- docs dirs create <acme-id> --parent-id root --name reports       # 201, the new directory's id and version
+mise run slab -- docs dirs get <acme-id> root                                  # the root, its path "/"
+mise run slab -- docs dirs list <acme-id> root --sort name                     # the root's child directories
+```
+
+```sh
+# upload, list, read back, revalidate:
+mise run slab -- docs files put <acme-id> <reports-id> q3.pdf                  # 201; stored as q3.pdf, application/pdf
+mise run slab -- docs files put <acme-id> <reports-id> notes --name "Q3 notes" # no extension: application/octet-stream
+mise run slab -- docs files list <acme-id> <reports-id> --size 1               # page 1 and next; continue with --cursor <next>
+mise run slab -- docs files show <acme-id> <file-id>                           # the metadata: status, size, version
+mise run slab -- docs files get <acme-id> <file-id> --out /tmp/q3.pdf          # headers, Content-Disposition among them
+mise run slab -- docs files get <acme-id> <file-id> --if-none-match '"<etag>"' # 304 Not Modified
+```
+
+```sh
+# moves take the version they guard on, as the flag or inside --body:
+mise run slab -- docs files move <acme-id> <file-id> --version 1 --directory-id <reports-id> --name q3-final.pdf
+mise run slab -- docs dirs move <acme-id> <reports-id> --body '{"parent_id":"root","name":"archive","version":1}'
+```
+
+```sh
+mise run slab -- docs files delete <acme-id> <file-id>                         # 204
+mise run slab -- docs dirs delete <acme-id> <reports-id>                       # 409: "Q3 notes" is still in it
+mise run slab -- docs dirs delete <acme-id> <reports-id> --recursive           # 204: empties it first
+```
+
 ## `admin database` — the admin mount
 
 ```sh

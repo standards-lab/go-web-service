@@ -70,8 +70,9 @@ func (o *Output) Response(status int, body []byte) {
 }
 
 // objectHeaders are the headers an object response carries that Object
-// shows, in the order it shows them.
-var objectHeaders = []string{"Content-Type", "Content-Length", "ETag", "Last-Modified", "Cache-Control", "X-Content-Type-Options"}
+// shows, in the order it shows them. Content-Disposition is the name a
+// document download is served under.
+var objectHeaders = []string{"Content-Type", "Content-Length", "Content-Disposition", "ETag", "Last-Modified", "Cache-Control", "X-Content-Type-Options"}
 
 // Object writes a proxied object's response to stdout: the status line, the
 // object headers it carries, and what became of the bytes, since a binary

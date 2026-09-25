@@ -1,7 +1,7 @@
 # slab
 
-`slab` calls go-web-service's own endpoints directly, one subcommand per route under `org` and
-`admin`, and runs narrated scenarios under `demo`: each scenario says what it is about to do, does
+`slab` calls go-web-service's own endpoints directly, one subcommand per route under `org`,
+`docs`, and `admin`, and runs narrated scenarios under `demo`: each scenario says what it is about to do, does
 it — against the real running stack, or, for `sqlate`, in process over the repository's own
 sources — and prints what it observed. The direct commands are a scriptable replacement for
 ad-hoc curl; the scenarios are the architect's own instrument for briefing colleagues and
@@ -23,6 +23,7 @@ mise run slab -- demo sqlate                     # the compile pipeline, in proc
 mise run slab -- demo domain                     # the organization domain's full CRUD, against the running service
 mise run slab -- demo problems                   # a tour of the service's problem responses, against the running service
 mise run slab -- org list                        # the organization domain's endpoints, one subcommand per route
+mise run slab -- docs dirs list <org-id> root    # the document domain's endpoints, grouped by dirs and files
 mise run slab -- admin database schema status    # the admin mount's endpoints, under their own domain word
 ```
 
@@ -35,7 +36,7 @@ mise run serve   # in another shell
 
 ## Commands
 
-`org` and `admin` call the running service's endpoints directly, one subcommand per route,
+`org`, `docs`, and `admin` call the running service's endpoints directly, one subcommand per route,
 printing the response as pretty JSON — or, for an empty body such as `org delete`'s 204, the
 status line alone, so a command is never silent. This is distinct in kind from a `demo`
 scenario's narrated tour: a command sends one real request and returns its result.
@@ -53,6 +54,19 @@ scenario's narrated tour: a command sends one real request and returns its resul
   unless `--content-type` names one; `logo get <id>` prints the object headers and writes the
   bytes to `--out` (never to the terminal), and `--if-none-match <etag>` revalidates, a 304 when
   unchanged; `logo delete <id>` removes it.
+- **docs** — the document domain's eleven endpoints, every one under an organization id `<org>`,
+  where a directory `<dir>` is an id or the `root` alias. `dirs` holds `create <org>` (`--parent-id
+  <dir>`, `--name`), `get <org> <dir>` (the metadata with the path), `list <org> <dir>` (the child
+  directories, under `org list`'s paging and filter flags), `move <org> <dir>` (`--version`,
+  `--parent-id`, `--name`), and `delete <org> <dir>` (`--recursive` empties it first). `files` holds
+  `list <org> <dir>` (the directory's files, the same flags), `put <org> <dir> <file>` (the stored
+  name is the file's base name unless `--name` gives one; the media type is `--content-type`, else
+  the extension's, else `application/octet-stream`, since the service accepts any), `show <org>
+  <file-id>` (the metadata), `get <org> <file-id>` (the headers, `Content-Disposition` among them,
+  with the bytes to `--out` and `--if-none-match` as on `logo get`), `move <org> <file-id>`
+  (`--version`, `--directory-id`, `--name`), and `delete <org> <file-id>`. `dirs create` and both
+  moves take `--body` in place of their field flags, and on a move a top-level `"version"` in it
+  stands in for `--version`, as on `org edit`.
 - **admin database** — the database admin service's twelve endpoints: `schema status`, `verify`,
   `up`, `down` (`--set`, required; `--steps`, optional — one migration when unset), `steps`
   (`--set` and `--steps`, required), and `force` (`--set` and `--version`, required) under

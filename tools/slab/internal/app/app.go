@@ -57,9 +57,9 @@ func newRoot(cfg *Config) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "slab",
 		Short: "Call the service's endpoints and run its narrated scenarios",
-		Long: "slab calls the service's endpoints, one subcommand per endpoint under org and\n" +
-			"admin, and runs its narrated scenarios: each one says what it is about to do,\n" +
-			"does it against the running stack, and prints what it observed.",
+		Long: "slab calls the service's endpoints, one subcommand per endpoint under org,\n" +
+			"docs, and admin, and runs its narrated scenarios: each one says what it is about\n" +
+			"to do, does it against the running stack, and prints what it observed.",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,

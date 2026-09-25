@@ -66,7 +66,7 @@ func TestRoot_PrintsHelpAndTheListing(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("root exited %d: %s", code, errOut)
 	}
-	for _, want := range []string{"Available Commands:", "org", "admin", "demo", "list", "Scenarios:", "  sqlate    ", "  domain    ", "  problems  "} {
+	for _, want := range []string{"Available Commands:", "org", "docs", "admin", "demo", "list", "Scenarios:", "  sqlate    ", "  domain    ", "  problems  "} {
 		if !strings.Contains(out, want) {
 			t.Errorf("root output lacks %q:\n%s", want, out)
 		}
@@ -107,6 +107,24 @@ func TestOrg_MountsTheOrganizationCommands(t *testing.T) {
 	for _, want := range []string{"Available Commands:", "create", "delete", "edit", "get", "get-by-path", "list", "transfer"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("org help lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestDocs_MountsTheDocumentCommands(t *testing.T) {
+	for args, wants := range map[string][]string{
+		"docs":       {"dirs", "files"},
+		"docs dirs":  {"create", "get", "list", "move", "delete"},
+		"docs files": {"list", "put", "show", "get", "move", "delete"},
+	} {
+		out, errOut, code := execute(t, strings.Fields(args)...)
+		if code != 0 {
+			t.Fatalf("%s exited %d: %s", args, code, errOut)
+		}
+		for _, want := range append([]string{"Available Commands:"}, wants...) {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s help lacks %q:\n%s", args, want, out)
+			}
 		}
 	}
 }
@@ -153,6 +171,11 @@ func TestCommands_BindTheClientToTheBaseFlagAsParsed(t *testing.T) {
 			args:   []string{"org", "get", "1"},
 			method: http.MethodGet,
 			uri:    "/api/organizations/1",
+		},
+		"docs": {
+			args:   []string{"docs", "dirs", "get", "1", "root"},
+			method: http.MethodGet,
+			uri:    "/api/documents/1/directories/root",
 		},
 		"admin database": {
 			args:   []string{"admin", "database", "diagnostics"},

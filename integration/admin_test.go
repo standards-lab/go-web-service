@@ -126,7 +126,7 @@ func TestAdmin(t *testing.T) {
 		for i, d := range inv.Domains {
 			names[i] = d.Name
 		}
-		if !equal(names, []string{"data", "organization"}) {
+		if !equal(names, []string{"data", "document", "organization"}) {
 			t.Fatalf("domains = %v", names)
 		}
 		byName := map[string]map[string]struct {

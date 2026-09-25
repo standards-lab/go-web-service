@@ -4,6 +4,7 @@ import (
 	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-web-sdk"
 
+	"github.com/standards-lab/go-web-service/domain/document"
 	"github.com/standards-lab/go-web-service/domain/organization"
 	"github.com/standards-lab/go-web-service/internal/config"
 )
@@ -14,6 +15,7 @@ import (
 // the infrastructure fields they depend on.
 type Domain struct {
 	Organization *organization.Service
+	Document     *document.Service
 }
 
 // newDomain wires the domain layer over infra: each domain package's
@@ -23,7 +25,9 @@ type Domain struct {
 func newDomain(infra *Infrastructure, lc *lifecycle.Coordinator) *Domain {
 	org := organization.New(infra.SQL, infra.Storage)
 	org.Register(lc)
-	return &Domain{Organization: org}
+	doc := document.New(infra.SQL, infra.Storage)
+	doc.Register(lc)
+	return &Domain{Organization: org, Document: doc}
 }
 
 // mountAPI builds the API mount, /api, with each domain layer's route group
@@ -36,5 +40,10 @@ func mountAPI(dom *Domain, cfg *config.Config) *web.Group {
 	orgReads := cfg.Reads.Limits()
 	orgReads.Cursor = true
 	api.Mount(organization.Routes(dom.Organization, orgReads))
+	// The document listings continue by cursor: blobfs's listings issue a
+	// cursor on every sort that can continue and page by number otherwise.
+	docReads := cfg.Reads.Limits()
+	docReads.Cursor = true
+	api.Mount(document.Routes(dom.Document, docReads))
 	return api
 }

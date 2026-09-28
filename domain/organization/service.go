@@ -33,6 +33,11 @@ func New(db *data.Database, st *data.Storage) *Service {
 // schema is corrected.
 func (s *Service) Verify(ctx context.Context) error { return s.store.Verify(ctx) }
 
+// Seed is the layer's contribution to the named states the data package's
+// seeder applies: the organization tree a state carries, seeded by the
+// layer's own statements. The composition root hands it to the seeder.
+func (s *Service) Seed() data.Seed { return seed{store: s.store} }
+
 // List returns one page of organizations and the read's paging, honoring
 // the parsed query's page or cursor, sort, and filters. A cursor that did
 // not come from this read is the request's error. An unknown sort or filter field,

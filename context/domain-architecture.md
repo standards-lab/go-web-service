@@ -104,6 +104,10 @@ a domain.
 The base layers (`data`, `domain/<layer>`, `admin/<service>`) are root-level packages because
 the domain packages import `data` and the topology-and-naming principle forbids a root-level
 package importing `internal/*`.
+A domain that seeds the named states declares its contribution as a `data.Seed` over its own
+tables and statements, returned by its service's `Seed`; `admin.go` hands each to
+`data.NewSeeder` in the tables' dependency order, so the domain is constructed before the admin
+layer and `data` names no domain's table.
 `mountAPI` mounts each layer's group and hands policy at the construction site: the
 service-owned reads configuration yields the `web.Limits` each handler constructor receives.
 Per-layer policy variation is different values at different construction sites.

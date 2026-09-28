@@ -1,10 +1,15 @@
 package data_test
 
 import (
+	"context"
+	"errors"
 	"reflect"
 	"testing"
 
+	"github.com/standards-lab/blobfs"
+	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/go-web-sdk"
+	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/query"
 
 	"github.com/standards-lab/go-web-service/data"
@@ -70,5 +75,66 @@ func TestPaging_CarriesTheCollectionsReport(t *testing.T) {
 	want := web.Paging{Total: web.NoTotal, More: true, Next: "c2"}
 	if got := data.Paging(c); got != want {
 		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+// fakeListing records the read ReadListing chose: the anchor, the
+// directives, and the page or the cursor with its size.
+type fakeListing struct {
+	call   string
+	id     string
+	d      query.Directives
+	page   query.Page
+	cursor query.Cursor
+	size   int
+	err    error
+}
+
+func (f *fakeListing) List(_ context.Context, _ sqlate.Session, id string, d query.Directives, page query.Page, _ ...bfdata.ListOption) (query.Collection[string], error) {
+	f.call, f.id, f.d, f.page = "list", id, d, page
+	return query.Collection[string]{Items: []string{"a"}, Total: 1}, f.err
+}
+
+func (f *fakeListing) Continue(_ context.Context, _ sqlate.Session, id string, d query.Directives, after query.Cursor, size int, _ ...bfdata.ListOption) (query.Collection[string], error) {
+	f.call, f.id, f.d, f.cursor, f.size = "continue", id, d, after, size
+	return query.Collection[string]{Items: []string{"b"}, Total: query.NoTotal, More: true, Next: "c3"}, f.err
+}
+
+// blobfs's listings are Listings as they are.
+var (
+	_ data.Listing[blobfs.Directory] = (*bfdata.Directories)(nil)
+	_ data.Listing[blobfs.File]      = (*bfdata.Files)(nil)
+)
+
+func TestReadListing_PagesByNumberOrContinuesPastACursor(t *testing.T) {
+	sort := []web.Sort{{Field: "name", Descending: true}}
+	want := query.Directives{Sort: []query.Sort{{Field: "name", Descending: true}}}
+
+	var paged fakeListing
+	c, err := data.ReadListing(context.Background(), nil, &paged, "dir", web.Query{Page: 2, Size: 10, Sort: sort})
+	if err != nil || paged.call != "list" || paged.id != "dir" || paged.page != (query.Page{Number: 2, Size: 10}) || !reflect.DeepEqual(paged.d, want) {
+		t.Fatalf("paged read = %+v, %v", paged, err)
+	}
+	if c.Items[0] != "a" || c.Total != 1 {
+		t.Fatalf("paged collection = %+v", c)
+	}
+
+	var continued fakeListing
+	c, err = data.ReadListing(context.Background(), nil, &continued, "dir", web.Query{Page: 1, Size: 10, Cursor: "c2", Sort: sort})
+	if err != nil || continued.call != "continue" || continued.id != "dir" || continued.cursor != "c2" || continued.size != 10 || !reflect.DeepEqual(continued.d, want) {
+		t.Fatalf("continued read = %+v, %v", continued, err)
+	}
+	if c.Items[0] != "b" || !c.More || c.Next != "c3" {
+		t.Fatalf("continued collection = %+v", c)
+	}
+}
+
+// A refusal is the listing's own, returned unchanged for the caller's
+// policy to read.
+func TestReadListing_ReturnsTheListingsRefusal(t *testing.T) {
+	refused := errors.New("refused")
+	l := fakeListing{err: refused}
+	if _, err := data.ReadListing(context.Background(), nil, &l, "dir", web.Query{Page: 1, Size: 10}); !errors.Is(err, refused) {
+		t.Fatalf("err = %v; want the listing's refusal", err)
 	}
 }

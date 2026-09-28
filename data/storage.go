@@ -37,8 +37,9 @@ func NewStorage(fs *bfdata.Store, objects *storage.Store) *Storage {
 	return &Storage{FS: fs, Objects: &Objects{store: objects}}
 }
 
-// Objects is the one place the service names its object-store library:
-// the adapter between blobfs's protocol steps and a started store. It is
+// Objects is the adapter between blobfs's protocol steps and a started
+// store, the one place the domains' file operations reach the object-store
+// library, so no domain imports it. It is
 // the key validator blobfs's writes take as their first step's argument,
 // the put, open, and delete the steps between them run, and the object
 // deleter blobfs's sweep calls.

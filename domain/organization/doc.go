@@ -34,6 +34,13 @@
 // SQL:1999) and is an ordinary contract field, filterable and sortable
 // like any other.
 //
+// The layer seeds its own table: Seed is its contribution to the data
+// package's named states, which the composition root hands the seeder. It
+// applies a state's organizations, each naming its parent by code, parents
+// first, by the layer's seed statements: an insert that leaves a sibling's
+// taken code as it stands, and the lookup that finds that row, so a seed
+// is idempotent.
+//
 // The logo is ownership at blobfs's file grain: an organization_image row
 // binds one file to the organization, and a partial unique index admits one
 // active row per organization. The files sit in one structural directory

@@ -3,12 +3,7 @@ package document
 import (
 	"context"
 	"embed"
-	"errors"
-	"fmt"
 
-	"github.com/standards-lab/blobfs"
-	bfdata "github.com/standards-lab/blobfs/data"
-	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/query"
 
@@ -20,10 +15,11 @@ var files embed.FS
 
 // store is the domain's SQL client: the owner row's statements bound once
 // to their typed handles, and the protocols of storage.go as its other
-// methods. It is the package's sole importer of the query library, so the
-// lowering of a request's query onto blobfs's listings lives here too. The
-// owner-row statements are steps the protocols sequence around blobfs's,
-// so their methods take the session the protocol hands them.
+// methods. It is the package's sole importer of the query library; the
+// lowering of a request's query onto blobfs's listings is the data
+// package's, which storage.go calls. The owner-row statements are steps
+// the protocols sequence around blobfs's, so their methods take the
+// session the protocol hands them.
 type store struct {
 	db               *data.Database
 	storage          *data.Storage
@@ -44,7 +40,7 @@ func newStore(db *data.Database, st *data.Storage) *store {
 		storage:          st,
 		stmts:            stmts,
 		documentRootRows: stmts.Statement("document_root").Scan(query.Scalar[string]),
-		organizationRows: stmts.Statement("find_organization").Scan(query.Scalar[string]),
+		organizationRows: stmts.Statement("organization_exists").Scan(query.Scalar[string]),
 		bindRoot:         stmts.Statement("bind_root"),
 	}
 }
@@ -60,8 +56,8 @@ func (s *store) documentRoot(ctx context.Context, sess sqlate.Session, organizat
 	return s.documentRootRows.One(ctx, sess, query.Args{"organization_id": organizationID})
 }
 
-// findOrganization reads the organization, or sql.ErrNoRows.
-func (s *store) findOrganization(ctx context.Context, sess sqlate.Session, organizationID string) error {
+// organizationExists reads the organization, or sql.ErrNoRows.
+func (s *store) organizationExists(ctx context.Context, sess sqlate.Session, organizationID string) error {
 	_, err := s.organizationRows.One(ctx, sess, query.Args{"organization_id": organizationID})
 	return err
 }
@@ -70,37 +66,4 @@ func (s *store) findOrganization(ctx context.Context, sess sqlate.Session, organ
 func (s *store) bind(ctx context.Context, tx *sqlate.Tx, organizationID, directoryID string) error {
 	_, err := s.bindRoot.Exec(ctx, tx, query.Args{"directory_id": directoryID, "organization_id": organizationID})
 	return err
-}
-
-// listing is one of blobfs's directory listings, Directories' or Files':
-// List reads a page by number and Continue the page past a cursor, both
-// anchored on the directory's id. Both hide deleting rows unless given
-// bfdata.IncludeDeleting.
-type listing[T any] struct {
-	List     func(context.Context, sqlate.Session, string, query.Directives, query.Page, ...bfdata.ListOption) (query.Collection[T], error)
-	Continue func(context.Context, sqlate.Session, string, query.Directives, query.Cursor, int, ...bfdata.ListOption) (query.Collection[T], error)
-}
-
-// read runs the listing of the directory with id as the request addressed
-// it, data.Read's lowering over blobfs's listing in place of a projection:
-// past a cursor a previous page returned when the query names one, and by
-// page number otherwise. Every refusal of the directives or the cursor is
-// the request's error. Deleting rows are hidden, and the listing of a
-// directory in a branch being deleted is not found: blobfs refuses it as
-// blobfs.ErrDeleting, which the listing reports as the missing directory
-// rather than a conflict: a mark is never undone, so nothing a client
-// sends makes the directory listable again.
-func (l listing[T]) read(ctx context.Context, sess sqlate.Session, id string, q web.Query) ([]T, web.Paging, error) {
-	d := data.Directives(q)
-	var c query.Collection[T]
-	var err error
-	if q.Cursor != "" {
-		c, err = l.Continue(ctx, sess, id, d, query.Cursor(q.Cursor), q.Size)
-	} else {
-		c, err = l.List(ctx, sess, id, d, query.Page{Number: q.Page, Size: q.Size})
-	}
-	if errors.Is(err, blobfs.ErrDeleting) {
-		return nil, web.Paging{}, fmt.Errorf("directory %s is being deleted: %w", id, blobfs.ErrNotFound)
-	}
-	return c.Items, data.Paging(c), err
 }

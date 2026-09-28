@@ -37,12 +37,15 @@ type Admin struct {
 // check), so its stage is named at the call site from the stage table
 // rather than taken inside the library. The content it administers is the
 // data package's: the migration sets behind the migrator, the seeder, the
-// catalog, and the statements registry. gate is the process's quiesce
-// gate, which the database admin domain's routes hold around a schema
-// change. Startup's own schema correction takes no gate: it runs at
-// stageSchema, before the sweep's stage starts.
+// catalog, and the statements registry. The seeder composes the domains'
+// seed contributions from dom, in the tables' dependency order, so the
+// data package reads the states without naming a domain's table. gate is
+// the process's quiesce gate, which the database admin domain's routes
+// hold around a schema change. Startup's own schema correction takes no
+// gate: it runs at stageSchema, before the sweep's stage starts.
 func newAdmin(
 	infra *Infrastructure,
+	dom *Domain,
 	cfg *config.Config,
 	gate *sdk.Gate,
 	lc *lifecycle.Coordinator,
@@ -53,7 +56,7 @@ func newAdmin(
 	}
 	db := admin.New(infra.DB, infra.SQL.DB, migrator, infra.SQL.Catalog, admin.Options{
 		Seed:     cfg.Admin.SeedState(),
-		Seeder:   data.NewSeeder(infra.SQL),
+		Seeder:   data.NewSeeder(infra.SQL, dom.Organization.Seed()),
 		Registry: infra.SQL,
 		Logger:   infra.Logger,
 	})
@@ -63,7 +66,7 @@ func newAdmin(
 		Start: db.Start,
 		Check: db,
 	})
-	return &Admin{Database: db, Storage: infra.Objects, Gate: gate}, nil
+	return &Admin{Database: db, Storage: infra.ObjectStore, Gate: gate}, nil
 }
 
 // mountAdmin builds the admin mount, /admin, with each admin domain's route

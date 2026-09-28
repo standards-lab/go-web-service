@@ -12,7 +12,8 @@
 //
 // [New] is the cold start, with no I/O: it constructs infrastructure (each
 // service registering on the coordinator where it is constructed), the
-// admin layer over it, the domain over it, and the reactors, then
+// domain over it, the admin layer over both, since its seeder composes the
+// domains' seed contributions, and the reactors, then
 // assembles the router from the mounts and the middleware stack, and
 // declares the server as the coordinator's root-stage service, started
 // after every numbered stage and drained first, so in-flight requests

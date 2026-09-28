@@ -180,7 +180,7 @@ func TestStore_DirectoryReads(t *testing.T) {
 		dirRows(directory(dirID, rootID, "reports", 1)),
 	)
 	d, err := s.Directory(ctx, orgID, dirID)
-	if err != nil || d.Path != "/reports" || d.Name != "reports" || *d.ParentID != rootID || d.Status != blobfs.DirectoryStatusActive {
+	if err != nil || d.Path != "/reports" || d.Name != "reports" || *d.ParentID != rootID || d.Status != document.DirectoryActive {
 		t.Fatalf("Directory = %+v, %v", d, err)
 	}
 	r, err := s.Directory(ctx, orgID, document.RootAlias)
@@ -195,7 +195,7 @@ func TestStore_DirectoryReads(t *testing.T) {
 	}
 	query, _ = web.ParseQuery(url.Values{"status": {"available"}}, limits)
 	files, paging, err := s.ListFiles(ctx, orgID, dirID, query)
-	if err != nil || len(files) != 1 || files[0].Status != blobfs.StatusAvailable || paging.Total != 1 {
+	if err != nil || len(files) != 1 || files[0].Status != document.FileAvailable || paging.Total != 1 {
 		t.Fatalf("ListFiles = %+v, %+v, %v", files, paging, err)
 	}
 	sqls := rec.SQL(q)
@@ -224,7 +224,7 @@ func TestStore_ADeletingDirectory(t *testing.T) {
 		root(rootID), within(true), sqltest.WithTotal(fileRows(), 0), dirRows(marked),
 	)
 	d, err := s.Directory(ctx, orgID, dirID)
-	if err != nil || d.Status != blobfs.DirectoryStatusDeleting || d.Version != 2 {
+	if err != nil || d.Status != document.DirectoryDeleting || d.Version != 2 {
 		t.Fatalf("Directory = %+v, %v; want it deleting", d, err)
 	}
 	q, _ := web.ParseQuery(url.Values{}, web.Limits{DefaultSize: 20, MaxSize: 100})

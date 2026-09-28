@@ -31,31 +31,65 @@ const RootAlias = "root"
 // delete; a listing hides deleting directories, so only a read by id
 // shows one. Version is the concurrency token a move guards on.
 type Directory struct {
-	ID        string                 `json:"id"`
-	ParentID  *string                `json:"parent_id"`
-	Name      string                 `json:"name"`
-	Path      string                 `json:"path,omitempty"`
-	Status    blobfs.DirectoryStatus `json:"status"`
-	Version   int64                  `json:"version"`
-	CreatedAt time.Time              `json:"created_at"`
-	UpdatedAt time.Time              `json:"updated_at"`
+	ID        string          `json:"id"`
+	ParentID  *string         `json:"parent_id"`
+	Name      string          `json:"name"`
+	Path      string          `json:"path,omitempty"`
+	Status    DirectoryStatus `json:"status"`
+	Version   int64           `json:"version"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
 }
+
+// DirectoryStatus is a directory's place in the delete of its branch, in
+// the API's own vocabulary: the layer names each value, and storage.go
+// maps blobfs's onto it, so a change to the library's names never
+// changes the wire.
+type DirectoryStatus string
+
+// The directory statuses.
+const (
+	// DirectoryActive is a directory that accepts children, files, moves,
+	// and deletes.
+	DirectoryActive DirectoryStatus = "active"
+	// DirectoryDeleting is a directory in a branch marked for its delete,
+	// until the sweep removes it.
+	DirectoryDeleting DirectoryStatus = "deleting"
+)
 
 // File is one file of an organization's hierarchy, as the API presents
 // it: the row's description without its object key. Status is the stage
 // of blobfs's protocols the file stands at, and Size is nil until its
 // write completes.
 type File struct {
-	ID          string        `json:"id"`
-	DirectoryID string        `json:"directory_id"`
-	Name        string        `json:"name"`
-	Status      blobfs.Status `json:"status"`
-	Size        *int64        `json:"size"`
-	ContentType string        `json:"content_type"`
-	Version     int64         `json:"version"`
-	CreatedAt   time.Time     `json:"created_at"`
-	UpdatedAt   time.Time     `json:"updated_at"`
+	ID          string     `json:"id"`
+	DirectoryID string     `json:"directory_id"`
+	Name        string     `json:"name"`
+	Status      FileStatus `json:"status"`
+	Size        *int64     `json:"size"`
+	ContentType string     `json:"content_type"`
+	Version     int64      `json:"version"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
+
+// FileStatus is a file's stage in the write and delete protocols, in the
+// API's own vocabulary, mapped from blobfs's in storage.go as
+// DirectoryStatus is.
+type FileStatus string
+
+// The file statuses.
+const (
+	// FilePending is a file whose write has begun and whose object is not
+	// yet stored.
+	FilePending FileStatus = "pending"
+	// FileAvailable is a file whose write completed: the only status a
+	// download serves.
+	FileAvailable FileStatus = "available"
+	// FileDeleting is a file whose delete has begun, until its object and
+	// its row are removed.
+	FileDeleting FileStatus = "deleting"
+)
 
 // Content is an available file as the download serves it: its name, for
 // the attachment's filename; the stored object's description, which

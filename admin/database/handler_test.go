@@ -34,7 +34,8 @@ func (dialect) ServerVersion() string { return "SELECT version()" }
 // the scripted driver: the pool's lifecycle object, started so it answers
 // pings, the session, the migrator over the service's migration set
 // (unlocked, since the test dialect has no lock capability), the catalog,
-// and the data package as seeder and registry; seed names the state whose
+// the data package's seeder over a stand-in for the organization domain's
+// seed contribution, and the registry; seed names the state whose
 // set the service applies on a seed request naming none. The schema gate
 // is an open one no sweep holds.
 func module(t *testing.T, seed string, responses ...sqltest.Response) (http.Handler, *sqltest.Recorder) {
@@ -62,7 +63,7 @@ func gatedModule(t *testing.T, gate database.SchemaGate, seed string, responses 
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := admin.New(pdb, sdb, m, catalog, admin.Options{Seed: seed, Seeder: data.NewSeeder(d), Registry: d})
+	svc := admin.New(pdb, sdb, m, catalog, admin.Options{Seed: seed, Seeder: data.NewSeeder(d, organizations{}), Registry: d})
 	r := web.NewRouter()
 	r.Mount(web.NewModule(database.Routes(svc, gate)))
 	return r, rec
@@ -162,18 +163,23 @@ func TestSeed_IsForbiddenWithNoSet(t *testing.T) {
 	}
 }
 
-func idRow(id string) sqltest.Response {
-	return sqltest.Response{Columns: []string{"id"}, Rows: [][]driver.Value{{id}}}
+// organizations stands in for the organization domain's seed
+// contribution, which the composition root hands the seeder: it reads the
+// state's organizations and reports each as inserted, running no
+// statement, since the domain's own tests prove its seed.
+type organizations struct{}
+
+func (organizations) Key() string                  { return "organizations" }
+func (organizations) Verify(context.Context) error { return nil }
+func (organizations) Apply(_ context.Context, _ *sqlate.Tx, raw json.RawMessage) (int, error) {
+	rows, err := data.SeedRows[json.RawMessage](raw)
+	return len(rows), err
 }
 
 // A bodyless seed applies the configured set; a body names another. Both
 // answer with the rows inserted by table.
 func TestSeed_AppliesTheConfiguredOrNamedSet(t *testing.T) {
-	rows := make([]sqltest.Response, 0, 7)
-	for i := range 7 {
-		rows = append(rows, idRow(string(rune('a'+i))))
-	}
-	h, rec := module(t, "default", rows...)
+	h, rec := module(t, "default")
 	seeded := decode(t, send(t, h, "POST", "/database/seed", ""), 200)
 	if seeded["organizations"] != float64(7) {
 		t.Errorf("seeded = %v; want seven organizations", seeded)

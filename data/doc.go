@@ -9,9 +9,12 @@
 // root-level package never imports internal/*.
 //
 // The content is the schema (migrations/), the application's pattern
-// namespace (patterns/), and the named states with their seed statements
-// (seeds/, statements/), each behind a function the admin service
-// triggers: Migrations, Patterns, and a Seeder. Migrations declares the sets
+// namespace (patterns/), and the named states (seeds/), each behind a
+// function the admin service triggers: Migrations, Patterns, and a Seeder.
+// The Seeder composes the domains' seed contributions, each a Seed the
+// domain declares over its own tables and statements and the composition
+// root hands in, so a state file is read here and every table's rows are
+// applied by the domain that owns it. Migrations declares the sets
 // the libraries beneath the service ship, as the composition root passes
 // them, ahead of the service's own. Beside them sit the pieces every domain
 // would otherwise copy: the advisory-lock name registry, the lowering from
@@ -21,8 +24,11 @@
 // a fixed detail (the Detail constants) and never the error's own text.
 //
 // Storage is the object storage infrastructure as the domains see it:
-// blobfs's store over the same session, and Objects, the adapter that is
-// the one place the service names its object-store library. Storage also
+// blobfs's store over the same session, and Objects, the adapter over the
+// started object store, so no domain names the object-store library. The
+// library is named where it is composed and administered: by the
+// composition root, the storage admin domain, and the status matcher,
+// which reads its errors. Storage also
 // runs the file protocols every domain shares, staged for promotion to
 // blobfs: Write, blobfs's two-phase write with its abandon and its writer
 // rule; Retire and Purge, its two-phase delete; and Serve, the read of an

@@ -6,15 +6,15 @@
 // The layer's SQL is the statements/ directory, the owner row's three
 // statements; database.go is the domain's SQL client, the sole importer of
 // the query library: it compiles the directory against the service's
-// pattern catalog, registers the inventory, binds each statement to a
-// typed handle, and lowers a request's query onto blobfs's listings.
-// storage.go is the storage translation file, the one place the layer calls
-// blobfs or the object store: it runs the scope check, runs the write,
-// delete, and download through the data package's shared file protocols
-// with the scope check as their first transaction's step, and sequences
-// the moves and the directories over blobfs's steps and the owner row's
-// statements. No statement, session, or query
-// type crosses out of the two. entities.go owns the shapes and their
+// pattern catalog, registers the inventory, and binds each statement to a
+// typed handle. storage.go is the storage translation file, the one place
+// the layer calls blobfs or the object store: it runs the scope check,
+// runs the write, delete, and download through the data package's shared
+// file protocols with the scope check as their first transaction's step,
+// reads blobfs's listings through the data package's lowering of a
+// request's query, and sequences the moves and the directories over
+// blobfs's steps and the owner row's statements. No statement, session,
+// or query type crosses out of the two. entities.go owns the shapes and their
 // rules; service.go is the direct map from endpoint to operation; handler.go
 // binds the service to the route group the composition root mounts into
 // the API module.
@@ -22,7 +22,11 @@
 // Ownership is at blobfs's directory grain: an organization_directory row
 // binds one top-level directory, named with the organization's id, to the
 // organization as its document root, and everything beneath it is the
-// organization's by containment. A directory id segment may be the literal
+// organization's by containment. The document layer owns that table,
+// though it names the organization, because the row is the owner row at
+// the directory grain: it binds a directory, and only this layer reads or
+// writes it, as the organization layer owns organization_image, its owner
+// row at the file grain. A directory id segment may be the literal
 // root, the alias of that directory. A write that needs the root ensures it
 // on first use, the directory and its owner row in one transaction after
 // the organization is read; a read before then answers an empty listing, or
@@ -53,7 +57,10 @@
 // constants).
 //
 // A directory reads with its status, active until blobfs marks its branch
-// deleting. A deleting branch still reads by id, directories and files
+// deleting, and a file with its stage, pending, available, or deleting.
+// The statuses are the layer's own vocabulary (DirectoryStatus and
+// FileStatus), mapped from blobfs's in storage.go, so the wire never
+// carries a library type. A deleting branch still reads by id, directories and files
 // with their status, while every listing hides it: its parent lists
 // without it, and a listing of a directory within it is not found.
 //

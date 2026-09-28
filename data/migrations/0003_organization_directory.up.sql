@@ -2,10 +2,13 @@
 -- a top-level blobfs directory, the organization's document root, to the
 -- organization, and every directory and file beneath it is the
 -- organization's by containment, checked once at that ancestor. An
--- organization has at most one root. The foreign key into blobfs_directory
--- refuses removing an owned directory while its owner row stands, so the
--- removal deletes the row in the same transaction; the one into
--- organization refuses deleting an organization that still owns a root.
+-- organization has at most one root. The document domain owns the table,
+-- though it names the organization: it is the owner row at the directory
+-- grain, and only the document layer reads or writes it. The foreign key
+-- into blobfs_directory refuses removing an owned directory while its
+-- owner row stands, so the removal deletes the row in the same
+-- transaction; the one into organization refuses deleting an organization
+-- that still owns a root.
 CREATE TABLE organization_directory (
   directory_id uuid PRIMARY KEY,
   organization_id uuid NOT NULL,

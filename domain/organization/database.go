@@ -2,7 +2,10 @@ package organization
 
 import (
 	"context"
+	"database/sql"
 	"embed"
+	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/standards-lab/blobfs"
@@ -38,6 +41,8 @@ type store struct {
 	activeLogoRows query.Rows[blobfs.File]
 	attachImage    query.Statement
 	detachImage    query.Statement
+	seedRows       query.Rows[string]
+	findSeededRows query.Rows[string]
 }
 
 // newStore compiles the statements against the service's catalog, registers
@@ -60,6 +65,8 @@ func newStore(db *data.Database, st *data.Storage) *store {
 		activeLogoRows: stmts.Statement("active_logo").Scan(query.Scanner[blobfs.File]()),
 		attachImage:    stmts.Statement("attach_image"),
 		detachImage:    stmts.Statement("detach_image"),
+		seedRows:       stmts.Statement("seed").Scan(query.Scalar[string]),
+		findSeededRows: stmts.Statement("find_seeded").Scan(query.Scalar[string]),
 	}
 }
 
@@ -132,4 +139,69 @@ func (s *store) attach(ctx context.Context, tx *sqlate.Tx, organizationID, fileI
 func (s *store) detach(ctx context.Context, tx *sqlate.Tx, fileID string) error {
 	_, err := s.detachImage.Exec(ctx, tx, query.Args{"file_id": fileID})
 	return err
+}
+
+// seed is the domain's contribution to the data package's named states:
+// the organizations a state carries under "organizations", seeded by the
+// store's own statements in the seed's transaction.
+type seed struct{ store *store }
+
+var _ data.Seed = seed{}
+
+// Key names the organizations in a state file and in the seed's counts.
+func (seed) Key() string { return "organizations" }
+
+// Verify prepares the domain's statements, the seed's among them.
+func (s seed) Verify(ctx context.Context) error { return s.store.Verify(ctx) }
+
+// Apply inserts the tree in file order, each parent before its children,
+// resolving the file's parent codes to ids as it goes, and returns how
+// many rows it inserted.
+func (s seed) Apply(ctx context.Context, tx *sqlate.Tx, raw json.RawMessage) (int, error) {
+	rows, err := data.SeedRows[seedRow](raw)
+	if err != nil {
+		return 0, fmt.Errorf("seed organizations: %w", err)
+	}
+	ids := make(map[string]string, len(rows))
+	inserted := 0
+	for _, o := range rows {
+		var parent any
+		if o.Parent != "" {
+			id, ok := ids[o.Parent]
+			if !ok {
+				return inserted, fmt.Errorf("seed organization %s: parent %q not seeded before it", o.Code, o.Parent)
+			}
+			parent = id
+		}
+		if _, dup := ids[o.Code]; dup {
+			return inserted, fmt.Errorf("seed organization %s: code reused within the file", o.Code)
+		}
+		id, ok, err := s.store.seedOne(ctx, tx, parent, o)
+		if err != nil {
+			return inserted, fmt.Errorf("seed organization %s: %w", o.Code, err)
+		}
+		ids[o.Code] = id
+		if ok {
+			inserted++
+		}
+	}
+	return inserted, nil
+}
+
+// seedOne seeds one organization or finds the one already there, returning
+// its id and whether this call inserted it. The seed statement returns no
+// row on conflict; sql.ErrNoRows is that signal.
+func (s *store) seedOne(ctx context.Context, tx *sqlate.Tx, parent any, o seedRow) (id string, inserted bool, err error) {
+	id, err = s.seedRows.One(ctx, tx, query.Args{"parent": parent, "code": o.Code, "name": o.Name})
+	if err == nil {
+		return id, true, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", false, err
+	}
+	id, err = s.findSeededRows.One(ctx, tx, query.Args{"parent": parent, "code": o.Code})
+	if errors.Is(err, sql.ErrNoRows) {
+		err = errors.New("neither inserted nor found")
+	}
+	return id, false, err
 }

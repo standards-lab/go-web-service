@@ -31,19 +31,20 @@ import (
 // the domains see it: the session over the same pool with the dialect,
 // grouped with the pattern catalog every statement compiles against.
 // Storage is the object store as the domains see it: blobfs's store over
-// the same session, and the started object store its keys name; Objects is
-// that store itself, which the storage admin domain administers. Sets are
+// the same session, and data's adapter over the started object store its
+// keys name; ObjectStore is that store itself, which the storage admin
+// domain administers. Sets are
 // the migration sets the admin service's migrator runs, blobfs's beneath
 // the service's own. The struct stops at the composition root: the layer
 // files read its fields, and a package receives its dependencies as
 // constructor parameters, never the struct itself.
 type Infrastructure struct {
-	Logger  *slog.Logger
-	DB      *database.DB
-	SQL     *data.Database
-	Storage *data.Storage
-	Objects *storage.Store
-	Sets    []migrate.Set
+	Logger      *slog.Logger
+	DB          *database.DB
+	SQL         *data.Database
+	Storage     *data.Storage
+	ObjectStore *storage.Store
+	Sets        []migrate.Set
 }
 
 // newInfrastructure constructs the infrastructure services in one place, in
@@ -112,11 +113,11 @@ func newInfrastructure(
 	}
 
 	return &Infrastructure{
-		Logger:  logger,
-		DB:      db,
-		SQL:     data.New(session, catalog),
-		Storage: data.NewStorage(fs, objects),
-		Objects: objects,
-		Sets:    data.Migrations(blobfsSet),
+		Logger:      logger,
+		DB:          db,
+		SQL:         data.New(session, catalog),
+		Storage:     data.NewStorage(fs, objects),
+		ObjectStore: objects,
+		Sets:        data.Migrations(blobfsSet),
 	}, nil
 }

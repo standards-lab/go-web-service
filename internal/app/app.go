@@ -36,20 +36,22 @@ func New(cfg *config.Config, w io.Writer) (*App, error) {
 		return nil, err
 	}
 
-	// The quiesce gate precedes the admin layer and the reactors, the two
-	// halves that meet in it: a verb that changes the schema holds it
-	// exclusively, and the sweep holds it shared for each pass.
-	gate := new(sdk.Gate)
-
-	adm, err := newAdmin(infra, cfg, gate, lc)
-	if err != nil {
-		return nil, err
-	}
-
 	// The sweep's wake precedes the domain: the document layer nudges it,
 	// and the sweep reactor receives from it.
 	wake := newSweepWake(cfg)
 	dom := newDomain(infra, wake, lc)
+
+	// The quiesce gate precedes the admin layer and the reactors, the two
+	// halves that meet in it: a verb that changes the schema holds it
+	// exclusively, and the sweep holds it shared for each pass. The admin
+	// layer follows the domain, whose seed contributions its seeder
+	// composes.
+	gate := new(sdk.Gate)
+
+	adm, err := newAdmin(infra, dom, cfg, gate, lc)
+	if err != nil {
+		return nil, err
+	}
 
 	if _, err := newReactors(infra, cfg, wake, gate, lc); err != nil {
 		return nil, err

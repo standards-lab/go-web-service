@@ -113,6 +113,15 @@ type Identity struct {
 	Version int64  `json:"version"`
 }
 
+// seedRow is one organization of a named state, in the vocabulary of the
+// API: an organization names its parent by code, the empty code being the
+// root, and the rows come parents first.
+type seedRow struct {
+	Parent string `json:"parent"`
+	Code   string `json:"code"`
+	Name   string `json:"name"`
+}
+
 // logoTypes is the logo's allowlist: the raster image media types a
 // browser renders inertly, each with the extension its stored name takes.
 // SVG is left out because it is script-capable.

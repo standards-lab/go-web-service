@@ -11,15 +11,23 @@ import (
 	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
+
+	"github.com/standards-lab/go-web-service/data"
 )
 
-// directories and files are blobfs's two listings, lowered by listing.
-func (s *store) directories() listing[blobfs.Directory] {
-	return listing[blobfs.Directory]{List: s.storage.FS.Directories.List, Continue: s.storage.FS.Directories.Continue}
-}
-
-func (s *store) files() listing[blobfs.File] {
-	return listing[blobfs.File]{List: s.storage.FS.Files.List, Continue: s.storage.FS.Files.Continue}
+// listing reads one page of blobfs's listing l, Directories' or Files',
+// of the directory with id, as the request addressed it, through the data
+// package's lowering. Deleting rows are hidden, and the listing of a
+// directory in a branch being deleted is not found: blobfs refuses it as
+// blobfs.ErrDeleting, which the layer reports as the missing directory
+// rather than a conflict, since a mark is never undone, so nothing a
+// client sends makes the directory listable again.
+func listing[T any](ctx context.Context, sess sqlate.Session, l data.Listing[T], id string, q web.Query) ([]T, web.Paging, error) {
+	c, err := data.ReadListing(ctx, sess, l, id, q)
+	if errors.Is(err, blobfs.ErrDeleting) {
+		return nil, web.Paging{}, fmt.Errorf("directory %s is being deleted: %w", id, blobfs.ErrNotFound)
+	}
+	return c.Items, data.Paging(c), err
 }
 
 // scope resolves the directory id names, the root alias or a directory id,
@@ -91,7 +99,7 @@ func (s *store) ensureRoot(ctx context.Context, organizationID string) (string, 
 		return root, err
 	}
 	root, err = s.db.Transact(ctx, func(tx *sqlate.Tx) (string, error) {
-		if err := s.findOrganization(ctx, tx, organizationID); err != nil {
+		if err := s.organizationExists(ctx, tx, organizationID); err != nil {
 			return "", fmt.Errorf("organization %s: %w", organizationID, err)
 		}
 		dir, _, err := s.storage.FS.Directories.Ensure(ctx, tx, blobfs.RootID, organizationID)
@@ -152,7 +160,7 @@ func (s *store) listDirectories(ctx context.Context, organizationID, id string, 
 	if err != nil {
 		return rootless[Directory](id, err)
 	}
-	items, paging, err := s.directories().read(ctx, s.db, dir, q)
+	items, paging, err := listing(ctx, s.db, s.storage.FS.Directories, dir, q)
 	out := make([]Directory, len(items))
 	for i, d := range items {
 		out[i] = directoryOf(d, root)
@@ -168,7 +176,7 @@ func (s *store) listFiles(ctx context.Context, organizationID, id string, q web.
 	if err != nil {
 		return rootless[File](id, err)
 	}
-	items, paging, err := s.files().read(ctx, s.db, dir, q)
+	items, paging, err := listing(ctx, s.db, s.storage.FS.Files, dir, q)
 	out := make([]File, len(items))
 	for i, f := range items {
 		out[i] = fileOf(f)
@@ -313,7 +321,7 @@ func (s *store) moveFile(ctx context.Context, organizationID, id string, version
 // directoryOf presents a blobfs directory; the document root has no parent
 // the API shows and is named "/", as blobfs names its own root.
 func directoryOf(d blobfs.Directory, root string) Directory {
-	out := Directory{ID: d.ID, ParentID: d.ParentID, Name: d.Name, Status: d.Status, Version: d.Version, CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt}
+	out := Directory{ID: d.ID, ParentID: d.ParentID, Name: d.Name, Status: directoryStatus(d.Status), Version: d.Version, CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt}
 	if d.ID == root {
 		out.ParentID, out.Name = nil, "/"
 	}
@@ -323,7 +331,34 @@ func directoryOf(d blobfs.Directory, root string) Directory {
 // fileOf presents a blobfs file without its object key.
 func fileOf(f blobfs.File) File {
 	return File{
-		ID: f.ID, DirectoryID: f.DirectoryID, Name: f.Name, Status: f.Status, Size: f.Size,
+		ID: f.ID, DirectoryID: f.DirectoryID, Name: f.Name, Status: fileStatus(f.Status), Size: f.Size,
 		ContentType: f.ContentType, Version: f.Version, CreatedAt: f.CreatedAt, UpdatedAt: f.UpdatedAt,
 	}
+}
+
+// directoryStatus names blobfs's directory status in the API's vocabulary.
+// A status the layer does not name yet passes through as blobfs's text,
+// so a status blobfs adds is named here when the layer presents it.
+func directoryStatus(s blobfs.DirectoryStatus) DirectoryStatus {
+	switch s {
+	case blobfs.DirectoryStatusActive:
+		return DirectoryActive
+	case blobfs.DirectoryStatusDeleting:
+		return DirectoryDeleting
+	}
+	return DirectoryStatus(s)
+}
+
+// fileStatus names blobfs's file status in the API's vocabulary, as
+// directoryStatus does.
+func fileStatus(s blobfs.Status) FileStatus {
+	switch s {
+	case blobfs.StatusPending:
+		return FilePending
+	case blobfs.StatusAvailable:
+		return FileAvailable
+	case blobfs.StatusDeleting:
+		return FileDeleting
+	}
+	return FileStatus(s)
 }

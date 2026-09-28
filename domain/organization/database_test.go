@@ -62,6 +62,21 @@ func serviceOver(t *testing.T, dialect sqlate.Dialect, responses ...sqltest.Resp
 	return organization.New(db, data.NewStorage(fs, objects)), rec, fake
 }
 
+// seeder composes the data package's seeder over the layer's seed
+// contribution, as the composition root does.
+func seeder(t *testing.T, responses ...sqltest.Response) (*data.Seeder, *sqltest.Recorder) {
+	t.Helper()
+	pool, rec := sqltest.Open(t, responses...)
+	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
+	fs, err := bfdata.New(catalog, sqltest.Dialect{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := data.New(sqlate.Wrap(pool, sqltest.Dialect{}), catalog)
+	svc := organization.New(db, data.NewStorage(fs, nil))
+	return data.NewSeeder(db, svc.Seed()), rec
+}
+
 func identity(id string, version int64) sqltest.Response {
 	return sqltest.Response{Columns: []string{"id", "version"}, Rows: [][]driver.Value{{id, version}}}
 }
@@ -172,7 +187,7 @@ func TestStore_GuardDistinguishesAbsentFromStale(t *testing.T) {
 	}
 }
 
-// Verify prepares the ten statements and the read contract's three
+// Verify prepares the twelve statements and the read contract's three
 // probes: the fields against their declared types, a page past a cursor,
 // and the same page counted.
 func TestStore_VerifyPreparesEveryStatement(t *testing.T) {
@@ -181,8 +196,8 @@ func TestStore_VerifyPreparesEveryStatement(t *testing.T) {
 		t.Fatal(err)
 	}
 	prepared := rec.SQL(sqltest.OpPrepare)
-	if len(prepared) != 13 {
-		t.Errorf("prepared %d statements, want 10 + the contract's 3 probes", len(prepared))
+	if len(prepared) != 15 {
+		t.Errorf("prepared %d statements, want 12 + the contract's 3 probes", len(prepared))
 	}
 }
 
@@ -233,5 +248,97 @@ func TestStore_ListContinuesByCursor(t *testing.T) {
 	sqls := rec.SQL(sqltest.OpQuery)
 	if !strings.Contains(sqls[1], "WHERE (q.code > CAST($1 AS text) OR (q.code = CAST($1 AS text) AND q.id > CAST($2 AS uuid)))") {
 		t.Errorf("continued = %q; want the standard tier's keyset predicate past the cursor's row", sqls[1])
+	}
+}
+
+// The default state holds seven organizations in dependency order; the
+// root is first.
+const seedRows = 7
+
+func idRow(id string) sqltest.Response {
+	return sqltest.Response{Columns: []string{"id"}, Rows: [][]driver.Value{{id}}}
+}
+
+func TestSeed_InsertsEveryRowOnce(t *testing.T) {
+	responses := make([]sqltest.Response, 0, seedRows)
+	for i := range seedRows {
+		responses = append(responses, idRow(string(rune('a'+i))))
+	}
+	s, rec := seeder(t, responses...)
+
+	n, err := s.Seed(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+	if n["organizations"] != seedRows {
+		t.Fatalf("Seeded = %v; want %d organizations", n, seedRows)
+	}
+	ops := rec.Ops()
+	if ops[0] != sqltest.OpBegin || ops[len(ops)-1] != sqltest.OpCommit {
+		t.Fatalf("ops = %v; want one transaction", ops)
+	}
+	if rec.Pending() != 0 || rec.RowsLeaked() != 0 {
+		t.Fatalf("pending %d, leaked %d", rec.Pending(), rec.RowsLeaked())
+	}
+	calls := rec.Calls()
+	// The root binds a null parent; the second row binds the root's id.
+	if calls[1].Args[0] != nil || calls[2].Args[0] != "a" {
+		t.Fatalf("parents bound as %v and %v; want nil then a", calls[1].Args[0], calls[2].Args[0])
+	}
+	if !strings.Contains(calls[1].SQL, "ON CONFLICT ON CONSTRAINT uq_organization_parent_code DO NOTHING") {
+		t.Fatalf("seed statement: %s", calls[1].SQL)
+	}
+}
+
+func TestSeed_FindsExistingRows(t *testing.T) {
+	// The root already exists: no row from the insert, then the lookup.
+	responses := []sqltest.Response{{Columns: []string{"id"}}, idRow("root")}
+	for i := 1; i < seedRows; i++ {
+		responses = append(responses, idRow(string(rune('a'+i))))
+	}
+	s, rec := seeder(t, responses...)
+
+	n, err := s.Seed(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+	if n["organizations"] != seedRows-1 {
+		t.Fatalf("inserted %d; want %d", n["organizations"], seedRows-1)
+	}
+	calls := rec.Calls()
+	if !strings.Contains(calls[2].SQL, "IS NOT DISTINCT FROM") || calls[3].Args[0] != "root" {
+		t.Fatalf("lookup did not resolve the root: %s %v", calls[2].SQL, calls[3].Args)
+	}
+	if rec.Pending() != 0 {
+		t.Fatalf("pending %d", rec.Pending())
+	}
+}
+
+func TestSeed_RollsBackOnFailure(t *testing.T) {
+	s, rec := seeder(t, idRow("a"), sqltest.Response{Err: errors.New("boom")})
+
+	if _, err := s.Seed(context.Background(), "default"); err == nil || !strings.Contains(err.Error(), "seed organization engineering") {
+		t.Fatalf("err = %v; want the failing row named", err)
+	}
+	ops := rec.Ops()
+	if ops[len(ops)-1] != sqltest.OpRollback {
+		t.Fatalf("ops = %v; want a rollback last", ops)
+	}
+}
+
+// The contribution verifies the layer's statements, the seed's among
+// them, at the schema stage the seeder's Verify runs at.
+func TestSeed_VerifiesTheLayersStatements(t *testing.T) {
+	s, rec := seeder(t)
+	if err := s.Verify(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var seed, lookup bool
+	for _, sql := range rec.SQL(sqltest.OpPrepare) {
+		seed = seed || strings.Contains(sql, "ON CONFLICT ON CONSTRAINT uq_organization_parent_code")
+		lookup = lookup || strings.Contains(sql, "IS NOT DISTINCT FROM")
+	}
+	if !seed || !lookup {
+		t.Fatalf("prepared %v; want the seed and its lookup among them", rec.SQL(sqltest.OpPrepare))
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/standards-lab/blobfs"
 	"github.com/standards-lab/go-storage"
@@ -428,6 +429,58 @@ func TestDeletes_GuardOnIfMatch(t *testing.T) {
 				return
 			}
 			problem(t, rec, c.status)
+		})
+	}
+}
+
+// The reads' wire shape, byte for byte: the statuses are the layer's own
+// vocabulary, mapped from blobfs's, and each serializes as it always has.
+func TestReads_WireShape(t *testing.T) {
+	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	stamp := func(d blobfs.Directory) blobfs.Directory { d.CreatedAt, d.UpdatedAt = at, at; return d }
+	stampFile := func(f blobfs.File) blobfs.File { f.CreatedAt, f.UpdatedAt = at, at; return f }
+	ancestors := sqltest.Response{
+		Columns: []string{"id", "parent_id", "name"},
+		Rows:    [][]driver.Value{{dirID, rootID, "reports"}, {rootID, blobfs.RootID, orgID}, {blobfs.RootID, nil, "/"}},
+	}
+	const times = `"created_at":"2026-01-02T03:04:05Z","updated_at":"2026-01-02T03:04:05Z"`
+	cases := map[string]struct {
+		responses []sqltest.Response
+		path      string
+		want      string
+	}{
+		"active directory": {
+			[]sqltest.Response{root(rootID), within(true), dirRows(stamp(directory(dirID, rootID, "reports", 1))), ancestors},
+			base + "/directories/" + dirID,
+			`{"id":"` + dirID + `","parent_id":"` + rootID + `","name":"reports","path":"/reports","status":"active","version":1,` + times + `}`,
+		},
+		"deleting directory": {
+			[]sqltest.Response{root(rootID), within(true), dirRows(stamp(deleting(directory(dirID, rootID, "reports", 1)))), ancestors},
+			base + "/directories/" + dirID,
+			`{"id":"` + dirID + `","parent_id":"` + rootID + `","name":"reports","path":"/reports","status":"deleting","version":2,` + times + `}`,
+		},
+		"pending file": {
+			[]sqltest.Response{root(rootID), fileRows(stampFile(file(fileID, dirID, blobfs.StatusPending, 1))), within(true)},
+			base + "/files/" + fileID,
+			`{"id":"` + fileID + `","directory_id":"` + dirID + `","name":"report.txt","status":"pending","size":null,"content_type":"text/plain","version":1,` + times + `}`,
+		},
+		"available file": {
+			[]sqltest.Response{root(rootID), fileRows(stampFile(file(fileID, dirID, blobfs.StatusAvailable, 2))), within(true)},
+			base + "/files/" + fileID,
+			`{"id":"` + fileID + `","directory_id":"` + dirID + `","name":"report.txt","status":"available","size":6,"content_type":"text/plain","version":2,` + times + `}`,
+		},
+		"deleting file": {
+			[]sqltest.Response{root(rootID), fileRows(stampFile(file(fileID, dirID, blobfs.StatusDeleting, 3))), within(true)},
+			base + "/files/" + fileID,
+			`{"id":"` + fileID + `","directory_id":"` + dirID + `","name":"report.txt","status":"deleting","size":6,"content_type":"text/plain","version":3,` + times + `}`,
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := send(t, module(t, c.responses...), "GET", c.path, "", "")
+			if got := strings.TrimSpace(rec.Body.String()); rec.Code != 200 || got != c.want {
+				t.Fatalf("status %d, body\n%s\nwant\n%s", rec.Code, got, c.want)
+			}
 		})
 	}
 }

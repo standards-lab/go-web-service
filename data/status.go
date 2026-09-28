@@ -14,6 +14,21 @@ import (
 	"github.com/standards-lab/sqlate/query"
 )
 
+// The details a conflict carries on the wire, one fixed text per kind. A
+// 409's detail is always one of these and never the error's own text,
+// which names the library's operation, its ids, and its constraints.
+const (
+	DetailNameTaken  = "an entry with that name already exists"
+	DetailNotEmpty   = "the directory is not empty"
+	DetailDeleting   = "the directory is being deleted"
+	DetailReferenced = "the file is referenced"
+	// DetailConflict is every other conflict's: a constraint violation, a
+	// move into its own subtree, a transition the file's status does not
+	// allow, and a domain's own conflicts, which its matcher reports with
+	// this text too.
+	DetailConflict = "the request conflicts with the current state"
+)
+
 // Status is the web.ProblemMatcher over the vocabulary every domain's store
 // returns:
 //
@@ -41,6 +56,12 @@ import (
 //   - a store that is not ready, unreachable, or missing its container is a
 //     temporary outage
 //
+// Every conflict carries a curated detail, the Detail constant for its
+// kind, so a writer that opts 409 into error text still sends none of it:
+// a taken name or id is DetailNameTaken, a non-empty directory
+// DetailNotEmpty, a deleting directory DetailDeleting, a referenced file
+// DetailReferenced, and every other conflict DetailConflict.
+//
 // A handler composes it after its own matcher so the domain's errors take
 // precedence. Check and not-null violations stay unmatched on purpose: a
 // command's validation owns those rules, so a breach is an invariant
@@ -53,11 +74,17 @@ func Status(err error) (web.Problem, bool) {
 		return web.Problem{Status: http.StatusBadRequest}, true
 	case errors.Is(err, blobfs.ErrNotFound), errors.Is(err, storage.ErrNotFound) && !errors.Is(err, ErrContainerGone):
 		return web.Problem{Status: http.StatusNotFound}, true
-	case errors.Is(err, blobfs.ErrNameTaken), errors.Is(err, blobfs.ErrIDTaken),
-		errors.Is(err, blobfs.ErrNotEmpty), errors.Is(err, blobfs.ErrReferenced),
-		errors.Is(err, blobfs.ErrDeleting), errors.Is(err, blobfs.ErrNotDeleting),
+	case errors.Is(err, blobfs.ErrNameTaken), errors.Is(err, blobfs.ErrIDTaken):
+		return Conflict(DetailNameTaken), true
+	case errors.Is(err, blobfs.ErrNotEmpty):
+		return Conflict(DetailNotEmpty), true
+	case errors.Is(err, blobfs.ErrReferenced):
+		return Conflict(DetailReferenced), true
+	case errors.Is(err, blobfs.ErrDeleting):
+		return Conflict(DetailDeleting), true
+	case errors.Is(err, blobfs.ErrNotDeleting),
 		errors.Is(err, blobfs.ErrInvalidTransition), errors.Is(err, blobfs.ErrCycle):
-		return web.Problem{Status: http.StatusConflict}, true
+		return Conflict(DetailConflict), true
 	case errors.Is(err, storage.ErrTooLarge):
 		return web.Problem{Status: http.StatusRequestEntityTooLarge}, true
 	case errors.Is(err, ErrContainerGone), errors.Is(err, storage.ErrNotReady), errors.Is(err, storage.ErrUnavailable):
@@ -67,7 +94,7 @@ func Status(err error) (web.Problem, bool) {
 	case errors.Is(err, sql.ErrNoRows):
 		return web.Problem{Status: http.StatusNotFound}, true
 	case errors.Is(err, sqlate.ErrUniqueViolation), errors.Is(err, sqlate.ErrForeignKeyViolation):
-		return web.Problem{Status: http.StatusConflict}, true
+		return Conflict(DetailConflict), true
 	case errors.Is(err, query.ErrVersionMismatch):
 		return web.Problem{Status: http.StatusPreconditionFailed}, true
 	case errors.Is(err, database.ErrNotReady),
@@ -77,4 +104,10 @@ func Status(err error) (web.Problem, bool) {
 		return web.Problem{Status: http.StatusServiceUnavailable}, true
 	}
 	return web.Problem{}, false
+}
+
+// Conflict is the 409 problem carrying detail, one of the Detail
+// constants; a domain's matcher builds its own conflicts with it.
+func Conflict(detail string) web.Problem {
+	return web.Problem{Status: http.StatusConflict, Detail: detail}
 }

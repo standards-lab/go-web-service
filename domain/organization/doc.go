@@ -25,7 +25,10 @@
 // check, run inside its transaction under the tree's advisory lock, taken
 // through the data package by its registered name. The
 // guarded commands take their version precondition from If-Match: a
-// missing header is 428, a stale version 412; state conflicts are 409.
+// missing header is 428, a stale version 412; state conflicts are 409,
+// whose detail is a fixed text and never the error's own: a taken code, a
+// missing parent, a cycle, and a concurrent logo replacement all read "the
+// request conflicts with the current state".
 // The path is projected at read time by the lineage CTE (standard
 // SQL:1999) and is an ordinary contract field, filterable and sortable
 // like any other.

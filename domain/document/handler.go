@@ -316,7 +316,7 @@ func attrChar(b byte) bool {
 // errors map themselves, and the library's vocabulary (blobfs's and the
 // object store's sentinels, directives, the missing row, constraint
 // violations, the stale version, the outage) is data.Status, composed
-// after this one.
+// after this one, which gives every conflict its curated detail.
 func status(err error) (web.Problem, bool) {
 	var path *sdk.PathError
 	if errors.Is(err, ErrValidation) || errors.As(err, &path) {

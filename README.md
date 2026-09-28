@@ -128,7 +128,9 @@ same sort and filters) continues after the last row, so a tree that changes betw
 neither skips nor repeats one. A continued page omits `page`; a sort on `parent_id`, the one
 nullable field, pages by number alone. The guarded commands (`PUT`,
 transfer, `DELETE`) take the row's version in `If-Match: "3"`; a missing header answers 428 and a
-stale version 412. Every rejection is an RFC 9457 problem.
+stale version 412. Every rejection is an RFC 9457 problem. A conflict, 409, carries a fixed
+`detail` naming its kind and never the underlying error's text: "the request conflicts with the
+current state" for a taken code, a missing parent, or a cycle.
 
 ```sh
 curl localhost:8080/api/organizations                          # the seeded reference data, paged

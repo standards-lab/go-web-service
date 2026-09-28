@@ -2,14 +2,19 @@ package data_test
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/standards-lab/blobfs"
 	"github.com/standards-lab/go-database"
 	"github.com/standards-lab/go-storage"
+	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/query"
 
@@ -42,6 +47,10 @@ func TestStatus(t *testing.T) {
 		{"blobfs not empty", blobfs.ErrNotEmpty, 409, true},
 		{"blobfs referenced", blobfs.ErrReferenced, 409, true},
 		{"blobfs cycle", blobfs.ErrCycle, 409, true},
+		{"blobfs id taken", blobfs.ErrIDTaken, 409, true},
+		{"blobfs deleting", blobfs.ErrDeleting, 409, true},
+		{"blobfs not deleting", blobfs.ErrNotDeleting, 409, true},
+		{"blobfs invalid transition", &blobfs.TransitionError{From: blobfs.StatusAvailable, To: blobfs.StatusPending}, 409, true},
 		{"object too large", storage.ErrTooLarge, 413, true},
 		{"store not ready", storage.ErrNotReady, 503, true},
 		{"store unavailable", fmt.Errorf("%w: refused", storage.ErrUnavailable), 503, true},
@@ -56,6 +65,67 @@ func TestStatus(t *testing.T) {
 			if got.Status != tc.want || ok != tc.ok {
 				t.Fatalf("Status(%v) = %d, %t; want %d, %t", tc.err, got.Status, ok, tc.want, tc.ok)
 			}
+			if tc.want != http.StatusConflict && got.Detail != "" {
+				t.Errorf("Status(%v) detail = %q; only a conflict carries one", tc.err, got.Detail)
+			}
 		})
+	}
+}
+
+// Every conflict carries its curated detail and none of the error's own
+// text. The errors are shaped as the libraries wrap them, each naming its
+// operation, ids, and constraint, and the writer opts 409 into error text,
+// the worst case: the matcher's detail still wins, so nothing of the
+// error reaches the body.
+func TestStatus_ConflictsCarryACuratedDetail(t *testing.T) {
+	const dir = "0198c0de-0000-7000-8000-000000000001"
+	violation := func(sentinel error, constraint string, class error) error {
+		return &blobfs.ViolationError{Sentinel: sentinel, Constraint: constraint, Err: &sqlate.ConstraintError{Constraint: constraint, Class: class, Err: errors.New(`duplicate key value violates unique constraint "` + constraint + `"`)}}
+	}
+	cases := []struct {
+		name   string
+		err    error
+		detail string
+	}{
+		{"name taken", fmt.Errorf("data: create directory under %s as %q: %w", dir, "reports", violation(blobfs.ErrNameTaken, "blobfs_uq_directory_parent_name", sqlate.ErrUniqueViolation)), "an entry with that name already exists"},
+		{"id taken", fmt.Errorf("data: create file in %s: %w", dir, violation(blobfs.ErrIDTaken, "blobfs_pk_file", sqlate.ErrUniqueViolation)), "an entry with that name already exists"},
+		{"not empty", fmt.Errorf("data: delete directory %s: %w", dir, violation(blobfs.ErrNotEmpty, "blobfs_fk_directory_parent", sqlate.ErrForeignKeyViolation)), "the directory is not empty"},
+		{"deleting", fmt.Errorf("data: create directory under %s: the directory %s is deleting: %w", dir, dir, blobfs.ErrDeleting), "the directory is being deleted"},
+		{"referenced", fmt.Errorf("data: delete directory %s: %w", dir, violation(blobfs.ErrReferenced, "organization_directory_fk_directory", sqlate.ErrForeignKeyViolation)), "the file is referenced"},
+		{"not deleting", fmt.Errorf("data: purge file %s: %w", dir, blobfs.ErrNotDeleting), "the request conflicts with the current state"},
+		{"invalid transition", fmt.Errorf("data: complete file %s: %w", dir, &blobfs.TransitionError{From: blobfs.StatusAvailable, To: blobfs.StatusAvailable}), "the request conflicts with the current state"},
+		{"cycle", fmt.Errorf("data: move directory %s: %w", dir, blobfs.ErrCycle), "the request conflicts with the current state"},
+		{"unique violation", fmt.Errorf("create: %w", &sqlate.ConstraintError{Constraint: "organization_uq_parent_code", Class: sqlate.ErrUniqueViolation, Err: errors.New(`duplicate key value violates unique constraint "organization_uq_parent_code"`)}), "the request conflicts with the current state"},
+		{"foreign key violation", fmt.Errorf("create: %w", &sqlate.ConstraintError{Constraint: "organization_fk_parent", Class: sqlate.ErrForeignKeyViolation, Err: errors.New(`insert violates foreign key constraint "organization_fk_parent"`)}), "the request conflicts with the current state"},
+	}
+	ew := web.NewErrorWriter(data.Status)
+	ew.Detail(http.StatusConflict)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p, ok := data.Status(tc.err)
+			if !ok || p.Status != http.StatusConflict || p.Detail != tc.detail {
+				t.Fatalf("Status = %+v, %t; want 409 with %q", p, ok, tc.detail)
+			}
+			rec := httptest.NewRecorder()
+			if err := ew.Write(rec, httptest.NewRequest("GET", "/x", nil), tc.err); err != nil {
+				t.Fatal(err)
+			}
+			var body web.Problem
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || rec.Code != 409 || body.Detail != tc.detail {
+				t.Fatalf("wire = %d %s (%v); want 409 with %q", rec.Code, rec.Body, err, tc.detail)
+			}
+			noRawText(t, rec.Body.String())
+		})
+	}
+}
+
+// noRawText fails the test when body carries any of an error's own text:
+// a library's operation prefix, an id, or a constraint's name.
+func noRawText(t *testing.T, body string) {
+	t.Helper()
+	for _, leak := range []string{"data:", "blobfs:", "blobfs_", "_uq_", "_fk_", "_pk_", "constraint", "0198c0de"} {
+		if strings.Contains(body, leak) {
+			t.Errorf("body %s carries %q", body, leak)
+		}
 	}
 }

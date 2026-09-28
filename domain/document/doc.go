@@ -31,6 +31,13 @@
 // moves, or deletes across organizations, and a move stays under one root.
 // The root itself is not moved.
 //
+// A conflict is a 409 whose detail is a fixed text, never the error's own,
+// which would name blobfs's operation, ids, and constraints: "an entry
+// with that name already exists", "the directory is not empty", "the
+// directory is being deleted", "the file is referenced", or otherwise "the
+// request conflicts with the current state" (data.Status's Detail
+// constants).
+//
 // A directory reads with its status, active until blobfs marks its branch
 // deleting. A deleting branch still reads by id, directories and files
 // with their status, while every listing hides it: its parent lists

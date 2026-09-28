@@ -17,7 +17,8 @@
 // would otherwise copy: the advisory-lock name registry, the lowering from
 // the web SDK's query to the library's directives and the collection read
 // it addresses, and the status matcher over the libraries' error
-// vocabulary, the storage libraries' included.
+// vocabulary, the storage libraries' included, which gives every conflict
+// a fixed detail (the Detail constants) and never the error's own text.
 //
 // Storage is the object storage infrastructure as the domains see it:
 // blobfs's store over the same session, and Objects, the adapter that is

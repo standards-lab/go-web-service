@@ -196,17 +196,19 @@ func (h *handler) deleteLogo(w http.ResponseWriter, r *http.Request) error {
 }
 
 // status is the layer's own error vocabulary as one web.ProblemMatcher: a
-// validation rejection or a malformed path id (400) and the cycle (409).
-// The SDK's request errors map themselves, and the library's vocabulary
-// (directives, the missing row, constraint violations, the stale version,
-// the outage) is data.Status, composed after this one.
+// validation rejection or a malformed path id (400) and the cycle (409),
+// which carries data.DetailConflict as every conflict data.Status reports
+// without a text of its own does. The SDK's request errors map themselves,
+// and the library's vocabulary (directives, the missing row, constraint
+// violations, the stale version, the outage) is data.Status, composed after
+// this one.
 func status(err error) (web.Problem, bool) {
 	var path *sdk.PathError
 	switch {
 	case errors.Is(err, ErrValidation), errors.As(err, &path):
 		return web.Problem{Status: http.StatusBadRequest}, true
 	case errors.Is(err, ErrCycle):
-		return web.Problem{Status: http.StatusConflict}, true
+		return data.Conflict(data.DetailConflict), true
 	}
 	return web.Problem{}, false
 }

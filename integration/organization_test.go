@@ -5,6 +5,7 @@ package integration_test
 import (
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 
@@ -44,6 +45,25 @@ func (p organizationPage) total() int {
 		return -1
 	}
 	return *p.Total
+}
+
+// generalConflict is the detail of every conflict without a text of its
+// own, data.DetailConflict.
+const generalConflict = "the request conflicts with the current state"
+
+// conflict asserts a 409 whose detail is exactly the curated text and
+// whose body carries none of the error's own: no library prefix and no
+// constraint name.
+func conflict(t *testing.T, r *webtest.Response, detail string) {
+	t.Helper()
+	if p := r.Problem(t, http.StatusConflict); p.Detail != detail {
+		t.Errorf("detail = %q, want %q", p.Detail, detail)
+	}
+	for _, leak := range []string{"data:", "blobfs", "constraint", "_uq_", "_fk_", "_pk_", "violates"} {
+		if strings.Contains(string(r.Body), leak) {
+			t.Errorf("body %s carries %q", r.Body, leak)
+		}
+	}
 }
 
 // absentID is a well-formed id no row carries.
@@ -182,9 +202,9 @@ func TestOrganization(t *testing.T) {
 			t.Errorf("created row not readable by path: %+v", created)
 		}
 
-		_ = c.Post(t, organizations, body).Problem(t, http.StatusConflict)                                                             // duplicate sibling
-		_ = c.Post(t, organizations, map[string]any{"parent_id": nil, "code": "acme", "name": "Acme"}).Problem(t, http.StatusConflict) // duplicate root
-		_ = c.Post(t, organizations, map[string]any{"parent_id": absentID, "code": "orphan", "name": "Orphan"}).Problem(t, http.StatusConflict)
+		conflict(t, c.Post(t, organizations, body), generalConflict)                                                             // duplicate sibling
+		conflict(t, c.Post(t, organizations, map[string]any{"parent_id": nil, "code": "acme", "name": "Acme"}), generalConflict) // duplicate root
+		conflict(t, c.Post(t, organizations, map[string]any{"parent_id": absentID, "code": "orphan", "name": "Orphan"}), generalConflict)
 		_ = c.Post(t, organizations, map[string]any{"code": "Bad_Code", "name": "X"}).Problem(t, http.StatusBadRequest)
 		_ = c.Post(t, organizations, map[string]any{"code": "ok", "name": ""}).Problem(t, http.StatusBadRequest)
 		_ = c.Post(t, organizations, map[string]any{"parent_id": "nope", "code": "ok", "name": "X"}).Problem(t, http.StatusBadRequest)
@@ -223,12 +243,12 @@ func TestOrganization(t *testing.T) {
 		_ = c.Post(t, path, map[string]any{}, webtest.IfMatch(platform.Version)).Problem(t, http.StatusBadRequest) // key required
 		_ = c.Post(t, path, map[string]any{"parent_id": all["operations"].ID}).Problem(t, http.StatusPreconditionRequired)
 		_ = c.Post(t, path, map[string]any{"parent_id": all["operations"].ID}, webtest.IfMatch(9)).Problem(t, http.StatusPreconditionFailed)
-		_ = c.Post(t, path, map[string]any{"parent_id": absentID}, webtest.IfMatch(platform.Version)).Problem(t, http.StatusConflict)
+		conflict(t, c.Post(t, path, map[string]any{"parent_id": absentID}, webtest.IfMatch(platform.Version)), generalConflict)
 
 		// A cycle: acme under its own descendant, and a node under itself.
 		acme := all["acme"]
-		_ = c.Post(t, organizations+"/"+acme.ID+"/transfer", map[string]any{"parent_id": all["product"].ID}, webtest.IfMatch(acme.Version)).Problem(t, http.StatusConflict)
-		_ = c.Post(t, path, map[string]any{"parent_id": platform.ID}, webtest.IfMatch(platform.Version)).Problem(t, http.StatusConflict)
+		conflict(t, c.Post(t, organizations+"/"+acme.ID+"/transfer", map[string]any{"parent_id": all["product"].ID}, webtest.IfMatch(acme.Version)), generalConflict)
+		conflict(t, c.Post(t, path, map[string]any{"parent_id": platform.ID}, webtest.IfMatch(platform.Version)), generalConflict)
 
 		// The move, and the path recomposed beneath the new parent.
 		ident := webtest.Decode[identity](t, c.Post(t, path, map[string]any{"parent_id": all["operations"].ID}, webtest.IfMatch(platform.Version)), http.StatusOK)
@@ -254,7 +274,7 @@ func TestOrganization(t *testing.T) {
 		if root.ParentID != nil || root.Path != "/platform" || root.Version != ident.Version {
 			t.Errorf("root move = %+v", root)
 		}
-		_ = c.Post(t, organizations, map[string]any{"parent_id": nil, "code": "platform", "name": "Dup"}).Problem(t, http.StatusConflict) // root code unique
+		conflict(t, c.Post(t, organizations, map[string]any{"parent_id": nil, "code": "platform", "name": "Dup"}), generalConflict) // root code unique
 	})
 
 	run("concurrent transfers under the lock", func(t *testing.T) {

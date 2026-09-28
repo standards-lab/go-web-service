@@ -104,6 +104,21 @@ func TestDocument(t *testing.T) {
 			t.Errorf("root's files = %+v; want kept.txt alone", f.Items)
 		}
 	})
+
+	run("a conflict carries its curated detail", func(t *testing.T, docs string) {
+		reports := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)
+		archive := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": reports.ID, "name": "archive"}), http.StatusCreated)
+		q3 := webtest.Raw{ContentType: "text/plain", Body: []byte("report")}
+		_ = webtest.Decode[identity](t, c.Put(t, docs+"/directories/"+reports.ID+"/files/q3.txt", q3), http.StatusCreated)
+
+		conflict(t, c.Put(t, docs+"/directories/"+reports.ID+"/files/q3.txt", q3), "an entry with that name already exists")
+		conflict(t, c.Post(t, docs+"/directories", map[string]string{"parent_id": reports.ID, "name": "archive"}), "an entry with that name already exists")
+		conflict(t, c.Delete(t, docs+"/directories/"+reports.ID), "the directory is not empty")
+
+		markDeleting(t, archive.ID)
+		conflict(t, c.Post(t, docs+"/directories", map[string]string{"parent_id": archive.ID, "name": "q4"}), "the directory is being deleted")
+		conflict(t, c.Put(t, docs+"/directories/"+archive.ID+"/files/q4.txt", q3), "the directory is being deleted")
+	})
 }
 
 // markDeleting marks the branch rooted at the directory with id deleting

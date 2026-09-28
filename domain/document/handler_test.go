@@ -314,3 +314,54 @@ func TestListings_WithinADeletingBranchAre404(t *testing.T) {
 		})
 	}
 }
+
+// A conflict answers 409 with its fixed detail and none of the error's own
+// text, which names blobfs's operation, its ids, and its constraints: an
+// upload under a taken name, the delete of a directory with contents, and
+// a create under a directory whose branch is being deleted.
+func TestRoutes_ConflictsCarryAFixedDetail(t *testing.T) {
+	marked := dirRows(deleting(directory(dirID, rootID, "reports", 1)))
+	cases := map[string]struct {
+		responses          []sqltest.Response
+		method, path, body string
+		detail             string
+	}{
+		"taken name": {
+			[]sqltest.Response{root(rootID), within(true), {Err: takenName()}},
+			"PUT", base + "/directories/" + dirID + "/files/report.txt", "report",
+			"an entry with that name already exists",
+		},
+		"not empty": {
+			[]sqltest.Response{root(rootID), within(true), {Err: notEmpty()}},
+			"DELETE", base + "/directories/" + dirID, "",
+			"the directory is not empty",
+		},
+		"deleting parent": {
+			// The insert selects nothing from the deleting parent, and blobfs
+			// reads the parent, twice, to tell deleting from missing.
+			[]sqltest.Response{root(rootID), within(true), dirRows(), marked, marked},
+			"POST", base + "/directories", `{"parent_id":"` + dirID + `","name":"q3"}`,
+			"the directory is being deleted",
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := module(t, c.responses...)
+			var rec *httptest.ResponseRecorder
+			if c.method == "PUT" {
+				rec = upload(t, h, c.path, "text/plain", c.body, int64(len(c.body)))
+			} else {
+				rec = send(t, h, c.method, c.path, "", c.body)
+			}
+			body := problem(t, rec, 409)
+			if body["detail"] != c.detail {
+				t.Errorf("detail = %v, want %q", body["detail"], c.detail)
+			}
+			for _, leak := range []string{"data:", "blobfs", "constraint", "_fk_", "_uq_", rootID} {
+				if strings.Contains(rec.Body.String(), leak) {
+					t.Errorf("body %s carries %q", rec.Body, leak)
+				}
+			}
+		})
+	}
+}

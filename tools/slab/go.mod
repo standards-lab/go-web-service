@@ -21,3 +21,7 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 )
+
+// Temporary: builds against the unreleased blobfs v0.2.0 on its local
+// branch. Removed when blobfs v0.2.0 is tagged and pinned.
+replace github.com/standards-lab/blobfs => ../../../blobfs

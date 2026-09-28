@@ -88,11 +88,12 @@ func TestAdmin(t *testing.T) {
 	t.Run("schema", func(t *testing.T) {
 		st := schema(t, c.Get(t, admin+"/schema"))
 		assertCurrentSchema(t, st)
-		// blobfs's set is declared beneath the service's own, and current.
+		// blobfs's set is declared beneath the service's own, and current
+		// through its 0003, the directory status the document layer reads.
 		if len(st.Sets) != 2 || st.Sets[0].Name != "blobfs" || st.Sets[1].Name != integration.AppSet {
 			t.Errorf("sets = %+v, want blobfs then app", st.Sets)
 		}
-		if bf := st.Set("blobfs"); bf.Version != bf.Latest || bf.Latest < 2 || bf.Dirty {
+		if bf := st.Set("blobfs"); bf.Version != bf.Latest || bf.Latest < 3 || bf.Dirty {
 			t.Errorf("blobfs set = %+v, want current at its head", bf)
 		}
 		ms := st.Set(integration.AppSet).Migrations

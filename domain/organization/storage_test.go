@@ -56,8 +56,8 @@ func file(id string, status blobfs.Status, version int64) blobfs.File {
 func directoryRow() sqltest.Response {
 	now := time.Now()
 	return sqltest.Response{
-		Columns: []string{"id", "parent_id", "name", "version", "created_at", "updated_at"},
-		Rows:    [][]driver.Value{{dirID, blobfs.RootID, "organization-images", int64(1), now, now}},
+		Columns: []string{"id", "parent_id", "name", "status", "version", "created_at", "updated_at"},
+		Rows:    [][]driver.Value{{dirID, blobfs.RootID, "organization-images", string(blobfs.DirectoryStatusActive), int64(1), now, now}},
 	}
 }
 
@@ -109,7 +109,7 @@ func TestStore_LogoProtocolsBindTheirFilesParameters(t *testing.T) {
 		t.Fatalf("PutLogo = %+v, %v", id, err)
 	}
 	create := rec.Calls()[3]
-	if name, key := create.Args[2], create.Args[3]; !strings.HasPrefix(create.SQL, "INSERT INTO blobfs_file") || name != fmt.Sprint(create.Args[0])+".png" || key != fmt.Sprint(create.Args[0])+"/"+fmt.Sprint(name) {
+	if name, key := create.Args[1], create.Args[2]; !strings.HasPrefix(create.SQL, "INSERT INTO blobfs_file") || name != fmt.Sprint(create.Args[0])+".png" || key != fmt.Sprint(create.Args[0])+"/"+fmt.Sprint(name) {
 		t.Errorf("create = %q %v; want the file named for its minted id", create.SQL, create.Args)
 	}
 	if fake.Puts() != 1 {

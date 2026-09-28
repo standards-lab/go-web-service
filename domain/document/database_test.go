@@ -82,17 +82,24 @@ func organization() sqltest.Response {
 
 func exec(n int64) sqltest.Response { return sqltest.Response{Affected: n} }
 
-// directory is a directory row under parent at a version.
+// directory is an active directory row under parent at a version.
 func directory(id, parent, name string, version int64) blobfs.Directory {
 	now := time.Now()
-	return blobfs.Directory{ID: id, ParentID: &parent, Name: name, Version: version, CreatedAt: now, UpdatedAt: now}
+	return blobfs.Directory{ID: id, ParentID: &parent, Name: name, Status: blobfs.DirectoryStatusActive, Version: version, CreatedAt: now, UpdatedAt: now}
+}
+
+// deleting is d once its branch is marked for its delete, a version on.
+func deleting(d blobfs.Directory) blobfs.Directory {
+	d.Status = blobfs.DirectoryStatusDeleting
+	d.Version++
+	return d
 }
 
 // dirRows scripts a read of blobfs directory rows, one per directory given.
 func dirRows(dirs ...blobfs.Directory) sqltest.Response {
-	r := sqltest.Response{Columns: []string{"id", "parent_id", "name", "version", "created_at", "updated_at"}}
+	r := sqltest.Response{Columns: []string{"id", "parent_id", "name", "status", "version", "created_at", "updated_at"}}
 	for _, d := range dirs {
-		r.Rows = append(r.Rows, []driver.Value{d.ID, *d.ParentID, d.Name, d.Version, d.CreatedAt, d.UpdatedAt})
+		r.Rows = append(r.Rows, []driver.Value{d.ID, *d.ParentID, d.Name, string(d.Status), d.Version, d.CreatedAt, d.UpdatedAt})
 	}
 	return r
 }

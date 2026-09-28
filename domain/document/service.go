@@ -50,7 +50,8 @@ func (s *Service) CreateDirectory(ctx context.Context, organizationID string, c 
 	return s.store.createDirectory(ctx, organizationID, c)
 }
 
-// Directory returns the directory with its path from the root.
+// Directory returns the directory with its path from the root and its
+// status, deleting once its branch is marked.
 func (s *Service) Directory(ctx context.Context, organizationID, id string) (Directory, error) {
 	return s.store.directory(ctx, organizationID, id)
 }
@@ -58,13 +59,15 @@ func (s *Service) Directory(ctx context.Context, organizationID, id string) (Dir
 // ListDirectories returns one page of the directory's child directories
 // and the read's paging, honoring the parsed query's page or cursor, sort,
 // and filters. An unknown field, operator, or value, or a cursor that did
-// not come from this read, is the request's error.
+// not come from this read, is the request's error. A deleting directory is
+// hidden, and the listing of one is not found.
 func (s *Service) ListDirectories(ctx context.Context, organizationID, id string, q web.Query) ([]Directory, web.Paging, error) {
 	return s.store.listDirectories(ctx, organizationID, id, q)
 }
 
-// ListFiles returns one page of the directory's files, whatever their
-// status, as ListDirectories reads its directories.
+// ListFiles returns one page of the directory's files, pending and
+// available, as ListDirectories reads its directories. A file whose delete
+// has begun is hidden.
 func (s *Service) ListFiles(ctx context.Context, organizationID, id string, q web.Query) ([]File, web.Paging, error) {
 	return s.store.listFiles(ctx, organizationID, id, q)
 }

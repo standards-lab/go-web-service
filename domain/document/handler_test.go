@@ -2,6 +2,7 @@ package document_test
 
 import (
 	"context"
+	"database/sql/driver"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -271,4 +272,45 @@ func TestContent_OfAPendingFileIs404(t *testing.T) {
 func TestDeleteDirectory_NotEmptyIs409(t *testing.T) {
 	h := module(t, root(rootID), within(true), sqltest.Response{Err: notEmpty()})
 	problem(t, send(t, h, "DELETE", base+"/directories/"+dirID, "", ""), 409)
+}
+
+// A directory read carries its status, and a directory in a branch marked
+// for its delete still reads by id, deleting.
+func TestDirectory_CarriesItsStatus(t *testing.T) {
+	ancestors := sqltest.Response{
+		Columns: []string{"id", "parent_id", "name"},
+		Rows:    [][]driver.Value{{dirID, rootID, "reports"}, {rootID, blobfs.RootID, orgID}, {blobfs.RootID, nil, "/"}},
+	}
+	cases := map[string]struct {
+		dir  blobfs.Directory
+		want string
+	}{
+		"active":   {directory(dirID, rootID, "reports", 1), `"status":"active"`},
+		"deleting": {deleting(directory(dirID, rootID, "reports", 1)), `"status":"deleting"`},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := module(t, root(rootID), within(true), dirRows(c.dir), ancestors)
+			rec := send(t, h, "GET", base+"/directories/"+dirID, "", "")
+			if rec.Code != 200 || !strings.Contains(rec.Body.String(), c.want) {
+				t.Fatalf("status %d, body %s; want %s", rec.Code, rec.Body, c.want)
+			}
+		})
+	}
+}
+
+// A listing within a branch being deleted is not found, not a conflict:
+// the directory still reads by id, but it lists nothing.
+func TestListings_WithinADeletingBranchAre404(t *testing.T) {
+	marked := deleting(directory(dirID, rootID, "reports", 1))
+	cases := map[string]sqltest.Response{
+		"directories": sqltest.WithTotal(dirRows(), 0),
+		"files":       sqltest.WithTotal(fileRows(), 0),
+	}
+	for listing, page := range cases {
+		t.Run(listing, func(t *testing.T) {
+			h := module(t, root(rootID), within(true), page, dirRows(marked))
+			problem(t, send(t, h, "GET", base+"/directories/"+dirID+"/"+listing, "", ""), 404)
+		})
+	}
 }

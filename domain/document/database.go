@@ -3,7 +3,11 @@ package document
 import (
 	"context"
 	"embed"
+	"errors"
+	"fmt"
 
+	"github.com/standards-lab/blobfs"
+	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/query"
@@ -83,17 +87,22 @@ func (s *store) unbind(ctx context.Context, tx *sqlate.Tx, directoryID string) e
 
 // listing is one of blobfs's directory listings, Directories' or Files':
 // List reads a page by number and Continue the page past a cursor, both
-// anchored on the directory's id.
+// anchored on the directory's id. Both hide deleting rows unless given
+// bfdata.IncludeDeleting.
 type listing[T any] struct {
-	List     func(context.Context, sqlate.Session, string, query.Directives, query.Page) (query.Collection[T], error)
-	Continue func(context.Context, sqlate.Session, string, query.Directives, query.Cursor, int) (query.Collection[T], error)
+	List     func(context.Context, sqlate.Session, string, query.Directives, query.Page, ...bfdata.ListOption) (query.Collection[T], error)
+	Continue func(context.Context, sqlate.Session, string, query.Directives, query.Cursor, int, ...bfdata.ListOption) (query.Collection[T], error)
 }
 
 // read runs the listing of the directory with id as the request addressed
 // it, data.Read's lowering over blobfs's listing in place of a projection:
 // past a cursor a previous page returned when the query names one, and by
 // page number otherwise. Every refusal of the directives or the cursor is
-// the request's error.
+// the request's error. Deleting rows are hidden, and the listing of a
+// directory in a branch being deleted is not found: blobfs refuses it as
+// blobfs.ErrDeleting, which the listing reports as the missing directory
+// rather than a conflict: a mark is never undone, so nothing a client
+// sends makes the directory listable again.
 func (l listing[T]) read(ctx context.Context, sess sqlate.Session, id string, q web.Query) ([]T, web.Paging, error) {
 	d := data.Directives(q)
 	var c query.Collection[T]
@@ -103,12 +112,17 @@ func (l listing[T]) read(ctx context.Context, sess sqlate.Session, id string, q 
 	} else {
 		c, err = l.List(ctx, sess, id, d, query.Page{Number: q.Page, Size: q.Size})
 	}
+	if errors.Is(err, blobfs.ErrDeleting) {
+		return nil, web.Paging{}, fmt.Errorf("directory %s is being deleted: %w", id, blobfs.ErrNotFound)
+	}
 	return c.Items, data.Paging(c), err
 }
 
 // first reads the first page of the directory with id for a walk,
-// uncounted, since the walk reads it again until it comes back empty.
+// uncounted, since the walk reads it again until it comes back empty. It
+// lists every status: a file a stopped delete left deleting is the walk's
+// to finish, and it would otherwise hold the directory not empty.
 func (l listing[T]) first(ctx context.Context, sess sqlate.Session, id string) ([]T, error) {
-	c, err := l.List(ctx, sess, id, query.Directives{Total: query.TotalNone}, query.Page{Number: 1, Size: walkPage})
+	c, err := l.List(ctx, sess, id, query.Directives{Total: query.TotalNone}, query.Page{Number: 1, Size: walkPage}, bfdata.IncludeDeleting())
 	return c.Items, err
 }

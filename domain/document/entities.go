@@ -26,16 +26,19 @@ const RootAlias = "root"
 // Directory is one directory of an organization's hierarchy, as the API
 // presents it. The document root has no parent and is named "/". Path is
 // the directory's path from the root, "/" for the root itself; only the
-// single-directory read computes it, so a listing omits it. Version is the
-// concurrency token a move guards on.
+// single-directory read computes it, so a listing omits it. Status is
+// active, or deleting once the directory's branch is marked for its
+// delete; a listing hides deleting directories, so only a read by id
+// shows one. Version is the concurrency token a move guards on.
 type Directory struct {
-	ID        string    `json:"id"`
-	ParentID  *string   `json:"parent_id"`
-	Name      string    `json:"name"`
-	Path      string    `json:"path,omitempty"`
-	Version   int64     `json:"version"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        string                 `json:"id"`
+	ParentID  *string                `json:"parent_id"`
+	Name      string                 `json:"name"`
+	Path      string                 `json:"path,omitempty"`
+	Status    blobfs.DirectoryStatus `json:"status"`
+	Version   int64                  `json:"version"`
+	CreatedAt time.Time              `json:"created_at"`
+	UpdatedAt time.Time              `json:"updated_at"`
 }
 
 // File is one file of an organization's hierarchy, as the API presents

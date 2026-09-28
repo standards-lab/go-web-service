@@ -32,9 +32,11 @@ import (
 //   - a malformed name, path, key, or id, or an operation on the root, is
 //     the request's fault
 //   - an absent entry or object is not found
-//   - a taken name or id, a non-empty directory, a referenced or deleting
-//     file, a move into its own subtree, or a transition the file's status
-//     does not allow is a conflict
+//   - a taken name or id, a non-empty directory, a referenced file, a
+//     deleting file or directory, a move into its own subtree, or a
+//     transition the file's status does not allow is a conflict (a
+//     domain's listing reports a deleting directory as not found before
+//     its error reaches this matcher)
 //   - an object over the store's size bound is too large
 //   - a store that is not ready, unreachable, or missing its container is a
 //     temporary outage

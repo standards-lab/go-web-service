@@ -77,7 +77,7 @@ func TestStore_FileProtocols(t *testing.T) {
 		t.Errorf("puts = %d, want the upload stored once", fake.Puts())
 	}
 	create := rec.Calls()[3]
-	if !strings.HasPrefix(create.SQL, "INSERT INTO blobfs_file") || create.Args[1] != dirID || create.Args[2] != "report.txt" {
+	if !strings.HasPrefix(create.SQL, "INSERT INTO blobfs_file") || create.Args[1] != "report.txt" || create.Args[4] != dirID {
 		t.Errorf("create = %q %v; want the file named in the scoped directory", create.SQL, create.Args)
 	}
 
@@ -154,9 +154,10 @@ func TestStore_AFailedPutRetiresThePendingRow(t *testing.T) {
 	sameOps(t, rec, begin, q, q, q, commit, begin, q, commit, x)
 }
 
-// The directory reads: the metadata with its path relative to the root,
-// and the listings, lowered onto blobfs's with the request's sort and
-// filters.
+// The directory reads: the metadata with its path relative to the root
+// and its status, and the listings, lowered onto blobfs's with the
+// request's sort and filters and blobfs's own filter hiding deleting rows,
+// each followed by blobfs's read of the listed directory.
 func TestStore_DirectoryReads(t *testing.T) {
 	ctx := context.Background()
 	ancestors := sqltest.Response{
@@ -172,10 +173,12 @@ func TestStore_DirectoryReads(t *testing.T) {
 		root(rootID), dirRows(directory(rootID, blobfs.RootID, orgID, 1)),
 		sqltest.Response{Columns: []string{"id", "parent_id", "name"}, Rows: [][]driver.Value{{rootID, blobfs.RootID, orgID}, {blobfs.RootID, nil, "/"}}},
 		root(rootID), sqltest.WithTotal(dirRows(directory(dirID, rootID, "reports", 1)), 1),
+		dirRows(directory(rootID, blobfs.RootID, orgID, 1)),
 		root(rootID), within(true), sqltest.WithTotal(fileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), 1),
+		dirRows(directory(dirID, rootID, "reports", 1)),
 	)
 	d, err := s.Directory(ctx, orgID, dirID)
-	if err != nil || d.Path != "/reports" || d.Name != "reports" || *d.ParentID != rootID {
+	if err != nil || d.Path != "/reports" || d.Name != "reports" || *d.ParentID != rootID || d.Status != blobfs.DirectoryStatusActive {
 		t.Fatalf("Directory = %+v, %v", d, err)
 	}
 	r, err := s.Directory(ctx, orgID, document.RootAlias)
@@ -194,11 +197,40 @@ func TestStore_DirectoryReads(t *testing.T) {
 		t.Fatalf("ListFiles = %+v, %+v, %v", files, paging, err)
 	}
 	sqls := rec.SQL(q)
-	if list := sqls[8]; !strings.Contains(list, "ORDER BY q.created_at DESC, q.name DESC") {
-		t.Errorf("directory listing = %q; want the request's sort with the name tie-breaker", list)
+	if list := sqls[8]; !strings.Contains(list, "ORDER BY q.created_at DESC, q.name DESC") || !strings.Contains(list, "q.status <> CAST(") {
+		t.Errorf("directory listing = %q; want the request's sort with the name tie-breaker, deleting rows hidden", list)
 	}
-	if list := sqls[len(sqls)-1]; !strings.Contains(list, "q.status = CAST(") {
-		t.Errorf("file listing = %q; want the request's filter", list)
+	if list := sqls[len(sqls)-2]; !strings.Contains(list, "q.status = CAST(") || !strings.Contains(list, "q.status <> CAST(") {
+		t.Errorf("file listing = %q; want the request's filter, deleting rows hidden", list)
+	}
+}
+
+// A directory in a branch marked for its delete reads by id with its
+// status, while its listings are not found: blobfs refuses them as
+// deleting, and a listing answers that as the missing directory, not a
+// conflict.
+func TestStore_ADeletingDirectory(t *testing.T) {
+	ctx := context.Background()
+	marked := deleting(directory(dirID, rootID, "reports", 1))
+	s, _, _ := serviceOver(t,
+		root(rootID), within(true), dirRows(marked),
+		sqltest.Response{
+			Columns: []string{"id", "parent_id", "name"},
+			Rows:    [][]driver.Value{{dirID, rootID, "reports"}, {rootID, blobfs.RootID, orgID}, {blobfs.RootID, nil, "/"}},
+		},
+		root(rootID), within(true), sqltest.WithTotal(dirRows(), 0), dirRows(marked),
+		root(rootID), within(true), sqltest.WithTotal(fileRows(), 0), dirRows(marked),
+	)
+	d, err := s.Directory(ctx, orgID, dirID)
+	if err != nil || d.Status != blobfs.DirectoryStatusDeleting || d.Version != 2 {
+		t.Fatalf("Directory = %+v, %v; want it deleting", d, err)
+	}
+	q, _ := web.ParseQuery(url.Values{}, web.Limits{DefaultSize: 20, MaxSize: 100})
+	if _, _, err := s.ListDirectories(ctx, orgID, dirID, q); !errors.Is(err, blobfs.ErrNotFound) || errors.Is(err, blobfs.ErrDeleting) {
+		t.Errorf("ListDirectories = %v; want not found, and not deleting", err)
+	}
+	if _, _, err := s.ListFiles(ctx, orgID, dirID, q); !errors.Is(err, blobfs.ErrNotFound) || errors.Is(err, blobfs.ErrDeleting) {
+		t.Errorf("ListFiles = %v; want not found, and not deleting", err)
 	}
 }
 
@@ -300,6 +332,11 @@ func TestStore_RecursiveDeleteWalksChildrenFirst(t *testing.T) {
 	for _, c := range rec.Calls() {
 		if strings.HasPrefix(c.SQL, "DELETE FROM blobfs_directory") {
 			removed = append(removed, fmt.Sprint(c.Args[0]))
+		}
+		// The walk lists every status, so a file a stopped delete left
+		// deleting is finished rather than holding its directory.
+		if strings.Contains(c.SQL, "LIMIT") && strings.Contains(c.SQL, "q.status") {
+			t.Errorf("walk listing = %q; want every status listed", c.SQL)
 		}
 	}
 	if fmt.Sprint(removed) != fmt.Sprint([]string{subID, rootID}) {

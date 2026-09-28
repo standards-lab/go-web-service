@@ -166,7 +166,9 @@ func (s *store) listDirectories(ctx context.Context, organizationID, id string, 
 	return out, paging, err
 }
 
-// listFiles reads one page of the directory's files, whatever their status.
+// listFiles reads one page of the directory's files, pending and
+// available; a file whose delete has begun is hidden, as every listing
+// hides deleting rows.
 func (s *store) listFiles(ctx context.Context, organizationID, id string, q web.Query) ([]File, web.Paging, error) {
 	_, dir, err := s.scope(ctx, s.db, organizationID, id)
 	if err != nil {
@@ -406,7 +408,7 @@ func (s *store) retire(ctx context.Context, pick func(*sqlate.Tx) (string, error
 // directoryOf presents a blobfs directory; the document root has no parent
 // the API shows and is named "/", as blobfs names its own root.
 func directoryOf(d blobfs.Directory, root string) Directory {
-	out := Directory{ID: d.ID, ParentID: d.ParentID, Name: d.Name, Version: d.Version, CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt}
+	out := Directory{ID: d.ID, ParentID: d.ParentID, Name: d.Name, Status: d.Status, Version: d.Version, CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt}
 	if d.ID == root {
 		out.ParentID, out.Name = nil, "/"
 	}

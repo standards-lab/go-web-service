@@ -31,6 +31,11 @@
 // moves, or deletes across organizations, and a move stays under one root.
 // The root itself is not moved.
 //
+// A directory reads with its status, active until blobfs marks its branch
+// deleting. A deleting branch still reads by id, directories and files
+// with their status, while every listing hides it: its parent lists
+// without it, and a listing of a directory within it is not found.
+//
 // An upload is a raw body of at most 10 MiB in any media type, stored by
 // blobfs's write protocol: the pending row, the put, the completion; a
 // taken name is a conflict. A download is proxied as an attachment, never

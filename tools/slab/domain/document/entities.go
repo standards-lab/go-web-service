@@ -47,9 +47,9 @@ type Identity struct {
 }
 
 // Directory is one directory as the API presents it. Path is set on the
-// single-directory read only. The service's own type also carries
-// created_at and updated_at; slab reads neither, so they are left unstated
-// and pass through untouched in the raw JSON a command prints.
+// single-directory read only. The service's own type also carries status,
+// created_at, and updated_at; slab reads none of them, so they are left
+// unstated and pass through untouched in the raw JSON a command prints.
 type Directory struct {
 	ID       string  `json:"id"`
 	ParentID *string `json:"parent_id"`

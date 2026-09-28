@@ -66,3 +66,11 @@ require (
 )
 
 tool github.com/standards-lab/sqlate/sqlint/cmd/sqlint
+
+// Temporary: builds against the unreleased blobfs v0.2.0 on its local
+// branch. Removed when blobfs v0.2.0 and postgres/v0.2.0 are tagged and
+// pinned.
+replace (
+	github.com/standards-lab/blobfs => ../blobfs
+	github.com/standards-lab/blobfs/postgres => ../blobfs/postgres
+)

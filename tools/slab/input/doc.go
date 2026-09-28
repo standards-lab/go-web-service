@@ -1,11 +1,11 @@
 // Package input resolves the request body of a direct command, one that
-// sends a single request and prints what came back: the org and admin
-// database command families. A body-sending command takes its input either
-// way, a set of field flags the command binds, or a single --body <json>
-// escape hatch sent verbatim; cobra's mutual exclusion keeps the two apart
-// before any function here runs. Both families resolve identically, so the
-// resolution belongs to neither; it lives here, beside output, for both to
-// import.
+// sends a single request and prints what came back: the org, docs, and
+// admin database command families. A body-sending command takes its input
+// either way, a set of field flags the command binds, or a single
+// --body <json> escape hatch sent verbatim; cobra's mutual exclusion keeps the two apart
+// before any function here runs. The families resolve identically, so the
+// resolution belongs to none of them; it lives here, beside output, for each
+// to import.
 //
 // Body is the unguarded case: the --body bytes as given, or the value the
 // command builds from its flags, marshaled. GuardedBody is the case under a

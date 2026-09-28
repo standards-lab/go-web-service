@@ -9,6 +9,50 @@ accumulate under [Unreleased] until the first cut.
 
 ### Added
 
+- Object storage: the `storage` configuration block (`APP_STORAGE_*`, go-storage's), an Azure
+  Blob Storage provider through `go-storage/azureblob`, Azurite in the compose file, and blobfs
+  with `blobfs/postgres` for the file tree's rows, its migration set (`blobfs`) run beneath the
+  service's own (`app`). The object store starts at the infrastructure stage beside the pool,
+  and blobfs verifies its statements beside the domains. `/readyz` lists the `storage` check.
+- The storage admin service under `/admin/storage`: `GET /diagnostics` (whether a live probe
+  succeeds, the container, the provider's longest key) and `POST /container`, which creates the
+  configured container when it is missing.
+- The organization logo, `PUT`, `GET`, and `DELETE /api/organizations/{id}/logo`: a raw PNG,
+  JPEG, WebP, or GIF body of at most 1 MiB (415 for any other type), stored through blobfs and
+  bound by the `organization_image` table, one active per organization; the `GET` is served
+  `no-cache` and revalidates by the object's `ETag` and `Last-Modified`. The organization path
+  read moved to `GET /api/organizations/lookup?path=…`.
+- The document domain under `/api/documents/{org}`: each organization's hierarchy of
+  directories and files over blobfs, rooted at a document root its first write creates and
+  bound by the `organization_directory` table. Directory create, read with its `status`
+  (`active` or `deleting`), cursor-paged listings, moves, and deletes; file uploads of at most
+  10 MiB, metadata, downloads as an attachment (`private, no-cache`, 304 on `If-None-Match` and
+  `If-Modified-Since`), moves, and deletes. An id outside the organization's root is 404. The
+  moves and the deletes take the row's version in `If-Match`; a recursive directory delete
+  marks the branch deleting and answers 202 with the directory's read as its `Location`, its
+  listings 404 and its writes 409 until the sweep removes it.
+- The sweep: data's background worker (`data.Storage.SweepWorker`), blobfs's sweep in bounded
+  passes, staged on the reactor the composition root runs at its `reactors` stage. It finishes
+  the branches a recursive delete marks and reclaims uploads and deletes left unfinished past
+  the stale age; it wakes on each recursive delete, on an interval, and once at startup, and
+  logs a refused pass at warn without failing the service. The `sweep` configuration block
+  (`APP_SWEEP_INTERVAL`, `APP_SWEEP_BATCH`, `APP_SWEEP_STALE_AGE`; 30s, 100, 1h), and the
+  `sweeper` check on `/readyz`.
+- The quiesce gate: the schema-changing admin verbs (`up`, `down`, `steps`, and the state reset)
+  hold it exclusively and each sweep pass shared, so the two never run at once. It is per
+  process.
+- The shared file protocols in `data`, staged for blobfs: the two-phase write with its
+  retry-safe form for fixed ids, the two-phase delete, and the read of an available file; both
+  domains run on them.
+- The storage seeds: the `default` state stores a logo per organization and acme's document
+  tree under fixed `5eed…` ids, so a rerun finds each file and a reset, which leaves the objects
+  in the container, writes it again under the same key.
+- `slab demo storage`, a narrated scenario of the storage end to end, and slab's `org logo`,
+  `docs`, and `admin storage` commands.
+- The integration tier's storage cases (`TestDocument`, `TestDocumentSweep`,
+  `TestSweepAtStartup`, `TestSweepUnderReset`, `TestOrganizationLogo`, `TestSeededStorage`),
+  the object store relayed through a forwarder (`Options.Storage`) and read beneath the API
+  (`integration.Objects`); a failed test prints the service's output.
 - Rate limiting on the router-level middleware stack, over
   `github.com/standards-lab/go-web-sdk/middleware/rate-limit`: a client over the configured limit
   (300 requests per minute by default, `APP_RATE_LIMIT_REQUESTS`/`APP_RATE_LIMIT_WINDOW`) gets a
@@ -21,12 +65,15 @@ accumulate under [Unreleased] until the first cut.
   the service's RFC 9457 problem-response contract, one request per real error condition, each
   with its own trace pointer, resetting first so a run never drifts the seed data. Not a v1
   layer — the architect's own instrument for demos and self-serve exploration.
-- Named database states: one file per state under `data/seeds/`, keyed by table (`default`, the
-  reference tree; `empty`, no rows). `GET /admin/database/states` lists them;
-  `POST /admin/database/state` resets the database to one, every migration reverted, the set
-  applied, the state's set seeded, and answers with the transition; `POST /admin/database/seed`
-  takes an optional `{"state": "…"}` to apply a named set over what is there. `mise run
-  db-state <state>` runs the reset against the local service.
+- Named database states: one file per state under `data/seeds/`, keyed by each domain's
+  contribution (`organizations`, `logos`, `documents`), with the files a state names under
+  `data/seeds/fixtures/`: `default` is the reference tree, a logo for each organization, and
+  acme's document tree; `empty` is nothing. `GET /admin/database/states` lists them;
+  `POST /admin/database/state` resets the database to one, every migration set reverted and
+  applied, the state seeded, and answers with the transition; `POST /admin/database/seed`
+  takes an optional `{"state": "…"}` to apply a named set over what is there. Both answer with
+  what they stored by contribution: the rows commit in one transaction, then the files are
+  written. `mise run db-state <state>` runs the reset against the local service.
 - The integration tier: the root `integration` package, a harness that runs the built service as
   a subprocess against the compose stack and a `//go:build integration` suite asserting the
   lifecycle, the organization API, the admin mount, and the 503 on a database outage through
@@ -79,8 +126,25 @@ accumulate under [Unreleased] until the first cut.
   key, null meaning the root.
 - The composition root is one file per layer under `internal/app`, as go-web-sdk-template
   v0.6.0 ships it.
-- Pins: go-core v0.4.1, go-database v0.5.0 with postgres/v0.3.0, go-web-sdk v0.8.0, sqlate
-  v0.1.1 with postgres/v0.1.1.
+- Pins: go-core v0.4.1, go-database v0.6.1 with postgres/v0.3.0, go-web-sdk v0.11.0 with
+  middleware/rate-limit v0.1.1, sqlate v0.4.1 with postgres/v0.4.0, go-storage v0.1.0 with
+  azureblob/v0.1.0, and blobfs v0.2.0 with postgres/v0.2.0.
+- The database admin verbs act on migration sets by name: `down`, `steps`, and `force` name
+  the set in their body (400 when it is missing or undeclared), and the schema status reports
+  each set. The state reset requires `"confirm": true`.
+- The lifecycle stages are named once, in the composition root's stage table: infrastructure,
+  schema (go-database's `admin.Stage`), verify, reactors, and root. The domains declare no
+  stage; the root registers each domain's `Verify`.
+- Every 409 carries a fixed detail naming its kind, never the error's text: "an entry with that
+  name already exists", "the directory is not empty", "the directory is being deleted", "the
+  file is referenced", or "the request conflicts with the current state".
+- The seeder composes the domains' seed contributions: each domain seeds its own tables with
+  its own statements, rows in the seed's transaction (`data.Seed`) and stored files after it
+  commits (`data.FileSeed`).
+- A logo `PUT` answers 201 with the new file's `{"id"}` and no version, whether or not it
+  replaced a logo; the logo routes take no `If-Match`, the last write winning.
+- The document root's owner row goes with its directory through a cascading foreign key, so the
+  sweep needs no hook into the document domain.
 - The error matchers return a `web.Problem`: `data.Status`, the database admin mount's
   matcher, and the organization domain's matcher are `web.ProblemMatcher`s, each answering a
   `Problem` carrying only the status, where they answered a bare status before.
@@ -91,6 +155,15 @@ accumulate under [Unreleased] until the first cut.
 - On the wire, an unmatched path and a wrong method answer as RFC 9457 problem documents
   instead of `net/http.ServeMux`'s plain text. go-web-sdk v0.8.0 changed the router's
   fallbacks; this service's code does not control it.
+
+### Fixed
+
+- The logo write: the image row is inserted only once its file completes, in the activation's
+  transaction, so a failed put or completion leaves a plain pending row the sweep reclaims,
+  never an image that refused the reclaim and made the organization undeletable, and a failed
+  retire no longer leaves an inactive image no endpoint could clear.
+- A state reset and a sweep pass no longer deadlock (SQLSTATE 40P01): the quiesce gate orders
+  them.
 
 ### Removed
 

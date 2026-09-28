@@ -3,21 +3,21 @@
 // /api/documents/{org} as reads of one directory's contents, metadata
 // reads, uploads, proxied downloads, moves, and deletes.
 //
-// The layer's SQL is the statements/ directory, the owner row's three
-// statements; database.go is the domain's SQL client, the sole importer of
-// the query library: it compiles the directory against the service's
-// pattern catalog, registers the inventory, and binds each statement to a
-// typed handle. storage.go is the storage translation file, the one place
-// the layer calls blobfs or the object store: it runs the scope check,
-// runs the write, delete, and download through the data package's shared
-// file protocols with the scope check as their first transaction's step,
-// reads blobfs's listings through the data package's lowering of a
-// request's query, and sequences the moves and the directories over
-// blobfs's steps and the owner row's statements. No statement, session,
-// or query type crosses out of the two. entities.go owns the shapes and their
-// rules; service.go is the direct map from endpoint to operation; handler.go
-// binds the service to the route group the composition root mounts into
-// the API module.
+// The layer's SQL is the statements/ directory, the owner row's statements
+// and the seed's path walk; database.go is the domain's SQL client, the
+// sole importer of the query library: it compiles the directory against the
+// service's pattern catalog, registers the inventory, and binds each
+// statement to a typed handle. storage.go is the storage translation file,
+// the one place the layer calls blobfs or the object store: it runs the
+// scope check, runs the write, delete, and download through the data
+// package's shared file protocols with the scope check as their first
+// transaction's step, reads blobfs's listings through the data package's
+// lowering of a request's query, and sequences the moves and the
+// directories over blobfs's steps and the owner row's statements. No
+// statement, session, or query type crosses out of the two. entities.go
+// owns the shapes and their rules; service.go is the direct map from
+// endpoint to operation; handler.go binds the service to the route group
+// the composition root mounts into the API module.
 //
 // Ownership is at blobfs's directory grain: an organization_directory row
 // binds one top-level directory, named with the organization's id, to the

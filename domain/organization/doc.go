@@ -9,8 +9,9 @@
 // against the service's pattern catalog, registers the inventory, binds
 // each statement to a typed handle, and exposes the operations as the
 // store's methods. storage.go is the storage translation file, the one
-// place the layer calls blobfs or the object store: it sequences the logo's
-// protocols over blobfs's steps, the object store's, and the store's image
+// place the layer calls blobfs or the object store: it runs the logo's
+// write, delete, and read through the data package's shared file protocols
+// and sequences the activation over blobfs's steps and the store's image
 // statements. No statement, session, or query type crosses out of the two.
 // entities.go owns the shapes and their rules: each command validates
 // itself, and the entities' tags are the binding and scan contract.
@@ -38,12 +39,18 @@
 // active row per organization. The files sit in one structural directory
 // under blobfs's root, each named for its id. An upload is a raw body of
 // at most 1 MiB in a raster type (SVG is script-capable and refused, 415).
-// It writes the pending file and its inactive image in one transaction,
-// stores the object outside any, completes the file on the pool, then
-// holds the file and makes its image the active one in one transaction,
-// and retires the file it replaced by the delete protocol: the image and
-// blobfs's delete step in one transaction, the object, then the purge. A
+// It is written by the data package's shared write protocol: the pending
+// file, created once the organization is read, alone in one transaction,
+// the object stored outside any, the file completed on the pool. The image
+// is written only after the file completes, so a write that stops partway
+// leaves a plain pending row that the protocol abandons or blobfs's stale
+// reclaim removes, and never an image that would refuse the reclaim's
+// purge and the organization's delete. The completed file is then held and
+// activated in one transaction that removes the replaced logo's image,
+// begins its file's delete, and inserts the new image as the active one;
+// the replaced file's object and row are purged after the commit. A
 // concurrent replacement that activates first is a unique violation, 409,
-// and the losing file is retired. The read serves an available file's
-// bytes by proxy, revalidated by its entity tag.
+// and the losing file is retired by the shared delete protocol, as a logo
+// delete retires the active one. The read serves an available file's bytes
+// by proxy through the shared read, revalidated by its entity tag.
 package organization

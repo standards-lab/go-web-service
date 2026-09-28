@@ -26,20 +26,18 @@ var files embed.FS
 // statements are steps the logo's protocols in storage.go sequence around
 // blobfs's, so their methods take the session the protocol hands them.
 type store struct {
-	db              *data.Database
-	storage         *data.Storage
-	stmts           *query.Statements
-	view            query.Projection[Organization]
-	createRows      query.Rows[Identity]
-	inSubtree       query.Rows[int64]
-	editGuard       query.Guard
-	transferGuard   query.Guard
-	deleteGuard     query.Guard
-	activeLogoRows  query.Rows[blobfs.File]
-	attachImage     query.Statement
-	activateImage   query.Statement
-	deactivateImage query.Statement
-	detachImage     query.Statement
+	db             *data.Database
+	storage        *data.Storage
+	stmts          *query.Statements
+	view           query.Projection[Organization]
+	createRows     query.Rows[Identity]
+	inSubtree      query.Rows[int64]
+	editGuard      query.Guard
+	transferGuard  query.Guard
+	deleteGuard    query.Guard
+	activeLogoRows query.Rows[blobfs.File]
+	attachImage    query.Statement
+	detachImage    query.Statement
 }
 
 // newStore compiles the statements against the service's catalog, registers
@@ -50,20 +48,18 @@ func newStore(db *data.Database, st *data.Storage) *store {
 	db.Register("organization", stmts)
 	check := stmts.Statement("version")
 	return &store{
-		db:              db,
-		storage:         st,
-		stmts:           stmts,
-		view:            stmts.Statement("organization_view").Project(query.Scanner[Organization]()),
-		createRows:      stmts.Statement("create").Scan(query.Scanner[Identity]()),
-		inSubtree:       stmts.Statement("in_subtree").Scan(query.Scalar[int64]),
-		editGuard:       stmts.Statement("edit").Guarded(check, "version"),
-		transferGuard:   stmts.Statement("transfer").Guarded(check, "version"),
-		deleteGuard:     stmts.Statement("delete").Guarded(check, "version"),
-		activeLogoRows:  stmts.Statement("active_logo").Scan(query.Scanner[blobfs.File]()),
-		attachImage:     stmts.Statement("attach_image"),
-		activateImage:   stmts.Statement("activate_image"),
-		deactivateImage: stmts.Statement("deactivate_image"),
-		detachImage:     stmts.Statement("detach_image"),
+		db:             db,
+		storage:        st,
+		stmts:          stmts,
+		view:           stmts.Statement("organization_view").Project(query.Scanner[Organization]()),
+		createRows:     stmts.Statement("create").Scan(query.Scanner[Identity]()),
+		inSubtree:      stmts.Statement("in_subtree").Scan(query.Scalar[int64]),
+		editGuard:      stmts.Statement("edit").Guarded(check, "version"),
+		transferGuard:  stmts.Statement("transfer").Guarded(check, "version"),
+		deleteGuard:    stmts.Statement("delete").Guarded(check, "version"),
+		activeLogoRows: stmts.Statement("active_logo").Scan(query.Scanner[blobfs.File]()),
+		attachImage:    stmts.Statement("attach_image"),
+		detachImage:    stmts.Statement("detach_image"),
 	}
 }
 
@@ -125,19 +121,10 @@ func (s *store) activeLogo(ctx context.Context, sess sqlate.Session, organizatio
 	return s.activeLogoRows.One(ctx, sess, query.Args{"organization_id": organizationID})
 }
 
-// attach binds the file to the organization as an inactive image.
+// attach binds the file to the organization as its active image; the
+// image it replaces must be removed first in the same transaction.
 func (s *store) attach(ctx context.Context, tx *sqlate.Tx, organizationID, fileID string) error {
 	_, err := s.attachImage.Exec(ctx, tx, query.Args{"organization_id": organizationID, "file_id": fileID})
-	return err
-}
-
-// activate makes the image binding the file its organization's only
-// active one: the current one cleared, then this one set.
-func (s *store) activate(ctx context.Context, tx *sqlate.Tx, organizationID, fileID string) error {
-	if _, err := s.deactivateImage.Exec(ctx, tx, query.Args{"organization_id": organizationID}); err != nil {
-		return err
-	}
-	_, err := s.activateImage.Exec(ctx, tx, query.Args{"file_id": fileID})
 	return err
 }
 

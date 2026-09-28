@@ -22,7 +22,12 @@
 //
 // Storage is the object storage infrastructure as the domains see it:
 // blobfs's store over the same session, and Objects, the adapter that is
-// the one place the service names its object-store library. Domains and
-// the admin service are peers over this package; nothing here imports
-// either.
+// the one place the service names its object-store library. Storage also
+// runs the file protocols every domain shares, staged for promotion to
+// blobfs: Write, blobfs's two-phase write with its abandon and its writer
+// rule; Retire and Purge, its two-phase delete; and Serve, the read of an
+// available file. A domain enters them through a callback run in the
+// protocol's first transaction, so no domain concept reaches here.
+// Domains and the admin service are peers over this package; nothing here
+// imports either.
 package data

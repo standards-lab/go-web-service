@@ -9,9 +9,11 @@
 // pattern catalog, registers the inventory, binds each statement to a
 // typed handle, and lowers a request's query onto blobfs's listings.
 // storage.go is the storage translation file, the one place the layer calls
-// blobfs or the object store: it runs the scope check and sequences the
-// write, delete, and move protocols over blobfs's steps, the object
-// store's, and the owner row's statements. No statement, session, or query
+// blobfs or the object store: it runs the scope check, runs the write,
+// delete, and download through the data package's shared file protocols
+// with the scope check as their first transaction's step, and sequences
+// the moves and the directories over blobfs's steps and the owner row's
+// statements. No statement, session, or query
 // type crosses out of the two. entities.go owns the shapes and their
 // rules; service.go is the direct map from endpoint to operation; handler.go
 // binds the service to the route group the composition root mounts into
@@ -44,8 +46,9 @@
 // without it, and a listing of a directory within it is not found.
 //
 // An upload is a raw body of at most 10 MiB in any media type, stored by
-// blobfs's write protocol: the pending row, the put, the completion; a
-// taken name is a conflict. A download is proxied as an attachment, never
+// the shared write protocol: the pending row, the put, the completion; a
+// put or a completion that fails abandons the pending row, and a taken name
+// is a conflict. A download is proxied as an attachment, never
 // rendered inline, since stored HTML would run in the API's origin. A
 // completion refused because a mark or the sweep reached the row deletes
 // the object just put, since a sweep that ran before the put landed could

@@ -172,7 +172,7 @@ func TestStore_GuardDistinguishesAbsentFromStale(t *testing.T) {
 	}
 }
 
-// Verify prepares the twelve statements and the read contract's three
+// Verify prepares the ten statements and the read contract's three
 // probes: the fields against their declared types, a page past a cursor,
 // and the same page counted.
 func TestStore_VerifyPreparesEveryStatement(t *testing.T) {
@@ -181,8 +181,8 @@ func TestStore_VerifyPreparesEveryStatement(t *testing.T) {
 		t.Fatal(err)
 	}
 	prepared := rec.SQL(sqltest.OpPrepare)
-	if len(prepared) != 15 {
-		t.Errorf("prepared %d statements, want 12 + the contract's 3 probes", len(prepared))
+	if len(prepared) != 13 {
+		t.Errorf("prepared %d statements, want 10 + the contract's 3 probes", len(prepared))
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 
 	"github.com/standards-lab/blobfs"
@@ -264,48 +263,28 @@ func (s *store) moveDirectory(ctx context.Context, organizationID, id string, ve
 }
 
 // putFile stores the upload as a new file named name in the directory,
-// ensuring the root when the directory is its alias. The write's steps
-// each run on their own session: the scope check and the pending row
-// commit together before any byte is stored, the put runs outside any
-// transaction, and the completion on the pool. A put or a completion that
-// fails retires the pending row, so its name is free for a retry; one whose
-// retire fails too leaves the row pending, blobfs's state for a sweep. A
-// completion refused because the row's delete began or the sweep removed
-// it, the mark of a branch that raced the write, deletes the object just
-// put under the key the write holds, since a sweep that ran before the put
-// landed cannot have deleted it; the row is the sweep's.
+// ensuring the root when the directory is its alias, by the data package's
+// write protocol: the scope check and the pending row commit together
+// before any byte is stored, the put runs outside any transaction, and the
+// completion on the pool. A put or a completion that fails retires the
+// pending row, so its name is free for a retry; one whose retire fails too
+// leaves the row for the sweep. A completion refused because the row's
+// delete began or the sweep removed it, the mark of a branch that raced the
+// write, deletes the object just put; the row is the sweep's.
 func (s *store) putFile(ctx context.Context, organizationID, directoryID, name string, u web.Upload) (Identity, error) {
-	fs, objects := s.storage.FS, s.storage.Objects
+	st := s.storage
 	directoryID, err := s.writable(ctx, organizationID, directoryID)
 	if err != nil {
 		return Identity{}, err
 	}
-	file, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (blobfs.File, error) {
+	file, err := st.Write(ctx, s.db.DB, u.Body, u.Size, func(tx *sqlate.Tx) (blobfs.File, error) {
 		_, dir, err := s.scope(ctx, tx, organizationID, directoryID)
 		if err != nil {
 			return blobfs.File{}, err
 		}
-		return fs.Files.Create(ctx, tx, objects, dir, name, u.ContentType)
+		return st.FS.Files.Create(ctx, tx, st.Objects, dir, name, u.ContentType)
 	})
-	if err != nil {
-		return Identity{}, err
-	}
-	abandon := func(err error) (Identity, error) {
-		return Identity{}, errors.Join(err, s.retire(ctx, func(*sqlate.Tx) (string, error) { return file.ID, nil }))
-	}
-	obj, err := objects.Put(ctx, file.Key, u.Body, u.ContentType, u.Size)
-	if err != nil {
-		return abandon(err)
-	}
-	done, err := fs.Files.Complete(ctx, s.db, file.ID, file.Version, obj)
-	switch {
-	case errors.Is(err, blobfs.ErrDeleting), errors.Is(err, blobfs.ErrNotFound):
-		return Identity{}, errors.Join(err, objects.Delete(ctx, file.Key))
-	case err != nil:
-		return abandon(err)
-	}
-	file = done
-	return Identity{ID: file.ID, Version: file.Version}, nil
+	return Identity{ID: file.ID, Version: file.Version}, err
 }
 
 // file reads the file's metadata.
@@ -321,21 +300,20 @@ func (s *store) content(ctx context.Context, organizationID, id string) (Content
 	if err != nil {
 		return Content{}, err
 	}
-	if file.Status != blobfs.StatusAvailable || file.Size == nil || file.ETag == nil {
-		return Content{}, fmt.Errorf("content of file %s, which is %s: %w", file.ID, file.Status, blobfs.ErrNotFound)
+	obj, open, err := s.storage.Serve(ctx, file)
+	if err != nil {
+		return Content{}, fmt.Errorf("content: %w", err)
 	}
-	return Content{
-		Name:   file.Name,
-		Object: web.Object{ContentType: file.ContentType, Size: *file.Size, ETag: *file.ETag, ModifiedAt: file.UpdatedAt},
-		Open:   func() (io.ReadCloser, error) { return s.storage.Objects.Open(ctx, file.Key) },
-	}, nil
+	return Content{Name: file.Name, Object: obj, Open: open}, nil
 }
 
-// deleteFile removes the file at version by the delete protocol, its
-// scope checked in the transaction that begins the delete. A file deleting
-// already is the delete's retry, which converges at any version.
+// deleteFile removes the file at version by the data package's delete
+// protocol, its scope checked in the transaction that begins the delete. No
+// row of the layer references a file, so no reference is removed before
+// the delete. A file deleting already is the delete's retry, which
+// converges at any version.
 func (s *store) deleteFile(ctx context.Context, organizationID, id string, version int64) error {
-	return s.retire(ctx, func(tx *sqlate.Tx) (string, error) {
+	return s.storage.Retire(ctx, s.db.DB, func(tx *sqlate.Tx) (string, error) {
 		_, file, err := s.fileScope(ctx, tx, organizationID, id)
 		return file.ID, err
 	}, bfdata.AtVersion(version))
@@ -356,29 +334,6 @@ func (s *store) moveFile(ctx context.Context, organizationID, id string, version
 		return s.storage.FS.Files.Move(ctx, tx, id, dir, m.Name, version)
 	})
 	return Identity{ID: file.ID, Version: file.Version}, err
-}
-
-// retire runs the delete protocol over the file pick names in its
-// transaction: blobfs's delete begun in that transaction, under the
-// version guard when opts carries one, then the object deleted, then the
-// row purged on the pool. No row of the layer references a file, so no
-// reference check precedes the delete. Every step converges on a retry.
-func (s *store) retire(ctx context.Context, pick func(*sqlate.Tx) (string, error), opts ...bfdata.VersionOption) error {
-	fs := s.storage.FS
-	file, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (blobfs.File, error) {
-		id, err := pick(tx)
-		if err != nil {
-			return blobfs.File{}, err
-		}
-		return fs.Files.Delete(ctx, tx, id, opts...)
-	})
-	if err != nil {
-		return err
-	}
-	if err := s.storage.Objects.Delete(ctx, file.Key); err != nil {
-		return err
-	}
-	return fs.Files.Purge(ctx, s.db, file.ID)
 }
 
 // directoryOf presents a blobfs directory; the document root has no parent

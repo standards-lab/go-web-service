@@ -20,8 +20,12 @@ var ErrContainerGone = errors.New("data: the object store's container is missing
 // blobfs's store, whose tables hold a row for every stored file and a tree
 // of directories over them, run through the same session as [Database],
 // and the object store the rows' keys name. The composition root installs
-// the engine and starts the object store; a domain sequences the write,
-// delete, and move protocols over the two in its storage translation file.
+// the engine and starts the object store. The file protocols that span the
+// two, the write, the delete, and the read of an available file, are
+// Storage's own methods (protocol.go); a domain runs them from its storage
+// translation file with its scope checks and its own rows as their
+// callbacks, and sequences the rest, the moves and its directories, over
+// blobfs's steps directly.
 type Storage struct {
 	FS      *bfdata.Store
 	Objects *Objects

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/standards-lab/blobfs"
+	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/sqltest"
@@ -86,16 +87,14 @@ func TestStore_LogoProtocolsBindTheirFilesParameters(t *testing.T) {
 		// PutLogo, replacing the active logo.
 		directoryRow(), // the images directory, found on the pool
 		row(),          // write: the organization exists
-		fileRows(file(newFileID, blobfs.StatusPending, 1)), // write: the pending file
-		exec(1), // write: the inactive image
+		fileRows(file(newFileID, blobfs.StatusPending, 1)),   // write: the pending file, alone
 		fileRows(file(newFileID, blobfs.StatusAvailable, 2)), // complete, on the pool
 		exec(1), // activate: the hold
 		fileRows(file(oldFileID, blobfs.StatusAvailable, 2)), // activate: the current logo
-		exec(1), // activate: the current image cleared
-		exec(1), // activate: the new image set
-		exec(1), // retire: the replaced image removed
-		fileRows(file(oldFileID, blobfs.StatusDeleting, 3)), // retire: the delete begun
-		exec(1), // retire: the purge, on the pool
+		exec(1), // activate: the replaced image removed
+		fileRows(file(oldFileID, blobfs.StatusDeleting, 3)), // activate: the replaced file's delete begun
+		exec(1), // activate: the new image, active
+		exec(1), // the replaced file purged, on the pool
 		// Logo.
 		fileRows(file(newFileID, blobfs.StatusAvailable, 2)),
 		// DeleteLogo.
@@ -104,6 +103,10 @@ func TestStore_LogoProtocolsBindTheirFilesParameters(t *testing.T) {
 		fileRows(file(newFileID, blobfs.StatusDeleting, 3)), // the delete begun
 		exec(1), // the purge
 	)
+	old := file(oldFileID, blobfs.StatusAvailable, 2)
+	if _, err := fake.Put(ctx, old.Key, strings.NewReader("old"), storage.PutOptions{}); err != nil {
+		t.Fatal(err)
+	}
 	id, err := s.PutLogo(ctx, validID, logoUpload(t))
 	if err != nil || id != (organization.Identity{ID: newFileID, Version: 2}) {
 		t.Fatalf("PutLogo = %+v, %v", id, err)
@@ -112,8 +115,14 @@ func TestStore_LogoProtocolsBindTheirFilesParameters(t *testing.T) {
 	if name, key := create.Args[1], create.Args[2]; !strings.HasPrefix(create.SQL, "INSERT INTO blobfs_file") || name != fmt.Sprint(create.Args[0])+".png" || key != fmt.Sprint(create.Args[0])+"/"+fmt.Sprint(name) {
 		t.Errorf("create = %q %v; want the file named for its minted id", create.SQL, create.Args)
 	}
-	if fake.Puts() != 1 {
-		t.Errorf("puts = %d, want the upload stored once", fake.Puts())
+	if attach := rec.Calls()[11]; !strings.HasPrefix(attach.SQL, "INSERT INTO organization_image") || fmt.Sprint(attach.Args) != fmt.Sprint([]any{validID, newFileID}) {
+		t.Errorf("attach = %q %v; want the new file bound in the activation", attach.SQL, attach.Args)
+	}
+	if fake.Puts() != 2 {
+		t.Errorf("puts = %d, want the replaced logo's seed and the upload", fake.Puts())
+	}
+	if _, err := fake.Get(ctx, old.Key, storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
+		t.Errorf("the replaced logo's object outlived its retire: %v", err)
 	}
 
 	logo, err := s.Logo(ctx, validID)
@@ -135,41 +144,118 @@ func TestStore_LogoProtocolsBindTheirFilesParameters(t *testing.T) {
 	if _, err := logo.Open(); err == nil {
 		t.Error("the logo's object outlived its delete")
 	}
-	if rec.Pending() != 0 || rec.RowsLeaked() != 0 {
-		t.Errorf("pending = %d, leaked = %d", rec.Pending(), rec.RowsLeaked())
+	sameOps(t, rec,
+		q,
+		begin, q, q, commit,
+		q,
+		begin, x, q, x, q, x, commit, x,
+		q,
+		begin, q, x, q, commit, x,
+	)
+}
+
+// A put that fails abandons the write: the pending row is retired by the
+// delete protocol, and no image was ever written, so nothing is left to
+// block the organization's delete.
+func TestStore_AFailedPutAbandonsThePendingRow(t *testing.T) {
+	s, rec, fake := serviceOver(t, sqltest.ReturningDialect{},
+		directoryRow(), row(), fileRows(file(newFileID, blobfs.StatusPending, 1)),
+		fileRows(file(newFileID, blobfs.StatusDeleting, 2)), exec(1), // the abandon: the delete begun, the purge
+	)
+	fake.FailPut(errors.New("put failed"))
+	if _, err := s.PutLogo(context.Background(), validID, logoUpload(t)); err == nil {
+		t.Fatal("PutLogo succeeded over a failed put")
 	}
-	ops := rec.Ops()
-	want := []sqltest.Op{
-		sqltest.OpQuery,
-		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpExec, sqltest.OpCommit,
-		sqltest.OpQuery,
-		sqltest.OpBegin, sqltest.OpExec, sqltest.OpQuery, sqltest.OpExec, sqltest.OpExec, sqltest.OpCommit,
-		sqltest.OpBegin, sqltest.OpExec, sqltest.OpQuery, sqltest.OpCommit, sqltest.OpExec,
-		sqltest.OpQuery,
-		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpExec, sqltest.OpQuery, sqltest.OpCommit, sqltest.OpExec,
+	sameOps(t, rec, q, begin, q, q, commit, begin, q, commit, x)
+	noImage(t, rec)
+}
+
+// The writer rule: a completion refused because the stale reclaim reached
+// the pending row, or removed it, deletes the object the put stored under
+// the key the write holds, leaves the row to the sweep, and activates
+// nothing.
+func TestStore_ARefusedCompletionDeletesTheLogosObject(t *testing.T) {
+	cases := map[string]struct {
+		read sqltest.Response
+		want error
+	}{
+		"reclaiming": {fileRows(file(newFileID, blobfs.StatusDeleting, 2)), blobfs.ErrDeleting},
+		"reclaimed":  {fileRows(), blobfs.ErrNotFound},
 	}
-	if fmt.Sprint(ops) != fmt.Sprint(want) {
-		t.Errorf("ops = %v\nwant %v", ops, want)
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, rec, fake := serviceOver(t, sqltest.ReturningDialect{},
+				directoryRow(), row(), fileRows(file(newFileID, blobfs.StatusPending, 1)),
+				fileRows(), c.read, // the completion matches no pending row; blobfs reads why
+			)
+			if _, err := s.PutLogo(context.Background(), validID, logoUpload(t)); !errors.Is(err, c.want) {
+				t.Fatalf("PutLogo = %v; want %v", err, c.want)
+			}
+			if fake.Puts() != 1 {
+				t.Errorf("puts = %d; want the object put once", fake.Puts())
+			}
+			key := file(newFileID, blobfs.StatusPending, 1).Key
+			if _, err := fake.Get(context.Background(), key, storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
+				t.Errorf("the object outlived the refused completion: %v", err)
+			}
+			sameOps(t, rec, q, begin, q, q, commit, q, q)
+			noImage(t, rec)
+		})
 	}
 }
 
 // A replacement that loses the race to activate is the unique violation,
-// and its own file is retired rather than left behind.
-func TestStore_ALostActivationRetiresTheNewFile(t *testing.T) {
-	s, rec, _ := serviceOver(t, sqltest.ReturningDialect{},
-		directoryRow(), row(), fileRows(file(newFileID, blobfs.StatusPending, 1)), exec(1),
+// 409 on the wire, and its own file is retired rather than left behind:
+// the activation rolled back, so no image references it.
+func TestStore_ALostActivationIs409AndRetiresTheNewFile(t *testing.T) {
+	s, rec, fake := serviceOver(t, sqltest.ReturningDialect{},
+		directoryRow(), row(), fileRows(file(newFileID, blobfs.StatusPending, 1)),
 		fileRows(file(newFileID, blobfs.StatusAvailable, 2)),
-		exec(1), fileRows(), exec(0), // the hold, no current logo, nothing cleared
-		sqltest.Response{Err: fmt.Errorf("ux_organization_image_active: %w", sqlate.ErrUniqueViolation)},
-		exec(1), fileRows(file(newFileID, blobfs.StatusDeleting, 3)), exec(1), // the new file retired
+		exec(1), fileRows(), // the hold, no current logo
+		sqltest.Response{Err: &sqlate.ConstraintError{Constraint: "ux_organization_image_active", Class: sqlate.ErrUniqueViolation, Err: errors.New("unique")}},
+		fileRows(file(newFileID, blobfs.StatusDeleting, 3)), exec(1), // the new file retired
 	)
-	if _, err := s.PutLogo(context.Background(), validID, logoUpload(t)); !errors.Is(err, sqlate.ErrUniqueViolation) {
-		t.Fatalf("PutLogo = %v; want the unique violation", err)
-	}
-	if rec.Pending() != 0 {
-		t.Errorf("pending = %d; want the retire run", rec.Pending())
+	r := web.NewRouter()
+	r.Mount(web.NewModule(organization.Routes(s, web.Limits{DefaultSize: 20, MaxSize: 100})))
+	problem(t, upload(t, r, "/organizations/"+validID+"/logo", "image/png", "png", 3), 409)
+	sameOps(t, rec,
+		q,
+		begin, q, q, commit,
+		q,
+		begin, x, q, x, sqltest.OpRollback,
+		begin, q, commit, x,
+	)
+	if _, err := fake.Get(context.Background(), file(newFileID, blobfs.StatusPending, 1).Key, storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
+		t.Errorf("the losing logo's object outlived its retire: %v", err)
 	}
 }
+
+// noImage fails the test if any statement touched organization_image.
+func noImage(t *testing.T, rec *sqltest.Recorder) {
+	t.Helper()
+	for _, c := range rec.Calls() {
+		if strings.Contains(c.SQL, "organization_image") {
+			t.Errorf("image statement ran: %q", c.SQL)
+		}
+	}
+}
+
+// sameOps fails the test unless the recorder's operations are want and
+// every scripted response was consumed.
+func sameOps(t *testing.T, rec *sqltest.Recorder, want ...sqltest.Op) {
+	t.Helper()
+	if got := rec.Ops(); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("ops = %v\nwant %v", got, want)
+	}
+	if rec.Pending() != 0 || rec.RowsLeaked() != 0 {
+		t.Errorf("pending = %d, leaked = %d", rec.Pending(), rec.RowsLeaked())
+	}
+}
+
+const (
+	q, x          = sqltest.OpQuery, sqltest.OpExec
+	begin, commit = sqltest.OpBegin, sqltest.OpCommit
+)
 
 // A logo for an organization that does not exist is the missing row,
 // before the file's row is written.
@@ -181,10 +267,10 @@ func TestStore_PutLogoForAMissingOrganizationIs404(t *testing.T) {
 // A first logo answers 201 with the new file's identity and the logo's own
 // path as its Location; there is no replaced file to retire.
 func TestPutLogo_AnswersCreatedWithLocation(t *testing.T) {
-	s, _, _ := serviceOver(t, sqltest.ReturningDialect{},
-		directoryRow(), row(), fileRows(file(newFileID, blobfs.StatusPending, 1)), exec(1),
+	s, db, _ := serviceOver(t, sqltest.ReturningDialect{},
+		directoryRow(), row(), fileRows(file(newFileID, blobfs.StatusPending, 1)),
 		fileRows(file(newFileID, blobfs.StatusAvailable, 2)),
-		exec(1), fileRows(), exec(0), exec(1),
+		exec(1), fileRows(), exec(1), // the hold, no current logo, the new image
 	)
 	r := web.NewRouter()
 	r.Mount(web.NewModule(organization.Routes(s, web.Limits{DefaultSize: 20, MaxSize: 100})))
@@ -193,4 +279,5 @@ func TestPutLogo_AnswersCreatedWithLocation(t *testing.T) {
 	if rec.Code != 201 || rec.Header().Get("Location") != path || !strings.Contains(rec.Body.String(), `"id":"`+newFileID+`","version":2`) {
 		t.Fatalf("status %d, Location %q, body %s", rec.Code, rec.Header().Get("Location"), rec.Body)
 	}
+	sameOps(t, db, q, begin, q, q, commit, q, begin, x, q, x, commit)
 }

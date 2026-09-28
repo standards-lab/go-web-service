@@ -137,6 +137,33 @@ curl localhost:8080/api/organizations                          # the seeded refe
 curl 'localhost:8080/api/organizations/lookup?path=/acme/engineering'   # lookup by hierarchical path
 ```
 
+The document domain is mounted under `/api/documents/{org}`, each organization's hierarchy of
+directories and files over blobfs and the object store. A directory id may be `root`, the
+organization's document root, which its first write creates:
+
+| Method | Path | What it does |
+|--------|------|--------------|
+| `POST` | `/directories` | Create a directory (`parent_id`, `name`) |
+| `GET` | `/directories/{id}` | Read a directory with its path and `status` (`active` or `deleting`) |
+| `GET` | `/directories/{id}/directories` | List its child directories (paged, filtered, sorted) |
+| `GET` | `/directories/{id}/files` | List its files, pending and available (paged, filtered, sorted) |
+| `DELETE` | `/directories/{id}` | Delete an empty directory (204), or with `?recursive=true` its branch (202) |
+| `POST` | `/directories/{id}/move` | Move it under a new parent within the root |
+| `PUT` | `/directories/{id}/files/{name}` | Upload a file (raw body, at most 10 MiB) |
+| `GET` | `/files/{id}` | Read a file's metadata |
+| `GET` | `/files/{id}/content` | Download an available file, as an attachment |
+| `DELETE` | `/files/{id}` | Delete a file |
+| `POST` | `/files/{id}/move` | Move it into a directory within the root |
+
+The moves and the deletes take the row's version in `If-Match`: 428 when it is missing, 412
+when it is stale. A recursive delete marks the branch deleting and answers 202 with the
+directory's read as its `Location`; a sweep then removes the rows and their objects. Until it
+does, the directory reads `deleting`, its listings answer 404, and a write into it answers 409
+"the directory is being deleted". A repeated recursive delete answers 202 again. Every conflict
+carries one of the fixed details: "an entry with that name already exists", "the directory is
+not empty", "the directory is being deleted", "the file is referenced", or "the request
+conflicts with the current state".
+
 ## Admin
 
 The database admin service is mounted under `/admin/database`. Every endpoint triggers the same

@@ -33,13 +33,14 @@ type handler struct {
 // under /{org}, the organization's id, where a directory's {id} may be the
 // root alias. The directories: create (POST /directories), the metadata read
 // with the path (GET /directories/{id}), the paged listings of its child
-// directories and its files, the delete (DELETE /directories/{id}, with
-// ?recursive=true to empty it first), and the move, an action on its own
-// path (POST /directories/{id}/move). An upload is a PUT of the raw body to
-// the new file's name in its directory (PUT /directories/{id}/files/{name}).
+// directories and its files, the delete (DELETE /directories/{id}, 204 for
+// an empty directory, or with ?recursive=true 202 once the branch is
+// marked for the sweep), and the move, an action on its own path
+// (POST /directories/{id}/move). An upload is a PUT of the raw body to the
+// new file's name in its directory (PUT /directories/{id}/files/{name}).
 // The files: the metadata read (GET /files/{id}), the download
-// (GET /files/{id}/content), the delete, and the move. The moves take their
-// version precondition from If-Match. Every rejection is an RFC 9457
+// (GET /files/{id}/content), the delete, and the move. The moves and the
+// deletes take their version precondition from If-Match. Every rejection is an RFC 9457
 // problem through the group's error writer: the SDK maps its own request
 // errors, the layer's matcher its own vocabulary, and the data package's
 // matcher the library's. The composition root mounts the group into the API
@@ -123,9 +124,18 @@ func (h *handler) listFiles(w http.ResponseWriter, r *http.Request) error {
 	return web.WriteJSON(w, http.StatusOK, web.NewPage(items, q, paging))
 }
 
-// deleteDirectory reads ?recursive as a boolean; absent is false.
+// deleteDirectory reads its inputs in the guarded command's order, the
+// path ids, the If-Match version, then ?recursive as a boolean, absent
+// false. An empty directory is removed, 204. A recursive delete marks the
+// branch and answers 202 with no body, its Location the directory's read,
+// which reports it deleting until the sweep removes it; a repeated one is
+// accepted again.
 func (h *handler) deleteDirectory(w http.ResponseWriter, r *http.Request) error {
 	org, id, err := directoryPath(r)
+	if err != nil {
+		return err
+	}
+	version, err := web.IfMatch(r)
 	if err != nil {
 		return err
 	}
@@ -135,10 +145,20 @@ func (h *handler) deleteDirectory(w http.ResponseWriter, r *http.Request) error 
 			return fmt.Errorf("%w: recursive must be true or false, not %q", ErrValidation, raw)
 		}
 	}
-	if err := h.service.DeleteDirectory(r.Context(), org, id, recursive); err != nil {
+	if !recursive {
+		if err := h.service.DeleteDirectory(r.Context(), org, id, version); err != nil {
+			return err
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}
+	marked, err := h.service.DeleteBranch(r.Context(), org, id, version)
+	if err != nil {
 		return err
 	}
-	w.WriteHeader(http.StatusNoContent)
+	prefix, _, _ := strings.Cut(r.URL.Path, "/directories/")
+	w.Header().Set("Location", prefix+"/directories/"+marked)
+	w.WriteHeader(http.StatusAccepted)
 	return nil
 }
 
@@ -216,12 +236,17 @@ func (h *handler) content(w http.ResponseWriter, r *http.Request) error {
 	return web.WriteObject(w, r, c.Object, c.Open)
 }
 
+// deleteFile reads the path ids, then the If-Match version.
 func (h *handler) deleteFile(w http.ResponseWriter, r *http.Request) error {
 	org, id, err := filePath(r)
 	if err != nil {
 		return err
 	}
-	if err := h.service.DeleteFile(r.Context(), org, id); err != nil {
+	version, err := web.IfMatch(r)
+	if err != nil {
+		return err
+	}
+	if err := h.service.DeleteFile(r.Context(), org, id, version); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -23,3 +23,10 @@ func newReactors(
 ) (*Reactors, error) {
 	return &Reactors{}, nil
 }
+
+// idleSweep is the document layer's sweeper until the sweep reactor exists:
+// its nudge does nothing, so a marked branch stays deleting, hidden from
+// every listing, until a sweep runs.
+type idleSweep struct{}
+
+func (idleSweep) Nudge() {}

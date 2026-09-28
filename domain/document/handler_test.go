@@ -76,28 +76,33 @@ func TestRoutes_RejectBeforeAnyOperation(t *testing.T) {
 		status                      int
 		detail                      string
 	}{
-		"malformed organization":         {"GET", "/documents/nope/directories/root", "", "", 400, "must be a UUID"},
-		"malformed directory id":         {"GET", base + "/directories/nope", "", "", 400, "must be a UUID"},
-		"malformed file id":              {"GET", base + "/files/nope", "", "", 400, "must be a UUID"},
-		"list: malformed page":           {"GET", base + "/directories/root/files?page=x", "", "", 400, "query page"},
-		"list: oversized page":           {"GET", base + "/directories/root/directories?size=1000", "", "", 400, "query size"},
-		"create: malformed body":         {"POST", base + "/directories", "", "{", 400, "body:"},
-		"create: unknown field":          {"POST", base + "/directories", "", `{"parent":"root","name":"a"}`, 400, "parent"},
-		"create: no parent":              {"POST", base + "/directories", "", `{"name":"a"}`, 400, "parent_id is required"},
-		"create: bad parent":             {"POST", base + "/directories", "", `{"parent_id":"nope","name":"a"}`, 400, "parent_id must be root or a UUID"},
-		"create: empty name":             {"POST", base + "/directories", "", `{"parent_id":"root","name":""}`, 400, "name"},
-		"create: slash in name":          {"POST", base + "/directories", "", `{"parent_id":"root","name":"a/b"}`, 400, "name"},
-		"delete: bad recursive":          {"DELETE", base + "/directories/root?recursive=maybe", "", "", 400, "recursive must be"},
-		"move directory: no If-Match":    {"POST", base + "/directories/" + dirID + "/move", "", `{"parent_id":"root","name":"a"}`, 428, "If-Match"},
-		"move directory: weak If-Match":  {"POST", base + "/directories/" + dirID + "/move", `W/"1"`, `{"parent_id":"root","name":"a"}`, 400, "If-Match"},
-		"move directory: key omitted":    {"POST", base + "/directories/" + dirID + "/move", `"1"`, `{"name":"a"}`, 400, "parent_id is required"},
-		"move directory: the root":       {"POST", base + "/directories/root/move", `"1"`, `{"parent_id":"root","name":"a"}`, 400, "document root cannot be moved"},
-		"move file: no If-Match":         {"POST", base + "/files/" + fileID + "/move", "", `{"directory_id":"root","name":"a"}`, 428, "If-Match"},
-		"move file: malformed id":        {"POST", base + "/files/nope/move", `"1"`, `{"directory_id":"root","name":"a"}`, 400, "must be a UUID"},
-		"move file: bad directory":       {"POST", base + "/files/" + fileID + "/move", `"1"`, `{"directory_id":"x","name":"a"}`, 400, "directory_id must be root or a UUID"},
-		"move file: missing name":        {"POST", base + "/files/" + fileID + "/move", `"1"`, `{"directory_id":"root"}`, 400, "name"},
-		"move file: malformed body":      {"POST", base + "/files/" + fileID + "/move", `"1"`, `[`, 400, "body:"},
-		"move directory on PUT unrouted": {"PUT", base + "/directories/" + dirID + "/move", `"1"`, `{}`, 405, ""},
+		"malformed organization":          {"GET", "/documents/nope/directories/root", "", "", 400, "must be a UUID"},
+		"malformed directory id":          {"GET", base + "/directories/nope", "", "", 400, "must be a UUID"},
+		"malformed file id":               {"GET", base + "/files/nope", "", "", 400, "must be a UUID"},
+		"list: malformed page":            {"GET", base + "/directories/root/files?page=x", "", "", 400, "query page"},
+		"list: oversized page":            {"GET", base + "/directories/root/directories?size=1000", "", "", 400, "query size"},
+		"create: malformed body":          {"POST", base + "/directories", "", "{", 400, "body:"},
+		"create: unknown field":           {"POST", base + "/directories", "", `{"parent":"root","name":"a"}`, 400, "parent"},
+		"create: no parent":               {"POST", base + "/directories", "", `{"name":"a"}`, 400, "parent_id is required"},
+		"create: bad parent":              {"POST", base + "/directories", "", `{"parent_id":"nope","name":"a"}`, 400, "parent_id must be root or a UUID"},
+		"create: empty name":              {"POST", base + "/directories", "", `{"parent_id":"root","name":""}`, 400, "name"},
+		"create: slash in name":           {"POST", base + "/directories", "", `{"parent_id":"root","name":"a/b"}`, 400, "name"},
+		"delete: bad recursive":           {"DELETE", base + "/directories/root?recursive=maybe", `"1"`, "", 400, "recursive must be"},
+		"delete directory: no If-Match":   {"DELETE", base + "/directories/" + dirID, "", "", 428, "If-Match"},
+		"recursive delete: no If-Match":   {"DELETE", base + "/directories/" + dirID + "?recursive=true", "", "", 428, "If-Match"},
+		"delete directory: weak If-Match": {"DELETE", base + "/directories/" + dirID, `W/"1"`, "", 400, "If-Match"},
+		"delete file: no If-Match":        {"DELETE", base + "/files/" + fileID, "", "", 428, "If-Match"},
+		"delete file: weak If-Match":      {"DELETE", base + "/files/" + fileID, `W/"1"`, "", 400, "If-Match"},
+		"move directory: no If-Match":     {"POST", base + "/directories/" + dirID + "/move", "", `{"parent_id":"root","name":"a"}`, 428, "If-Match"},
+		"move directory: weak If-Match":   {"POST", base + "/directories/" + dirID + "/move", `W/"1"`, `{"parent_id":"root","name":"a"}`, 400, "If-Match"},
+		"move directory: key omitted":     {"POST", base + "/directories/" + dirID + "/move", `"1"`, `{"name":"a"}`, 400, "parent_id is required"},
+		"move directory: the root":        {"POST", base + "/directories/root/move", `"1"`, `{"parent_id":"root","name":"a"}`, 400, "document root cannot be moved"},
+		"move file: no If-Match":          {"POST", base + "/files/" + fileID + "/move", "", `{"directory_id":"root","name":"a"}`, 428, "If-Match"},
+		"move file: malformed id":         {"POST", base + "/files/nope/move", `"1"`, `{"directory_id":"root","name":"a"}`, 400, "must be a UUID"},
+		"move file: bad directory":        {"POST", base + "/files/" + fileID + "/move", `"1"`, `{"directory_id":"x","name":"a"}`, 400, "directory_id must be root or a UUID"},
+		"move file: missing name":         {"POST", base + "/files/" + fileID + "/move", `"1"`, `{"directory_id":"root"}`, 400, "name"},
+		"move file: malformed body":       {"POST", base + "/files/" + fileID + "/move", `"1"`, `[`, 400, "body:"},
+		"move directory on PUT unrouted":  {"PUT", base + "/directories/" + dirID + "/move", `"1"`, `{}`, 405, ""},
 	}
 	h := module(t)
 	for name, c := range cases {
@@ -198,14 +203,15 @@ func TestRoutes_OutsideTheRootIs404(t *testing.T) {
 	}{
 		"directory read":   {[]sqltest.Response{root(rootID), within(false)}, "GET", base + "/directories/" + otherID, "", ""},
 		"directory list":   {[]sqltest.Response{root(rootID), within(false)}, "GET", base + "/directories/" + otherID + "/files", "", ""},
-		"directory delete": {[]sqltest.Response{root(rootID), within(false)}, "DELETE", base + "/directories/" + otherID + "?recursive=true", "", ""},
+		"directory delete": {[]sqltest.Response{root(rootID), within(false)}, "DELETE", base + "/directories/" + otherID, `"1"`, ""},
+		"branch delete":    {[]sqltest.Response{root(rootID), within(false)}, "DELETE", base + "/directories/" + otherID + "?recursive=true", `"1"`, ""},
 		"directory move": {
 			[]sqltest.Response{root(rootID), within(false)},
 			"POST", base + "/directories/" + otherID + "/move", `"1"`, `{"parent_id":"root","name":"a"}`,
 		},
 		"file read":     {[]sqltest.Response{root(rootID), fileRows(file(fileID, otherID, blobfs.StatusAvailable, 2)), within(false)}, "GET", base + "/files/" + fileID, "", ""},
 		"file content":  {[]sqltest.Response{root(rootID), fileRows(file(fileID, otherID, blobfs.StatusAvailable, 2)), within(false)}, "GET", base + "/files/" + fileID + "/content", "", ""},
-		"file delete":   {[]sqltest.Response{root(rootID), fileRows(file(fileID, otherID, blobfs.StatusAvailable, 2)), within(false)}, "DELETE", base + "/files/" + fileID, "", ""},
+		"file delete":   {[]sqltest.Response{root(rootID), fileRows(file(fileID, otherID, blobfs.StatusAvailable, 2)), within(false)}, "DELETE", base + "/files/" + fileID, `"2"`, ""},
 		"upload":        {[]sqltest.Response{root(rootID), within(false)}, "PUT", base + "/directories/" + otherID + "/files/a.txt", "", ""},
 		"absent file":   {[]sqltest.Response{root(rootID), fileRows()}, "GET", base + "/files/" + fileID, "", ""},
 		"no root":       {[]sqltest.Response{root()}, "GET", base + "/directories/" + dirID, "", ""},
@@ -271,7 +277,7 @@ func TestContent_OfAPendingFileIs404(t *testing.T) {
 // Without recursive, a directory with contents is a conflict.
 func TestDeleteDirectory_NotEmptyIs409(t *testing.T) {
 	h := module(t, root(rootID), within(true), sqltest.Response{Err: notEmpty()})
-	problem(t, send(t, h, "DELETE", base+"/directories/"+dirID, "", ""), 409)
+	problem(t, send(t, h, "DELETE", base+"/directories/"+dirID, `"1"`, ""), 409)
 }
 
 // A directory read carries its status, and a directory in a branch marked
@@ -322,25 +328,25 @@ func TestListings_WithinADeletingBranchAre404(t *testing.T) {
 func TestRoutes_ConflictsCarryAFixedDetail(t *testing.T) {
 	marked := dirRows(deleting(directory(dirID, rootID, "reports", 1)))
 	cases := map[string]struct {
-		responses          []sqltest.Response
-		method, path, body string
-		detail             string
+		responses                   []sqltest.Response
+		method, path, ifMatch, body string
+		detail                      string
 	}{
 		"taken name": {
 			[]sqltest.Response{root(rootID), within(true), {Err: takenName()}},
-			"PUT", base + "/directories/" + dirID + "/files/report.txt", "report",
+			"PUT", base + "/directories/" + dirID + "/files/report.txt", "", "report",
 			"an entry with that name already exists",
 		},
 		"not empty": {
 			[]sqltest.Response{root(rootID), within(true), {Err: notEmpty()}},
-			"DELETE", base + "/directories/" + dirID, "",
+			"DELETE", base + "/directories/" + dirID, `"1"`, "",
 			"the directory is not empty",
 		},
 		"deleting parent": {
 			// The insert selects nothing from the deleting parent, and blobfs
 			// reads the parent, twice, to tell deleting from missing.
 			[]sqltest.Response{root(rootID), within(true), dirRows(), marked, marked},
-			"POST", base + "/directories", `{"parent_id":"` + dirID + `","name":"q3"}`,
+			"POST", base + "/directories", "", `{"parent_id":"` + dirID + `","name":"q3"}`,
 			"the directory is being deleted",
 		},
 	}
@@ -351,7 +357,7 @@ func TestRoutes_ConflictsCarryAFixedDetail(t *testing.T) {
 			if c.method == "PUT" {
 				rec = upload(t, h, c.path, "text/plain", c.body, int64(len(c.body)))
 			} else {
-				rec = send(t, h, c.method, c.path, "", c.body)
+				rec = send(t, h, c.method, c.path, c.ifMatch, c.body)
 			}
 			body := problem(t, rec, 409)
 			if body["detail"] != c.detail {
@@ -362,6 +368,66 @@ func TestRoutes_ConflictsCarryAFixedDetail(t *testing.T) {
 					t.Errorf("body %s carries %q", rec.Body, leak)
 				}
 			}
+		})
+	}
+}
+
+// A recursive delete answers 202 with no body once the branch is marked,
+// its Location the directory's read, and a repeated one, the mark's retry,
+// is accepted again. The root's alias locates the root by its id.
+func TestDeleteDirectory_RecursiveIs202(t *testing.T) {
+	cases := map[string]struct {
+		responses []sqltest.Response
+		id, want  string
+	}{
+		"a directory": {[]sqltest.Response{root(rootID), within(true), exec(1), exec(1)}, dirID, dirID},
+		"a retry": {
+			[]sqltest.Response{root(rootID), within(true), exec(0), dirRows(deleting(directory(dirID, rootID, "reports", 1))), exec(0)},
+			dirID, dirID,
+		},
+		"the root": {[]sqltest.Response{root(rootID), exec(1), exec(0)}, document.RootAlias, rootID},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := send(t, module(t, c.responses...), "DELETE", base+"/directories/"+c.id+"?recursive=true", `"1"`, "")
+			if rec.Code != 202 || rec.Header().Get("Location") != base+"/directories/"+c.want || rec.Body.Len() != 0 {
+				t.Fatalf("status %d, Location %q, body %q", rec.Code, rec.Header().Get("Location"), rec.Body)
+			}
+		})
+	}
+}
+
+// The deletes answer 204, and 412 at a version the row no longer holds.
+func TestDeletes_GuardOnIfMatch(t *testing.T) {
+	cases := map[string]struct {
+		responses     []sqltest.Response
+		path, ifMatch string
+		status        int
+	}{
+		"empty directory": {[]sqltest.Response{root(rootID), within(true), exec(1)}, "/directories/" + dirID, `"1"`, 204},
+		"stale directory": {
+			[]sqltest.Response{root(rootID), within(true), exec(0), dirRows(directory(dirID, rootID, "reports", 2))},
+			"/directories/" + dirID, `"1"`, 412,
+		},
+		"stale branch": {
+			[]sqltest.Response{root(rootID), within(true), exec(0), dirRows(directory(dirID, rootID, "reports", 2))},
+			"/directories/" + dirID + "?recursive=true", `"1"`, 412,
+		},
+		"stale file": {
+			[]sqltest.Response{root(rootID), fileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), within(true), fileRows(), fileRows(file(fileID, dirID, blobfs.StatusAvailable, 3))},
+			"/files/" + fileID, `"2"`, 412,
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := send(t, module(t, c.responses...), "DELETE", base+c.path, c.ifMatch, "")
+			if c.status == 204 {
+				if rec.Code != 204 {
+					t.Fatalf("status %d, body %s", rec.Code, rec.Body)
+				}
+				return
+			}
+			problem(t, rec, c.status)
 		})
 	}
 }

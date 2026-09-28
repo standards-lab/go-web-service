@@ -3,18 +3,10 @@
 package integration_test
 
 import (
-	"context"
 	"net/http"
 	"testing"
 
-	bfdata "github.com/standards-lab/blobfs/data"
-	blobfspg "github.com/standards-lab/blobfs/postgres"
-	"github.com/standards-lab/go-database"
-	"github.com/standards-lab/go-database/postgres"
 	"github.com/standards-lab/go-web-sdk/webtest"
-	"github.com/standards-lab/sqlate"
-	pgdialect "github.com/standards-lab/sqlate/postgres"
-	"github.com/standards-lab/sqlate/query"
 
 	"github.com/standards-lab/go-web-service/integration"
 )
@@ -73,6 +65,40 @@ func TestDocument(t *testing.T) {
 		}
 	})
 
+	run("the deletes guard on If-Match", func(t *testing.T, docs string) {
+		reports := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)
+		q3 := webtest.Decode[identity](t, c.Put(t, docs+"/directories/"+reports.ID+"/files/q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}), http.StatusCreated)
+
+		_ = c.Delete(t, docs+"/files/"+q3.ID).Problem(t, http.StatusPreconditionRequired)
+		_ = c.Delete(t, docs+"/files/"+q3.ID, webtest.IfMatch(q3.Version-1)).Problem(t, http.StatusPreconditionFailed)
+		_ = c.Delete(t, docs+"/directories/"+reports.ID).Problem(t, http.StatusPreconditionRequired)
+		_ = c.Delete(t, docs+"/directories/"+reports.ID+"?recursive=true").Problem(t, http.StatusPreconditionRequired)
+		_ = c.Delete(t, docs+"/directories/"+reports.ID+"?recursive=true", webtest.IfMatch(reports.Version+1)).Problem(t, http.StatusPreconditionFailed)
+		if d := webtest.Decode[directory](t, c.Get(t, docs+"/directories/"+reports.ID), http.StatusOK); d.Status != "active" {
+			t.Errorf("reports after a stale recursive delete = %+v; want it active", d)
+		}
+
+		c.Delete(t, docs+"/files/"+q3.ID, webtest.IfMatch(q3.Version)).Expect(t, http.StatusNoContent)
+		_ = c.Get(t, docs+"/files/"+q3.ID).Problem(t, http.StatusNotFound)
+		_ = c.Delete(t, docs+"/directories/"+reports.ID, webtest.IfMatch(reports.Version+1)).Problem(t, http.StatusPreconditionFailed)
+		c.Delete(t, docs+"/directories/"+reports.ID, webtest.IfMatch(reports.Version)).Expect(t, http.StatusNoContent)
+		_ = c.Get(t, docs+"/directories/"+reports.ID).Problem(t, http.StatusNotFound)
+	})
+
+	run("a recursive delete is accepted and repeats", func(t *testing.T, docs string) {
+		reports := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)
+		deleteBranch(t, c, docs, reports.ID)
+		// The client's version is the one before the mark; the retry is
+		// accepted at it all the same.
+		r := c.Delete(t, docs+"/directories/"+reports.ID+"?recursive=true", webtest.IfMatch(reports.Version)).Expect(t, http.StatusAccepted)
+		if loc := r.Header.Get("Location"); loc != docs+"/directories/"+reports.ID {
+			t.Errorf("retry Location = %q", loc)
+		}
+		if d := webtest.Decode[directory](t, c.Get(t, docs+"/directories/"+reports.ID), http.StatusOK); d.Status != "deleting" || d.Version != reports.Version+1 {
+			t.Errorf("reports = %+v; want it deleting, a version on", d)
+		}
+	})
+
 	run("a deleting branch reads by id and lists as not found", func(t *testing.T, docs string) {
 		reports := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)
 		archive := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": reports.ID, "name": "archive"}), http.StatusCreated)
@@ -82,7 +108,7 @@ func TestDocument(t *testing.T) {
 			t.Fatalf("reports' files before the mark = %+v", f.Items)
 		}
 
-		markDeleting(t, reports.ID)
+		deleteBranch(t, c, docs, reports.ID)
 
 		for id, name := range map[string]string{reports.ID: "reports", archive.ID: "archive"} {
 			d := webtest.Decode[directory](t, c.Get(t, docs+"/directories/"+id), http.StatusOK)
@@ -113,48 +139,27 @@ func TestDocument(t *testing.T) {
 
 		conflict(t, c.Put(t, docs+"/directories/"+reports.ID+"/files/q3.txt", q3), "an entry with that name already exists")
 		conflict(t, c.Post(t, docs+"/directories", map[string]string{"parent_id": reports.ID, "name": "archive"}), "an entry with that name already exists")
-		conflict(t, c.Delete(t, docs+"/directories/"+reports.ID), "the directory is not empty")
+		conflict(t, c.Delete(t, docs+"/directories/"+reports.ID, webtest.IfMatch(reports.Version)), "the directory is not empty")
 
-		markDeleting(t, archive.ID)
+		deleteBranch(t, c, docs, archive.ID)
 		conflict(t, c.Post(t, docs+"/directories", map[string]string{"parent_id": archive.ID, "name": "q4"}), "the directory is being deleted")
 		conflict(t, c.Put(t, docs+"/directories/"+archive.ID+"/files/q4.txt", q3), "the directory is being deleted")
 	})
 }
 
-// markDeleting marks the branch rooted at the directory with id deleting
-// through blobfs's store, over a pool of its own to the database the
-// service runs against, since the API has no mark path yet: the recursive
-// delete that marks a branch arrives with the asynchronous delete. The
-// pool is go-database's, configured as the service's is: config.json's
-// name and user, the compose password, and the APP_DATABASE_* overrides
-// the harness passes the service.
-func markDeleting(t *testing.T, id string) {
+// deleteBranch deletes the directory with id recursively at the version
+// it reads at, and asserts the 202 and its Location, the directory's read,
+// which reports it deleting: the sweep that removes the branch is not
+// wired yet, so the branch stays marked for the rest of the case.
+func deleteBranch(t *testing.T, c *webtest.Client, docs, id string) {
 	t.Helper()
-	ctx := context.Background()
-	cfg := database.Config{Host: "127.0.0.1", Name: "app", User: "app", Password: "app", Options: map[string]string{"sslmode": "disable"}}
-	if err := cfg.Finalize("app"); err != nil {
-		t.Fatal(err)
+	d := webtest.Decode[directory](t, c.Get(t, docs+"/directories/"+id), http.StatusOK)
+	r := c.Delete(t, docs+"/directories/"+id+"?recursive=true", webtest.IfMatch(d.Version)).Expect(t, http.StatusAccepted)
+	loc := r.Header.Get("Location")
+	if loc != docs+"/directories/"+id || len(r.Body) != 0 {
+		t.Fatalf("202 Location %q, body %q; want the directory's read and no body", loc, r.Body)
 	}
-	pool, err := postgres.New(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = pool.Shutdown(ctx) }()
-	db := sqlate.Wrap(pool.Conn(), pgdialect.Dialect{})
-	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns())
-	fs, err := bfdata.New(catalog, db.Dialect(), bfdata.WithEngine(blobfspg.Engine))
-	if err != nil {
-		t.Fatal(err)
-	}
-	tx, err := db.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := fs.Directories.MarkDeleting(ctx, tx, id); err != nil {
-		_ = tx.Rollback()
-		t.Fatalf("mark %s: %v", id, err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
+	if marked := webtest.Decode[directory](t, c.Get(t, loc), http.StatusOK); marked.Status != "deleting" {
+		t.Fatalf("%s after the delete = %+v; want it deleting", loc, marked)
 	}
 }

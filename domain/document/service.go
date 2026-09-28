@@ -21,13 +21,23 @@ const Stage = 2
 // validate their input before any I/O and return Identity only.
 type Service struct {
 	store *store
+	sweep Sweeper
+}
+
+// Sweeper is what the layer asks of the sweep that removes a branch once
+// its delete is marked: a nudge that work is waiting, which returns at
+// once and never fails the request, since the sweep finds its work in the
+// database and a missed nudge only delays it. The layer declares it and
+// the composition root injects it.
+type Sweeper interface {
+	Nudge()
 }
 
 // New constructs the service over the database and the object storage the
-// domains share. Construction compiles and binds the statements and
-// performs no I/O.
-func New(db *data.Database, st *data.Storage) *Service {
-	return &Service{store: newStore(db, st)}
+// domains share, nudging sweep after each branch it marks. Construction
+// compiles and binds the statements and performs no I/O.
+func New(db *data.Database, st *data.Storage, sweep Sweeper) *Service {
+	return &Service{store: newStore(db, st), sweep: sweep}
 }
 
 // Register declares the domain's startup verification on lc.
@@ -72,12 +82,26 @@ func (s *Service) ListFiles(ctx context.Context, organizationID, id string, q we
 	return s.store.listFiles(ctx, organizationID, id, q)
 }
 
-// DeleteDirectory removes the directory. Without recursive a directory
-// with contents is blobfs.ErrNotEmpty; with it, the contents are removed
-// first, children before their parent, up to the walk's bound. Removing
-// the root removes its owner row with it.
-func (s *Service) DeleteDirectory(ctx context.Context, organizationID, id string, recursive bool) error {
-	return s.store.deleteDirectory(ctx, organizationID, id, recursive)
+// DeleteDirectory removes the empty directory at version: a directory with
+// contents is blobfs.ErrNotEmpty and another version
+// query.ErrVersionMismatch. Removing the root removes its owner row with it.
+func (s *Service) DeleteDirectory(ctx context.Context, organizationID, id string, version int64) error {
+	return s.store.deleteDirectory(ctx, organizationID, id, version)
+}
+
+// DeleteBranch begins the delete of the directory with everything beneath
+// it, the directory at version, and returns its id: blobfs marks the
+// branch deleting in one transaction, and after the commit the sweep is
+// nudged to remove it. From the commit the directory reads deleting and
+// its listings are not found. A directory deleting already is the mark's
+// retry, accepted again at any version.
+func (s *Service) DeleteBranch(ctx context.Context, organizationID, id string, version int64) (string, error) {
+	id, err := s.store.markBranch(ctx, organizationID, id, version)
+	if err != nil {
+		return "", err
+	}
+	s.sweep.Nudge()
+	return id, nil
 }
 
 // MoveDirectory is an action: it moves the directory under a new parent
@@ -116,9 +140,11 @@ func (s *Service) Content(ctx context.Context, organizationID, id string) (Conte
 	return s.store.content(ctx, organizationID, id)
 }
 
-// DeleteFile removes the file, its row and its object.
-func (s *Service) DeleteFile(ctx context.Context, organizationID, id string) error {
-	return s.store.deleteFile(ctx, organizationID, id)
+// DeleteFile removes the file at version, its row and its object; another
+// version is query.ErrVersionMismatch. A file deleting already is the
+// delete's retry, which converges at any version.
+func (s *Service) DeleteFile(ctx context.Context, organizationID, id string, version int64) error {
+	return s.store.deleteFile(ctx, organizationID, id, version)
 }
 
 // MoveFile is an action: it moves the file into a directory within the

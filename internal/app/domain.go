@@ -25,7 +25,7 @@ type Domain struct {
 func newDomain(infra *Infrastructure, lc *lifecycle.Coordinator) *Domain {
 	org := organization.New(infra.SQL, infra.Storage)
 	org.Register(lc)
-	doc := document.New(infra.SQL, infra.Storage)
+	doc := document.New(infra.SQL, infra.Storage, idleSweep{})
 	doc.Register(lc)
 	return &Domain{Organization: org, Document: doc}
 }

@@ -35,6 +35,22 @@ const (
 // over the fake, started as the composition root starts the real one.
 func serviceOver(t *testing.T, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *storagetest.Fake) {
 	t.Helper()
+	s, rec, fake, _ := serviceNudged(t, responses...)
+	return s, rec, fake
+}
+
+// nudges is the sweeper the tests inject: it records, at each nudge, the
+// operations the scripted driver had run by then.
+type nudges struct {
+	rec  *sqltest.Recorder
+	seen [][]sqltest.Op
+}
+
+func (n *nudges) Nudge() { n.seen = append(n.seen, n.rec.Ops()) }
+
+// serviceNudged is serviceOver with the sweeper the service nudges.
+func serviceNudged(t *testing.T, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *storagetest.Fake, *nudges) {
+	t.Helper()
 	dialect := sqltest.ReturningDialect{}
 	pool, rec := sqltest.Open(t, responses...)
 	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
@@ -53,7 +69,8 @@ func serviceOver(t *testing.T, responses ...sqltest.Response) (*document.Service
 	}
 	t.Cleanup(func() { _ = objects.Shutdown(context.Background()) })
 	db := data.New(sqlate.Wrap(pool, dialect), catalog)
-	return document.New(db, data.NewStorage(fs, objects)), rec, fake
+	sweep := &nudges{rec: rec}
+	return document.New(db, data.NewStorage(fs, objects), sweep), rec, fake, sweep
 }
 
 // root scripts the owner row's read: the organization's document root, or
@@ -157,7 +174,7 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 	if err != nil || id != (document.Identity{ID: dirID, Version: 1}) {
 		t.Fatalf("CreateDirectory = %+v, %v", id, err)
 	}
-	if err := s.DeleteDirectory(ctx, orgID, document.RootAlias, false); err != nil {
+	if err := s.DeleteDirectory(ctx, orgID, document.RootAlias, 1); err != nil {
 		t.Fatalf("DeleteDirectory = %v", err)
 	}
 	if rec.Pending() != 0 || rec.RowsLeaked() != 0 {

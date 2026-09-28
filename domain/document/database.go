@@ -18,11 +18,6 @@ import (
 //go:embed statements/*.sql
 var files embed.FS
 
-// walkPage is the size of each page a recursive delete reads: the walk
-// reads a directory's first page again after removing it, so it never
-// holds a cursor over rows it is removing.
-const walkPage = 100
-
 // store is the domain's SQL client: the owner row's statements bound once
 // to their typed handles, and the protocols of storage.go as its other
 // methods. It is the package's sole importer of the query library, so the
@@ -116,13 +111,4 @@ func (l listing[T]) read(ctx context.Context, sess sqlate.Session, id string, q 
 		return nil, web.Paging{}, fmt.Errorf("directory %s is being deleted: %w", id, blobfs.ErrNotFound)
 	}
 	return c.Items, data.Paging(c), err
-}
-
-// first reads the first page of the directory with id for a walk,
-// uncounted, since the walk reads it again until it comes back empty. It
-// lists every status: a file a stopped delete left deleting is the walk's
-// to finish, and it would otherwise hold the directory not empty.
-func (l listing[T]) first(ctx context.Context, sess sqlate.Session, id string) ([]T, error) {
-	c, err := l.List(ctx, sess, id, query.Directives{Total: query.TotalNone}, query.Page{Number: 1, Size: walkPage}, bfdata.IncludeDeleting())
-	return c.Items, err
 }

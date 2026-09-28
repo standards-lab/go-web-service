@@ -12,8 +12,10 @@ import (
 	"testing"
 
 	"github.com/standards-lab/blobfs"
+	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
+	"github.com/standards-lab/sqlate/query"
 	"github.com/standards-lab/sqlate/sqltest"
 
 	"github.com/standards-lab/go-web-service/domain/document"
@@ -98,7 +100,7 @@ func TestStore_FileProtocols(t *testing.T) {
 	if err != nil || moved.Version != 3 {
 		t.Fatalf("MoveFile = %+v, %v", moved, err)
 	}
-	if err := s.DeleteFile(ctx, orgID, fileID); err != nil {
+	if err := s.DeleteFile(ctx, orgID, fileID, 3); err != nil {
 		t.Fatalf("DeleteFile = %v", err)
 	}
 	if _, err := c.Open(); err == nil {
@@ -295,60 +297,11 @@ func TestStore_MoveOutsideTheRootIsNotFound(t *testing.T) {
 	sameOps(t, rec, begin, q, q, q, sqltest.OpRollback, begin, q, q, q, q, sqltest.OpRollback)
 }
 
-// The recursive delete of the root: the bounded walk removes each file by
-// the delete protocol and each directory after its own contents, deepest
-// first, then the root with its owner row.
-func TestStore_RecursiveDeleteWalksChildrenFirst(t *testing.T) {
-	s, rec, _ := serviceOver(t,
-		root(rootID),
-		// The root's first pass: one file, then one directory.
-		fileRows(file(fileID, rootID, blobfs.StatusAvailable, 2)),
-		fileRows(file(fileID, rootID, blobfs.StatusDeleting, 3)), exec(1),
-		dirRows(directory(subID, rootID, "archive", 1)),
-		// The directory's first pass: one file, no directory.
-		fileRows(file(file2ID, subID, blobfs.StatusAvailable, 2)),
-		fileRows(file(file2ID, subID, blobfs.StatusDeleting, 3)), exec(1),
-		dirRows(),
-		// The directory's second pass finds it empty, and it is removed.
-		fileRows(), dirRows(), exec(1),
-		// The root's second pass finds it empty; the root and its owner row go.
-		fileRows(), dirRows(),
-		exec(1), exec(1),
-	)
-	if err := s.DeleteDirectory(context.Background(), orgID, document.RootAlias, true); err != nil {
-		t.Fatalf("DeleteDirectory = %v", err)
-	}
-	sameOps(t, rec,
-		q,
-		q, begin, q, commit, x,
-		q,
-		q, begin, q, commit, x,
-		q,
-		q, q, x,
-		q, q,
-		begin, x, x, commit,
-	)
-	var removed []string
-	for _, c := range rec.Calls() {
-		if strings.HasPrefix(c.SQL, "DELETE FROM blobfs_directory") {
-			removed = append(removed, fmt.Sprint(c.Args[0]))
-		}
-		// The walk lists every status, so a file a stopped delete left
-		// deleting is finished rather than holding its directory.
-		if strings.Contains(c.SQL, "LIMIT") && strings.Contains(c.SQL, "q.status") {
-			t.Errorf("walk listing = %q; want every status listed", c.SQL)
-		}
-	}
-	if fmt.Sprint(removed) != fmt.Sprint([]string{subID, rootID}) {
-		t.Errorf("removed %v; want the child before the root", removed)
-	}
-}
-
 // Without recursive, a directory with contents is not empty: the foreign
 // key's refusal, classified by blobfs.
 func TestStore_DeleteOfANonEmptyDirectoryIsNotEmpty(t *testing.T) {
 	s, _, _ := serviceOver(t, root(rootID), within(true), sqltest.Response{Err: notEmpty()})
-	if err := s.DeleteDirectory(context.Background(), orgID, dirID, false); !errors.Is(err, blobfs.ErrNotEmpty) {
+	if err := s.DeleteDirectory(context.Background(), orgID, dirID, 1); !errors.Is(err, blobfs.ErrNotEmpty) {
 		t.Fatalf("DeleteDirectory = %v; want ErrNotEmpty", err)
 	}
 }
@@ -363,4 +316,124 @@ func notEmpty() error {
 // directory already holds.
 func takenName() error {
 	return &sqlate.ConstraintError{Constraint: "blobfs_uq_file_directory_name", Class: sqlate.ErrUniqueViolation, Err: errors.New("unique")}
+}
+
+// A recursive delete marks the branch in one transaction with its scope
+// check, the directory at the If-Match version, and nudges the sweep once,
+// after the commit.
+func TestStore_DeleteBranchMarksThenNudges(t *testing.T) {
+	s, rec, _, sweep := serviceNudged(t,
+		root(rootID), within(true),
+		exec(2), // the directory and one beneath it marked
+		exec(3), // their files marked
+	)
+	id, err := s.DeleteBranch(context.Background(), orgID, dirID, 1)
+	if err != nil || id != dirID {
+		t.Fatalf("DeleteBranch = %q, %v", id, err)
+	}
+	sameOps(t, rec, begin, q, q, x, x, commit)
+	mark := rec.Calls()[3]
+	if !strings.HasPrefix(mark.SQL, "UPDATE blobfs_directory") || fmt.Sprint(mark.Args) != fmt.Sprint([]any{dirID, int64(1)}) {
+		t.Errorf("mark = %q %v; want the directory at the If-Match version", mark.SQL, mark.Args)
+	}
+	if len(sweep.seen) != 1 || fmt.Sprint(sweep.seen[0]) != fmt.Sprint(rec.Ops()) {
+		t.Errorf("nudges = %v; want one, after the commit", sweep.seen)
+	}
+}
+
+// A repeated recursive delete, once the branch is deleting, is the mark's
+// retry: at the version the client read before the mark, which the mark
+// advanced, it converges and is accepted again, nudging the sweep again.
+func TestStore_DeleteBranchRetryConverges(t *testing.T) {
+	marked := deleting(directory(dirID, rootID, "reports", 1))
+	s, rec, _, sweep := serviceNudged(t,
+		root(rootID), within(true),
+		exec(0), dirRows(marked), // nothing newly marked; the read finds it deleting
+		exec(0),
+	)
+	if _, err := s.DeleteBranch(context.Background(), orgID, dirID, 1); err != nil {
+		t.Fatalf("DeleteBranch = %v; want the retry accepted", err)
+	}
+	sameOps(t, rec, begin, q, q, x, q, x, commit)
+	if len(sweep.seen) != 1 {
+		t.Errorf("nudges = %d; want one", len(sweep.seen))
+	}
+}
+
+// A stale version marks nothing, rolls back, and nudges no sweep; the root
+// is marked like any directory, by its alias.
+func TestStore_DeleteBranchAtAStaleVersion(t *testing.T) {
+	s, rec, _, sweep := serviceNudged(t,
+		root(rootID), within(true), exec(0), dirRows(directory(dirID, rootID, "reports", 2)),
+		root(rootID), exec(1), exec(0),
+	)
+	ctx := context.Background()
+	if _, err := s.DeleteBranch(ctx, orgID, dirID, 1); !errors.Is(err, query.ErrVersionMismatch) {
+		t.Fatalf("DeleteBranch = %v; want a version mismatch", err)
+	}
+	if len(sweep.seen) != 0 {
+		t.Errorf("nudges = %d; want none after a refused mark", len(sweep.seen))
+	}
+	if id, err := s.DeleteBranch(ctx, orgID, document.RootAlias, 1); err != nil || id != rootID {
+		t.Fatalf("DeleteBranch(root) = %q, %v; want the root marked", id, err)
+	}
+	sameOps(t, rec, begin, q, q, x, q, sqltest.OpRollback, begin, q, x, x, commit)
+}
+
+// The deletes guard on the If-Match version: a file or an empty directory
+// at another version is a version mismatch, and nothing is removed.
+func TestStore_DeletesAtAStaleVersion(t *testing.T) {
+	s, _, fake := serviceOver(t,
+		root(rootID), fileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), within(true),
+		fileRows(), fileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), // the guarded delete matches nothing; the read tells the version
+		root(rootID), within(true), exec(0), dirRows(directory(dirID, rootID, "reports", 2)),
+	)
+	ctx := context.Background()
+	key := fileID + "/report.txt"
+	if _, err := fake.Put(ctx, key, strings.NewReader("report"), storage.PutOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteFile(ctx, orgID, fileID, 2); !errors.Is(err, query.ErrVersionMismatch) {
+		t.Errorf("DeleteFile = %v; want a version mismatch", err)
+	}
+	if _, err := fake.Get(ctx, key, storage.GetOptions{}); err != nil {
+		t.Errorf("the object of a refused delete is gone: %v", err)
+	}
+	if err := s.DeleteDirectory(ctx, orgID, dirID, 1); !errors.Is(err, query.ErrVersionMismatch) {
+		t.Errorf("DeleteDirectory = %v; want a version mismatch", err)
+	}
+}
+
+// The writer rule: a completion refused because a mark reached the row,
+// or because the sweep removed it, deletes the object the put stored under
+// the key the write holds, and leaves the row to the sweep.
+func TestStore_ACompletionTheSweepRefusedDeletesTheObject(t *testing.T) {
+	// The completion's update matches no pending row, and blobfs reads the
+	// row to tell why: deleting, or gone.
+	cases := map[string]struct {
+		read sqltest.Response
+		want error
+	}{
+		"marked":  {fileRows(file(fileID, dirID, blobfs.StatusDeleting, 2)), blobfs.ErrDeleting},
+		"removed": {fileRows(), blobfs.ErrNotFound},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, rec, fake := serviceOver(t,
+				root(rootID), within(true), fileRows(file(fileID, dirID, blobfs.StatusPending, 1)),
+				fileRows(), c.read,
+			)
+			_, err := s.PutFile(context.Background(), orgID, dirID, "report.txt", textUpload(t))
+			if !errors.Is(err, c.want) {
+				t.Fatalf("PutFile = %v; want %v", err, c.want)
+			}
+			if fake.Puts() != 1 {
+				t.Errorf("puts = %d; want the object put once", fake.Puts())
+			}
+			if _, err := fake.Get(context.Background(), fileID+"/report.txt", storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
+				t.Errorf("the object outlived the refused completion: %v", err)
+			}
+			sameOps(t, rec, begin, q, q, q, commit, q, q)
+		})
+	}
 }

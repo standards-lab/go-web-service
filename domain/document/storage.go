@@ -9,15 +9,10 @@ import (
 	"strings"
 
 	"github.com/standards-lab/blobfs"
+	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
 )
-
-// maxWalk bounds a recursive delete at the entries, files and directories,
-// one request removes. A walk that reaches it stops and reports the
-// directory not empty; a repeated request continues where it stopped, so a
-// directory that concurrent writes keep filling cannot hold a request open.
-const maxWalk = 10_000
 
 // directories and files are blobfs's two listings, lowered by listing.
 func (s *store) directories() listing[blobfs.Directory] {
@@ -193,85 +188,46 @@ func rootless[T any](id string, err error) ([]T, web.Paging, error) {
 	return nil, web.Paging{}, err
 }
 
-// deleteDirectory removes the directory, emptying it first under
-// recursive. Removing the root removes its owner row with it.
-func (s *store) deleteDirectory(ctx context.Context, organizationID, id string, recursive bool) error {
+// deleteDirectory removes the empty directory at version. Removing the
+// root removes its owner row with it.
+func (s *store) deleteDirectory(ctx context.Context, organizationID, id string, version int64) error {
 	root, id, err := s.scope(ctx, s.db, organizationID, id)
 	if err != nil {
 		return err
 	}
-	if recursive {
-		budget := maxWalk
-		if err := s.empty(ctx, id, &budget); err != nil {
-			return err
-		}
-	}
-	return s.remove(ctx, id, id == root)
+	return s.remove(ctx, id, id == root, version)
 }
 
-// empty is the recursive delete's walk, children before their parent: it
-// removes the directory's files by the delete protocol and its child
-// directories after their own contents, deepest first, reading the first
-// page of each listing again until both come back empty. Each entry spends
-// one of the budget's removals.
-func (s *store) empty(ctx context.Context, id string, budget *int) error {
-	for {
-		files, err := s.files().first(ctx, s.db, id)
+// markBranch begins the delete of the directory with everything beneath
+// it: blobfs's mark, the directory at version, in one transaction with the
+// scope check, and returns the directory's id. The sweep removes the
+// branch after the commit. A directory deleting already is the mark's
+// retry, which converges at any version.
+func (s *store) markBranch(ctx context.Context, organizationID, id string, version int64) (string, error) {
+	return s.db.Transact(ctx, func(tx *sqlate.Tx) (string, error) {
+		_, id, err := s.scope(ctx, tx, organizationID, id)
 		if err != nil {
-			return err
+			return "", err
 		}
-		for _, f := range files {
-			if err := spend(budget, id); err != nil {
-				return err
-			}
-			if err := s.retire(ctx, func(*sqlate.Tx) (string, error) { return f.ID, nil }); err != nil {
-				return err
-			}
-		}
-		dirs, err := s.directories().first(ctx, s.db, id)
-		if err != nil {
-			return err
-		}
-		for _, d := range dirs {
-			if err := spend(budget, id); err != nil {
-				return err
-			}
-			if err := s.empty(ctx, d.ID, budget); err != nil {
-				return err
-			}
-			if err := s.remove(ctx, d.ID, false); err != nil {
-				return err
-			}
-		}
-		if len(files) == 0 && len(dirs) == 0 {
-			return nil
-		}
-	}
+		_, err = s.storage.FS.Directories.MarkDeleting(ctx, tx, id, bfdata.AtVersion(version))
+		return id, err
+	})
 }
 
-// spend takes one removal from the walk's budget, or reports the directory
-// being walked not empty once it is spent.
-func spend(budget *int, id string) error {
-	if *budget == 0 {
-		return fmt.Errorf("directory %s: a recursive delete removes at most %d entries a request; delete again to continue: %w", id, maxWalk, blobfs.ErrNotEmpty)
-	}
-	*budget--
-	return nil
-}
-
-// remove removes one empty directory. The root's owner row goes in the
-// same transaction, since its foreign key refuses the directory's removal
-// while it stands.
-func (s *store) remove(ctx context.Context, id string, root bool) error {
+// remove removes one empty directory at version. The root's owner row
+// goes in the same transaction, since its foreign key refuses the
+// directory's removal while it stands.
+func (s *store) remove(ctx context.Context, id string, root bool, version int64) error {
 	fs := s.storage.FS
+	at := bfdata.AtVersion(version)
 	if !root {
-		return fs.Directories.Delete(ctx, s.db, id)
+		return fs.Directories.Delete(ctx, s.db, id, at)
 	}
 	_, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (struct{}, error) {
 		if err := s.unbind(ctx, tx, id); err != nil {
 			return struct{}{}, err
 		}
-		return struct{}{}, fs.Directories.Delete(ctx, tx, id)
+		return struct{}{}, fs.Directories.Delete(ctx, tx, id, at)
 	})
 	return err
 }
@@ -303,7 +259,11 @@ func (s *store) moveDirectory(ctx context.Context, organizationID, id string, ve
 // commit together before any byte is stored, the put runs outside any
 // transaction, and the completion on the pool. A put or a completion that
 // fails retires the pending row, so its name is free for a retry; one whose
-// retire fails too leaves the row pending, blobfs's state for a sweep.
+// retire fails too leaves the row pending, blobfs's state for a sweep. A
+// completion refused because the row's delete began or the sweep removed
+// it, the mark of a branch that raced the write, deletes the object just
+// put under the key the write holds, since a sweep that ran before the put
+// landed cannot have deleted it; the row is the sweep's.
 func (s *store) putFile(ctx context.Context, organizationID, directoryID, name string, u web.Upload) (Identity, error) {
 	fs, objects := s.storage.FS, s.storage.Objects
 	directoryID, err := s.writable(ctx, organizationID, directoryID)
@@ -327,9 +287,14 @@ func (s *store) putFile(ctx context.Context, organizationID, directoryID, name s
 	if err != nil {
 		return abandon(err)
 	}
-	if file, err = fs.Files.Complete(ctx, s.db, file.ID, file.Version, obj); err != nil {
+	done, err := fs.Files.Complete(ctx, s.db, file.ID, file.Version, obj)
+	switch {
+	case errors.Is(err, blobfs.ErrDeleting), errors.Is(err, blobfs.ErrNotFound):
+		return Identity{}, errors.Join(err, objects.Delete(ctx, file.Key))
+	case err != nil:
 		return abandon(err)
 	}
+	file = done
 	return Identity{ID: file.ID, Version: file.Version}, nil
 }
 
@@ -356,13 +321,14 @@ func (s *store) content(ctx context.Context, organizationID, id string) (Content
 	}, nil
 }
 
-// deleteFile removes the file by the delete protocol, its scope checked in
-// the transaction that begins the delete.
-func (s *store) deleteFile(ctx context.Context, organizationID, id string) error {
+// deleteFile removes the file at version by the delete protocol, its
+// scope checked in the transaction that begins the delete. A file deleting
+// already is the delete's retry, which converges at any version.
+func (s *store) deleteFile(ctx context.Context, organizationID, id string, version int64) error {
 	return s.retire(ctx, func(tx *sqlate.Tx) (string, error) {
 		_, file, err := s.fileScope(ctx, tx, organizationID, id)
 		return file.ID, err
-	})
+	}, bfdata.AtVersion(version))
 }
 
 // moveFile moves the file into a directory within the same root, guarded
@@ -383,18 +349,18 @@ func (s *store) moveFile(ctx context.Context, organizationID, id string, version
 }
 
 // retire runs the delete protocol over the file pick names in its
-// transaction: blobfs's delete begun in that transaction, then the object
-// deleted, then the row purged on the pool. No row of the layer references
-// a file, so no reference check precedes the delete. Every step converges
-// on a retry.
-func (s *store) retire(ctx context.Context, pick func(*sqlate.Tx) (string, error)) error {
+// transaction: blobfs's delete begun in that transaction, under the
+// version guard when opts carries one, then the object deleted, then the
+// row purged on the pool. No row of the layer references a file, so no
+// reference check precedes the delete. Every step converges on a retry.
+func (s *store) retire(ctx context.Context, pick func(*sqlate.Tx) (string, error), opts ...bfdata.VersionOption) error {
 	fs := s.storage.FS
 	file, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (blobfs.File, error) {
 		id, err := pick(tx)
 		if err != nil {
 			return blobfs.File{}, err
 		}
-		return fs.Files.Delete(ctx, tx, id)
+		return fs.Files.Delete(ctx, tx, id, opts...)
 	})
 	if err != nil {
 		return err

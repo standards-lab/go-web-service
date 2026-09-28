@@ -46,10 +46,22 @@
 // An upload is a raw body of at most 10 MiB in any media type, stored by
 // blobfs's write protocol: the pending row, the put, the completion; a
 // taken name is a conflict. A download is proxied as an attachment, never
-// rendered inline, since stored HTML would run in the API's origin. A file
-// delete is blobfs's delete protocol; a directory delete removes an empty
-// directory, or with recursive=true walks it first, a bounded walk that
-// removes every file by the delete protocol and every directory after its
-// contents, deepest first. Removing the root removes its owner row in the
-// same transaction. The guarded moves take their version from If-Match.
+// rendered inline, since stored HTML would run in the API's origin. A
+// completion refused because a mark or the sweep reached the row deletes
+// the object just put, since a sweep that ran before the put landed could
+// not have deleted it.
+//
+// Every move and delete takes its version from If-Match: a missing header
+// is 428, a stale version 412. A file delete is blobfs's delete protocol,
+// 204. A directory delete removes an empty directory, 204; removing the
+// root removes its owner row in the same transaction. With recursive=true
+// it deletes the branch, the directory with everything beneath it, in two
+// stages: blobfs marks the branch deleting in one transaction, the request
+// answers 202 with the directory's read as its Location, and the sweep the
+// service is given is nudged after the commit to remove the rows and
+// their objects. Until the sweep finishes, the directory reads deleting,
+// its listings are not found, and a write into it is a conflict. A
+// repeated recursive delete is the mark's retry, accepted again at any
+// version. The root's branch is marked like any other; its owner row
+// stands until the sweep removes the root.
 package document

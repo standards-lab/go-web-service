@@ -5,7 +5,7 @@ go 1.27
 require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9
-	github.com/standards-lab/blobfs v0.1.0
+	github.com/standards-lab/blobfs v0.2.0
 	github.com/standards-lab/go-core v0.4.1
 	github.com/standards-lab/go-web-sdk v0.11.0
 	github.com/standards-lab/sqlate v0.4.1
@@ -21,7 +21,3 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 )
-
-// Temporary: builds against the unreleased blobfs v0.2.0 on its local
-// branch. Removed when blobfs v0.2.0 is tagged and pinned.
-replace github.com/standards-lab/blobfs => ../../../blobfs

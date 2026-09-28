@@ -3,8 +3,8 @@ module github.com/standards-lab/go-web-service
 go 1.27
 
 require (
-	github.com/standards-lab/blobfs v0.1.0
-	github.com/standards-lab/blobfs/postgres v0.1.0
+	github.com/standards-lab/blobfs v0.2.0
+	github.com/standards-lab/blobfs/postgres v0.2.0
 	github.com/standards-lab/go-core v0.4.1
 	github.com/standards-lab/go-database v0.6.1
 	github.com/standards-lab/go-database/postgres v0.3.0
@@ -66,11 +66,3 @@ require (
 )
 
 tool github.com/standards-lab/sqlate/sqlint/cmd/sqlint
-
-// Temporary: builds against the unreleased blobfs v0.2.0 on its local
-// branch. Removed when blobfs v0.2.0 and postgres/v0.2.0 are tagged and
-// pinned.
-replace (
-	github.com/standards-lab/blobfs => ../blobfs
-	github.com/standards-lab/blobfs/postgres => ../blobfs/postgres
-)

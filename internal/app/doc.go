@@ -52,7 +52,12 @@
 // to both halves: the sweep's wake, which the document layer nudges after
 // each branch it marks and the sweep reactor receives from. The wake is
 // nudged once at construction, so the sweep runs at startup and a branch
-// marked before a restart does not wait an interval.
+// marked before a restart does not wait an interval. The quiesce gate is
+// built the same way, before both halves that meet in it: the admin
+// layer's schema-changing verbs hold it exclusively and each sweep pass
+// holds it shared, so a reset never deadlocks with a pass. It orders this
+// process's work only; a reset is a development operation, and one across
+// replicas would need a database lock.
 //
 // [App.Run] is the hot start plus shutdown, delegated to the coordinator,
 // and returns the process exit code.

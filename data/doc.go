@@ -38,7 +38,9 @@
 // the composition root stages as a reactor anyway, since the reactor is
 // the process's one runner for work that lasts the process lifetime. Its
 // pass loop is kept apart from the logging policy, staged for promotion to
-// blobfs beside Sweep.
+// blobfs beside Sweep. Each pass holds the process's quiesce gate shared,
+// declared here as SweepGate, so no pass runs under an admin verb that
+// changes the schema, which holds it exclusively.
 //
 // Domains and the admin service are peers over this package; nothing here
 // imports either.

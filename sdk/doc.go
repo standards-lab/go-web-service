@@ -11,5 +11,9 @@
 // reactor, one source of occurrences joined to one function for the
 // process lifetime, with the Every and Wake sources; it is the
 // spike-messaging reactor with Wake added, and moves to go-core as its own
-// package. The v1.data.evaluation task rules on every tenant.
+// package. gate.go stages a second tenant for go-core beside it: the
+// quiesce gate, a context-aware readers-writer gate that prefers its
+// exclusive side, which a reactor's work holds shared and an operation
+// that must pause that work holds exclusively. The v1.data.evaluation task
+// rules on every tenant.
 package sdk

@@ -38,8 +38,9 @@ func newSweepWake(cfg *config.Config) *sdk.Waker {
 
 // newReactors constructs the reactors and registers each on lc at
 // stageReactors. It takes infra for the connections a reactor owns, cfg
-// for its schedule and its options, and wake for the source the sweep
-// receives from. Each reactor runs for the process lifetime, so it
+// for its schedule and its options, wake for the source the sweep
+// receives from, and gate for the quiesce gate each sweep pass holds
+// shared, so no pass runs under an admin verb that changes the schema. Each reactor runs for the process lifetime, so it
 // registers on the coordinator as an infrastructure service does, and lc
 // monitors its Err, so a reactor that fails ends the process. Every
 // reactor's Grace is half the shutdown timeout: the drain runs the root
@@ -50,11 +51,12 @@ func newReactors(
 	infra *Infrastructure,
 	cfg *config.Config,
 	wake *sdk.Waker,
+	gate *sdk.Gate,
 	lc *lifecycle.Coordinator,
 ) (*Reactors, error) {
 	grace := sdk.Grace(cfg.ShutdownTimeout.Duration() / 2)
 
-	sweep := infra.Storage.SweepWorker(infra.SQL.DB, infra.Logger,
+	sweep := infra.Storage.SweepWorker(infra.SQL.DB, gate, infra.Logger,
 		bfdata.Batch(*cfg.Sweep.Batch),
 		bfdata.StaleOlderThan(cfg.Sweep.StaleAge.Duration()),
 	)

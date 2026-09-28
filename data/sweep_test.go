@@ -190,3 +190,84 @@ func TestSweepWorker_ARefusalKeepsTheReactor(t *testing.T) {
 		t.Errorf("Shutdown = %v", err)
 	}
 }
+
+// A pass waits out a schema change: while the gate is held exclusively no
+// pass runs, and once it is released the wake's passes run.
+func TestSweepWorker_APassWaitsOutASchemaChange(t *testing.T) {
+	gate := new(sdk.Gate)
+	change, err := gate.Exclusive(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran := make(chan struct{}, 1)
+	p := &passes{t: t, results: []bfdata.SweepResult{{}}, during: map[int]func(){0: func() { ran <- struct{}{} }}}
+	logger, _ := logged()
+	done := make(chan error, 1)
+	go func() { done <- sweepWorker(gated(gate, p.pass), logger)(context.Background(), time.Now()) }()
+
+	select {
+	case <-ran:
+		t.Fatal("a pass ran under the schema change")
+	case <-time.After(50 * time.Millisecond):
+	}
+	change()
+	select {
+	case <-ran:
+	case <-time.After(waitFor):
+		t.Fatal("no pass ran once the schema change released the gate")
+	}
+	if err := <-done; err != nil {
+		t.Errorf("worker = %v, want nil", err)
+	}
+}
+
+// A schema change waits for the pass in flight, and holds the gate once
+// the pass returns.
+func TestSweepWorker_ASchemaChangeWaitsForThePass(t *testing.T) {
+	gate := new(sdk.Gate)
+	inPass, finish := make(chan struct{}), make(chan struct{})
+	p := &passes{t: t, results: []bfdata.SweepResult{{}}, during: map[int]func(){0: func() {
+		close(inPass)
+		<-finish
+	}}}
+	logger, _ := logged()
+	done := make(chan error, 1)
+	go func() { done <- sweepWorker(gated(gate, p.pass), logger)(context.Background(), time.Now()) }()
+	<-inPass
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if _, err := gate.Exclusive(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Exclusive under a pass = %v, want it to wait out its deadline", err)
+	}
+	close(finish)
+	if err := <-done; err != nil {
+		t.Fatalf("worker = %v", err)
+	}
+	change, err := gate.Exclusive(context.Background())
+	if err != nil {
+		t.Fatalf("Exclusive after the pass = %v", err)
+	}
+	change()
+}
+
+// A drain that ends the wake while a pass waits on the gate runs no pass,
+// and the worker returns the cancellation.
+func TestSweepWorker_TheDrainEndsAWaitingPass(t *testing.T) {
+	gate := new(sdk.Gate)
+	change, err := gate.Exclusive(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer change()
+	p := &passes{t: t}
+	logger, out := logged()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if err := sweepWorker(gated(gate, p.pass), logger)(ctx, time.Now()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("worker = %v, want the context's end", err)
+	}
+	if p.calls != 0 || out.String() != "" {
+		t.Errorf("passes = %d, log %q; want no pass and no record", p.calls, out)
+	}
+}

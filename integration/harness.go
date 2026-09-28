@@ -93,7 +93,10 @@ func Start(t testing.TB, opts Options) *Service {
 
 // Launch runs the service with opts on a reserved loopback port and returns
 // without waiting, so a test can start several processes at once; Ready
-// waits for one.
+// waits for one. A test that fails logs the process's output at its
+// cleanup, before the process is stopped, so a failure a client sees, a
+// 500 from any call, the harness's Reset included, comes with the
+// service's own record of it.
 func Launch(t testing.TB, opts Options) *Service {
 	t.Helper()
 	host, port, err := net.SplitHostPort(opts.Database)
@@ -103,6 +106,11 @@ func Launch(t testing.TB, opts Options) *Service {
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(processtest.FreePort(t)))
 	s := &Service{addr: addr, client: webtest.NewClient("http://" + addr)}
 	s.Process = processtest.Launch(t, environment(opts, addr, host, port)...)
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("service %s output:\n%s", addr, s.Output())
+		}
+	})
 	return s
 }
 

@@ -115,7 +115,8 @@ accumulates no sub-packages, with each file named for the library its contents a
 Staging is cheap and deliberate; the `v1.data.evaluation` task rules on every tenant. The
 tenants are `PathID`, the typed path-value parse, and `Command`, the guarded-command read
 composing it with the SDK's `IfMatch` and `DecodeJSON`, both bound for go-web-sdk, and the
-reactor (`reactor.go`, with the `Every` and `Wake` sources), bound for go-core.
+reactor (`reactor.go`, with the `Every` and `Wake` sources) with the quiesce gate (`gate.go`, a
+context-aware readers-writer gate that prefers its exclusive side), both bound for go-core.
 
 ## The operation-shape principle
 

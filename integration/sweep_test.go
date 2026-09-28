@@ -5,9 +5,11 @@ package integration_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/standards-lab/go-core/process/processtest"
 	"github.com/standards-lab/go-storage"
@@ -217,5 +219,41 @@ func TestSweepAtStartup(t *testing.T) {
 	})
 	if _, err := integration.Objects(t).Stat(context.Background(), key); !errors.Is(err, storage.ErrNotFound) {
 		t.Errorf("stat %s after the startup sweep = %v; want not found", key, err)
+	}
+}
+
+// A reset never meets a sweep pass: the reset holds the process's quiesce
+// gate exclusively and each pass holds it shared, so a pass in flight
+// finishes before the revert begins and none starts until the reset is
+// done. Unguarded, the two deadlock: the revert of organization_directory
+// and a pass's cascading directory removal lock the two tables in the
+// opposite order, the reset fails with SQLSTATE 40P01, and a pass that
+// runs while the tables are dropped is refused on every statement. Each
+// round marks a branch of many directories, whose removals are the
+// cascading deletes, so the mark's nudge has the sweep working in passes
+// of five, and resets at a staggered offset into that work. The rounds run
+// in one process, since the startup sweep and a nudged one are the same
+// pass; a round costs well under a second.
+func TestSweepUnderReset(t *testing.T) {
+	s := integration.Start(t, integration.Options{
+		Seed: integration.Default,
+		Env:  []string{"APP_SWEEP_BATCH=5", "APP_RATE_LIMIT_REQUESTS=100000"},
+	})
+	c := s.Client()
+	refusals := strings.Count(s.Output(), refusedRecord)
+	for round := range 15 {
+		integration.Reset(t, c, integration.Default)
+		docs := "/api/documents/" + tree(t, c)["acme"].ID
+		branch := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "branch"}), http.StatusCreated)
+		for i := range 40 {
+			c.Post(t, docs+"/directories", map[string]string{"parent_id": branch.ID, "name": fmt.Sprint("d", i)}).Expect(t, http.StatusCreated)
+		}
+		markBranch(t, c, docs, branch.ID)
+		time.Sleep(time.Duration(round%5) * 5 * time.Millisecond)
+		// The reset under test: Reset fails the round on anything but 200.
+		integration.Reset(t, c, integration.Default)
+	}
+	if n := strings.Count(s.Output(), refusedRecord) - refusals; n != 0 {
+		t.Errorf("%d sweep passes were refused across the resets; want none to run under one", n)
 	}
 }

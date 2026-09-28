@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -17,8 +18,32 @@ const maxBody = 1 << 10
 // ErrUnconfirmed rejects a reset whose body does not confirm it.
 var ErrUnconfirmed = errors.New(`database: a reset reverts every migration set and its rows; it requires "confirm": true`)
 
+// SchemaGate is what the domain asks of the process while a verb changes
+// the schema: that the process's background work over the schema pause.
+// Exclusive waits for that work's turn in flight to finish and holds every
+// later turn off until the release, or returns ctx's error, holding
+// nothing, if ctx ends first. The domain declares it and the composition
+// root injects it; the process's quiesce gate satisfies it, and the sweep
+// holds the same gate shared for each pass.
+//
+// The gate exists because a schema change and the sweep deadlock:
+// reverting the migration that drops organization_directory, or the one
+// that alters its cascading foreign key into blobfs_directory, locks the
+// two tables in the opposite order from a sweep pass's directory removal,
+// whose delete cascades from blobfs_directory into organization_directory,
+// and Postgres aborts one of them (SQLSTATE 40P01). The gate is per
+// process: it keeps this process's sweep out of this process's schema
+// change, and nothing else. A reset is a development operation; with
+// several replicas, another replica's sweep, or API traffic that removes a
+// document root, can still meet it, and a multi-replica reset would need
+// a database lock the sweep takes too.
+type SchemaGate interface {
+	Exclusive(ctx context.Context) (release func(), err error)
+}
+
 type handler struct {
 	service *admin.Service
+	gate    SchemaGate
 }
 
 // Routes builds the admin domain's route group, rooted at /database. Reads:
@@ -36,6 +61,13 @@ type handler struct {
 //   - state: resets the database to the state its body names, once the
 //     body confirms it, and answers with the transition
 //
+// up, down, steps, and state change the schema, so each holds gate
+// exclusively around its operation: the process's sweep finishes its pass
+// in flight first and starts no other until the change is done. verify
+// and force hold nothing: verify reads, and force sets a set's history
+// without running any file, so neither takes a lock the sweep contends
+// for; seed only inserts rows.
+//
 // The status reports each migration set, in declaration order. force sets
 // a set's history without running any file, the operator's override for
 // dirty state after the schema has been repaired by hand. Every rejection
@@ -46,8 +78,8 @@ type handler struct {
 // The composition root mounts the group into the admin mount. The
 // confirmation token the strategy requires for down and force arrives with
 // the management listener.
-func Routes(service *admin.Service) *web.Group {
-	h := &handler{service: service}
+func Routes(service *admin.Service, gate SchemaGate) *web.Group {
+	h := &handler{service: service, gate: gate}
 	ew := web.NewErrorWriter(status)
 	ew.Detail(http.StatusForbidden, http.StatusConflict)
 	g := web.NewGroup("/database")
@@ -99,7 +131,7 @@ func (h *handler) verify(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (h *handler) up(w http.ResponseWriter, r *http.Request) error {
-	return respond(w)(h.service.Up(r.Context()))
+	return respond(w)(exclusive(r.Context(), h.gate, h.service.Up))
 }
 
 // down reverts one migration of the named set when the body omits steps.
@@ -111,7 +143,9 @@ func (h *handler) down(w http.ResponseWriter, r *http.Request) error {
 	if body.Steps == 0 {
 		body.Steps = 1
 	}
-	return respond(w)(h.service.Down(r.Context(), body.Set, body.Steps))
+	return respond(w)(exclusive(r.Context(), h.gate, func(ctx context.Context) (admin.Status, error) {
+		return h.service.Down(ctx, body.Set, body.Steps)
+	}))
 }
 
 func (h *handler) steps(w http.ResponseWriter, r *http.Request) error {
@@ -119,7 +153,9 @@ func (h *handler) steps(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	return respond(w)(h.service.Steps(r.Context(), body.Set, body.Steps))
+	return respond(w)(exclusive(r.Context(), h.gate, func(ctx context.Context) (admin.Status, error) {
+		return h.service.Steps(ctx, body.Set, body.Steps)
+	}))
 }
 
 func (h *handler) force(w http.ResponseWriter, r *http.Request) error {
@@ -154,11 +190,26 @@ func (h *handler) state(w http.ResponseWriter, r *http.Request) error {
 	if !body.Confirm {
 		return fmt.Errorf("%w (state %q)", ErrUnconfirmed, body.State)
 	}
-	tr, err := h.service.Reset(r.Context(), body.State)
+	tr, err := exclusive(r.Context(), h.gate, func(ctx context.Context) (admin.Transition, error) {
+		return h.service.Reset(ctx, body.State)
+	})
 	if err != nil {
 		return err
 	}
 	return web.WriteJSON(w, http.StatusOK, tr)
+}
+
+// exclusive runs op holding gate exclusively, and releases it once op
+// returns. A gate that ctx ended before it was held runs nothing and
+// returns ctx's error.
+func exclusive[T any](ctx context.Context, gate SchemaGate, op func(context.Context) (T, error)) (T, error) {
+	release, err := gate.Exclusive(ctx)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	defer release()
+	return op(ctx)
 }
 
 // respond writes an operation's resulting status, or returns its error.

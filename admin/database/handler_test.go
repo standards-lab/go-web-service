@@ -1,12 +1,15 @@
 package database_test
 
 import (
+	"context"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	godb "github.com/standards-lab/go-database"
 	"github.com/standards-lab/go-database/admin"
@@ -18,6 +21,7 @@ import (
 
 	"github.com/standards-lab/go-web-service/admin/database"
 	"github.com/standards-lab/go-web-service/data"
+	"github.com/standards-lab/go-web-service/sdk"
 )
 
 // dialect is the scripted driver's dialect with the server-version
@@ -31,8 +35,16 @@ func (dialect) ServerVersion() string { return "SELECT version()" }
 // pings, the session, the migrator over the service's migration set
 // (unlocked, since the test dialect has no lock capability), the catalog,
 // and the data package as seeder and registry; seed names the state whose
-// set the service applies on a seed request naming none.
+// set the service applies on a seed request naming none. The schema gate
+// is an open one no sweep holds.
 func module(t *testing.T, seed string, responses ...sqltest.Response) (http.Handler, *sqltest.Recorder) {
+	t.Helper()
+	return gatedModule(t, new(sdk.Gate), seed, responses...)
+}
+
+// gatedModule is module over the given schema gate, which a test holds
+// shared as a sweep pass in flight would.
+func gatedModule(t *testing.T, gate database.SchemaGate, seed string, responses ...sqltest.Response) (http.Handler, *sqltest.Recorder) {
 	t.Helper()
 	pool, rec := sqltest.Open(t, responses...)
 	cfg := godb.Config{Name: "app"}
@@ -52,7 +64,7 @@ func module(t *testing.T, seed string, responses ...sqltest.Response) (http.Hand
 	}
 	svc := admin.New(pdb, sdb, m, catalog, admin.Options{Seed: seed, Seeder: data.NewSeeder(d), Registry: d})
 	r := web.NewRouter()
-	r.Mount(web.NewModule(database.Routes(svc)))
+	r.Mount(web.NewModule(database.Routes(svc, gate)))
 	return r, rec
 }
 
@@ -237,4 +249,92 @@ func TestDiagnostics_PingsAndReadsTheServerVersion(t *testing.T) {
 	if got := rec.SQL(sqltest.OpQuery); len(got) != 1 || got[0] != "SELECT version()" {
 		t.Errorf("queries = %v; want the dialect's version statement", got)
 	}
+}
+
+// sendWithin is send under a request context that ends after d, as a
+// client that gives up would.
+func sendWithin(t *testing.T, h http.Handler, d time.Duration, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	defer cancel()
+	r := httptest.NewRequestWithContext(ctx, "POST", path, strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	return rec
+}
+
+// A reset waits for the sweep pass in flight: while a pass holds the gate
+// shared, the reset reaches no statement, and once the pass releases it,
+// the reset runs, here into a scripted failure, and releases the gate in
+// turn.
+func TestState_WaitsForTheSweepPassInFlight(t *testing.T) {
+	gate := new(sdk.Gate)
+	pass, err := gate.Shared(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, rec := gatedModule(t, gate, "default", sqltest.Response{Err: errors.New("scripted: the revert failed")})
+
+	done := make(chan int, 1)
+	go func() { done <- send(t, h, "POST", "/database/state", `{"state":"default","confirm":true}`).Code }()
+	time.Sleep(50 * time.Millisecond)
+	select {
+	case code := <-done:
+		t.Fatalf("the reset answered %d under a pass in flight, want it waiting", code)
+	default:
+	}
+	if calls := rec.Calls(); len(calls) != 0 {
+		t.Fatalf("the reset reached the database under a pass in flight: %v", calls)
+	}
+
+	pass()
+	select {
+	case code := <-done:
+		if code != http.StatusInternalServerError {
+			t.Errorf("reset = %d, want the scripted failure's 500", code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the reset did not run once the pass released the gate")
+	}
+	if len(rec.Calls()) == 0 {
+		t.Error("the reset reached no statement once the gate was free")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	next, err := gate.Shared(ctx)
+	if err != nil {
+		t.Fatalf("the next pass after the reset: %v; want the gate released", err)
+	}
+	next()
+}
+
+// Every verb that changes the schema holds the gate: with a pass holding
+// it, each waits until its request gives up, having run nothing. verify,
+// force, and seed hold nothing, so each answers under the pass.
+func TestVerbs_ChangingTheSchemaHoldTheGate(t *testing.T) {
+	gate := new(sdk.Gate)
+	pass, err := gate.Shared(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pass()
+	h, rec := gatedModule(t, gate, "default", count(0))
+
+	for path, body := range map[string]string{
+		"/database/schema/up":    "",
+		"/database/schema/down":  `{"set":"app"}`,
+		"/database/schema/steps": `{"set":"app","steps":1}`,
+		"/database/state":        `{"state":"default","confirm":true}`,
+	} {
+		if code := sendWithin(t, h, 30*time.Millisecond, path, body).Code; code != http.StatusInternalServerError {
+			t.Errorf("%s under a pass = %d, want the abandoned wait's 500", path, code)
+		}
+	}
+	if calls := rec.Calls(); len(calls) != 0 {
+		t.Fatalf("a verb waiting on the gate reached the database: %v", calls)
+	}
+
+	decode(t, send(t, h, "POST", "/database/schema/verify", ""), http.StatusConflict)
+	decode(t, send(t, h, "POST", "/database/schema/force", `{"set":"nope","version":1}`), http.StatusBadRequest)
+	decode(t, send(t, h, "POST", "/database/seed", `{"state":"nope"}`), http.StatusBadRequest)
 }

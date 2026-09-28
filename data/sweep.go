@@ -35,9 +35,30 @@ import (
 // options, the unit the worker repeats.
 type sweepPass func(ctx context.Context) (bfdata.SweepResult, error)
 
+// SweepGate is what the worker asks of the process before each pass: its
+// turn, alongside any other background work, while no schema change runs.
+// Shared waits out a schema change that holds the gate or waits for it,
+// and returns the release, or ctx's error, holding nothing, if ctx ends
+// first. The worker declares it and the composition root injects it; the
+// process's quiesce gate satisfies it, and the database admin domain holds
+// the same gate exclusively around every verb that changes the schema.
+//
+// A pass must not run under a schema change: a pass's directory removal
+// cascades from blobfs_directory into organization_directory, and a
+// revert that drops that table or alters its foreign key locks the two in
+// the opposite order, so the two deadlock and Postgres aborts one; a pass
+// that runs while the tables are dropped fails on every statement. The
+// gate is per process, so it orders this process's sweep against this
+// process's schema changes only; the database admin domain's SchemaGate
+// says what that leaves out.
+type SweepGate interface {
+	Shared(ctx context.Context) (release func(), err error)
+}
+
 // SweepWorker returns the sweep's background worker as a reactor's Func:
 // on each wake it runs blobfs's sweep over db and the object store, with
-// opts, in passes while a pass reports More, and logs each pass to logger.
+// opts, in passes while a pass reports More, each pass holding gate
+// shared, and logs each pass to logger.
 // One wake finishes the work waiting, in passes of the configured batch,
 // and the next wake finds whatever arrived since.
 //
@@ -55,10 +76,25 @@ type sweepPass func(ctx context.Context) (bfdata.SweepResult, error)
 // database's and the store's own readiness checks instead. The one error
 // it returns is its context's, once the drain cancels it past the
 // reactor's Grace, which Shutdown reports as handlers cancelled.
-func (s *Storage) SweepWorker(db *sqlate.DB, logger *slog.Logger, opts ...bfdata.SweepOption) sdk.Func[time.Time] {
-	return sweepWorker(func(ctx context.Context) (bfdata.SweepResult, error) {
+func (s *Storage) SweepWorker(db *sqlate.DB, gate SweepGate, logger *slog.Logger, opts ...bfdata.SweepOption) sdk.Func[time.Time] {
+	return sweepWorker(gated(gate, func(ctx context.Context) (bfdata.SweepResult, error) {
 		return s.FS.Sweep(ctx, db, s.Objects, opts...)
-	}, logger)
+	}), logger)
+}
+
+// gated runs pass holding gate shared, so a pass waits out a schema change
+// and a schema change waits for the pass in flight. A wait that ctx ends
+// runs no pass and returns ctx's error, which ends the worker's loop as
+// the drain's cancellation.
+func gated(gate SweepGate, pass sweepPass) sweepPass {
+	return func(ctx context.Context) (bfdata.SweepResult, error) {
+		release, err := gate.Shared(ctx)
+		if err != nil {
+			return bfdata.SweepResult{}, err
+		}
+		defer release()
+		return pass(ctx)
+	}
 }
 
 // sweepWorker joins the loop to the logging policy over any pass, the seam

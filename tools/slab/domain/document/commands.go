@@ -299,7 +299,7 @@ func (d deps) dirsDeleteCommand() *cobra.Command {
 			if wait == 0 {
 				return nil
 			}
-			took, err := awaitSweep(cmd.Context(), client, location, wait)
+			took, err := AwaitSweep(cmd.Context(), client, location, wait)
 			if err != nil {
 				return err
 			}
@@ -314,17 +314,18 @@ func (d deps) dirsDeleteCommand() *cobra.Command {
 	return cmd
 }
 
-// pollInterval is how long awaitSweep waits between reads of the Location.
+// pollInterval is how long AwaitSweep waits between reads of the Location.
 // The delete nudges the sweep, so a small branch is usually gone by the
 // first or second read.
 const pollInterval = 250 * time.Millisecond
 
-// awaitSweep reads location until it answers 404, the sweep having removed
+// AwaitSweep reads location until it answers 404, the sweep having removed
 // the branch, and returns how long that took. A 200 is the directory still
 // deleting, read again after pollInterval; any other status is returned as
 // output.Expect's error. When limit passes first, or ctx ends, it returns
-// the reason.
-func awaitSweep(ctx context.Context, client *Client, location string, limit time.Duration) (time.Duration, error) {
+// the reason. It is exported because it is --wait's one definition: the
+// storage demo waits for the sweep through it rather than restating it.
+func AwaitSweep(ctx context.Context, client *Client, location string, limit time.Duration) (time.Duration, error) {
 	start := time.Now()
 	deadline := start.Add(limit)
 	for {

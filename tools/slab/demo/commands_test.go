@@ -18,8 +18,8 @@ func TestScenarios_ListsEachOnceInPresentationOrder(t *testing.T) {
 	for _, s := range Scenarios() {
 		names = append(names, s.Name)
 	}
-	if got := strings.Join(names, ","); got != "sqlate,domain,problems" {
-		t.Errorf("Scenarios() = %s; want sqlate,domain,problems", got)
+	if got := strings.Join(names, ","); got != "sqlate,domain,problems,storage" {
+		t.Errorf("Scenarios() = %s; want sqlate,domain,problems,storage", got)
 	}
 }
 
@@ -34,8 +34,8 @@ func TestCommands_MountsOneSubcommandPerScenario(t *testing.T) {
 	for _, cmd := range demo.Commands() {
 		names = append(names, cmd.Name())
 	}
-	if got := strings.Join(names, ","); got != "domain,problems,sqlate" {
-		t.Errorf("Commands() subcommands = %s; want domain,problems,sqlate", got)
+	if got := strings.Join(names, ","); got != "domain,problems,sqlate,storage" {
+		t.Errorf("Commands() subcommands = %s; want domain,problems,sqlate,storage", got)
 	}
 }
 

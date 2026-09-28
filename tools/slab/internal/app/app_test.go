@@ -66,7 +66,7 @@ func TestRoot_PrintsHelpAndTheListing(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("root exited %d: %s", code, errOut)
 	}
-	for _, want := range []string{"Available Commands:", "org", "docs", "admin", "demo", "list", "Scenarios:", "  sqlate    ", "  domain    ", "  problems  "} {
+	for _, want := range []string{"Available Commands:", "org", "docs", "admin", "demo", "list", "Scenarios:", "  sqlate    ", "  domain    ", "  problems  ", "  storage   "} {
 		if !strings.Contains(out, want) {
 			t.Errorf("root output lacks %q:\n%s", want, out)
 		}
@@ -79,8 +79,9 @@ func TestList_PrintsTheScenariosInPresentationOrder(t *testing.T) {
 		t.Fatalf("list exited %d: %s", code, errOut)
 	}
 	sqlate, domain, problems := strings.Index(out, "  sqlate    "), strings.Index(out, "  domain    "), strings.Index(out, "  problems  ")
-	if sqlate < 0 || domain < sqlate || problems < domain {
-		t.Errorf("list does not print sqlate, domain, problems in that order:\n%s", out)
+	storage := strings.Index(out, "  storage   ")
+	if sqlate < 0 || domain < sqlate || problems < domain || storage < problems {
+		t.Errorf("list does not print sqlate, domain, problems, storage in that order:\n%s", out)
 	}
 }
 
@@ -89,7 +90,7 @@ func TestDemo_MountsEachScenario(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("demo exited %d: %s", code, errOut)
 	}
-	for _, want := range []string{"Available Commands:", "sqlate", "domain", "problems"} {
+	for _, want := range []string{"Available Commands:", "sqlate", "domain", "problems", "storage"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("demo help lacks %q:\n%s", want, out)
 		}

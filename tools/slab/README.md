@@ -22,12 +22,14 @@ mise run slab -- list                            # every scenario, its summary, 
 mise run slab -- demo sqlate                     # the compile pipeline, in process (no compose stack needed)
 mise run slab -- demo domain                     # the organization domain's full CRUD, against the running service
 mise run slab -- demo problems                   # a tour of the service's problem responses, against the running service
+mise run slab -- demo storage                    # logos, documents, the refusals, and the sweep, against the running service
 mise run slab -- org list                        # the organization domain's endpoints, one subcommand per route
 mise run slab -- docs dirs list <org-id> root    # the document domain's endpoints, grouped by dirs and files
 mise run slab -- admin database schema status    # the admin mount's endpoints, under their own domain word
 ```
 
-Everything but `demo sqlate` needs the full compose stack:
+Everything but `demo sqlate` needs the compose stack and the service (`demo storage` reads no
+traces, so it needs no Grafana, but `mise run serve` streams its logs to the collector):
 
 ```sh
 mise run db-up && mise run otel-up
@@ -105,6 +107,17 @@ Both share the persistent flags below with `demo`.
   duplicate code, and a transfer cycle — one request each, every response's trace pointer
   located in Grafana. Resets to the seeded tree first; none of the conditions write a row, so a
   run never drifts the seed data.
+- **storage** — the service's stored files end to end: the two migration sets (`blobfs` and
+  `app`) from the schema status and an additive seed of the `default` state; acme's logo read, a
+  304 revalidation by its ETag, a replacement with another seeded fixture read back under a new
+  ETag, and a delete; acme's seeded document tree, then its top-level directories walked by
+  cursor a page of one at a time; the scoped refusals (a delete with no `If-Match`, 428, and with
+  a stale one, 412; a taken name, 409 with its fixed detail; acme's directory id asked for under
+  another organization, 404); a run-named branch deleted recursively, its 202 and `deleting`
+  read, then the sweep waited out to 404 as `dirs delete --wait` does; and a reset to `default`
+  with the counts it seeded. The additive seed writes back a logo an interrupted run deleted, and
+  the branch's name is unique to the run, so it runs twice in a row. Needs postgres, azurite, and
+  the service, not Grafana.
 
 ## Flags
 

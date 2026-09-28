@@ -35,7 +35,9 @@ type Step struct {
 
 // Run checks every need of s, then runs its steps in order, narrating each
 // intent through r before its action. It stops at the first need that fails
-// or the first action that returns an error.
+// or the first action that returns an error, which it returns naming the
+// step by its number and its intent, so a failed run's last line says which
+// beat failed without the reader counting headings.
 func Run(ctx context.Context, s Scenario, r *Reporter) error {
 	for _, n := range s.Needs {
 		if n.Check == nil {
@@ -58,7 +60,7 @@ func Run(ctx context.Context, s Scenario, r *Reporter) error {
 			continue
 		}
 		if err := step.Action(ctx, r); err != nil {
-			return fmt.Errorf("%s: step %d: %w", s.Name, i+1, err)
+			return fmt.Errorf("%s: step %d (%s): %w", s.Name, i+1, step.Intent, err)
 		}
 	}
 	return nil

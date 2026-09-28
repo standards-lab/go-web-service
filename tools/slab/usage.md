@@ -174,8 +174,13 @@ mise run slab -- admin storage container       # creates the container; succeeds
 mise run slab -- demo sqlate     # no stack needed, deterministic output
 mise run slab -- demo domain
 mise run slab -- demo problems
+mise run slab -- demo storage    # ends by resetting to the default state
+mise run slab -- demo storage    # runs again as it stands: the branch it deletes is named for the run
 mise run slab -- list
 ```
+
+A step whose response is not the one it expects stops the scenario and exits non-zero, naming
+the step by its number and intent, as in `storage: step 6 (Logo Delete): status = 500 ...`.
 
 ## Clean up
 

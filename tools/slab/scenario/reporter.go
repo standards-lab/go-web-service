@@ -27,8 +27,10 @@ func NewReporter(w io.Writer, color bool) *Reporter {
 }
 
 // shownHeaders are the response headers Response prints when present, in
-// this order; every other header is omitted.
-var shownHeaders = []string{"Content-Type", "Location", "Traceparent", "X-Request-Id"}
+// this order; every other header is omitted. ETag and Last-Modified are a
+// stored object's validators, which a download carries and a conditional
+// read names back; a JSON response carries neither.
+var shownHeaders = []string{"Content-Type", "ETag", "Last-Modified", "Location", "Traceparent", "X-Request-Id"}
 
 // contentType is the header httpx.Client.Do sets on its own whenever a
 // request carries a body; Request prints it so the block shows what is sent.

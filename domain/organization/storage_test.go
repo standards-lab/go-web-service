@@ -108,7 +108,7 @@ func TestStore_LogoProtocolsBindTheirFilesParameters(t *testing.T) {
 		t.Fatal(err)
 	}
 	id, err := s.PutLogo(ctx, validID, logoUpload(t))
-	if err != nil || id != (organization.Identity{ID: newFileID, Version: 2}) {
+	if err != nil || id != (organization.LogoIdentity{ID: newFileID}) {
 		t.Fatalf("PutLogo = %+v, %v", id, err)
 	}
 	create := rec.Calls()[3]
@@ -276,7 +276,7 @@ func TestPutLogo_AnswersCreatedWithLocation(t *testing.T) {
 	r.Mount(web.NewModule(organization.Routes(s, web.Limits{DefaultSize: 20, MaxSize: 100})))
 	path := "/organizations/" + validID + "/logo"
 	rec := upload(t, r, path, "image/png", "png", 3)
-	if rec.Code != 201 || rec.Header().Get("Location") != path || !strings.Contains(rec.Body.String(), `"id":"`+newFileID+`","version":2`) {
+	if rec.Code != 201 || rec.Header().Get("Location") != path || strings.TrimSpace(rec.Body.String()) != `{"id":"`+newFileID+`"}` {
 		t.Fatalf("status %d, Location %q, body %s", rec.Code, rec.Header().Get("Location"), rec.Body)
 	}
 	sameOps(t, db, q, begin, q, q, commit, q, begin, x, q, x, commit)

@@ -34,13 +34,13 @@ const imagesDirectory = "organization-images"
 // and its row. A concurrent replacement that activated first fails the
 // insert with a unique violation; the new file is retired so it does not
 // linger.
-func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload, ext string) (Identity, error) {
+func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload, ext string) (LogoIdentity, error) {
 	st := s.storage
 	// On the pool, Ensure finds the directory a concurrent first upload
 	// created between its lookup and its insert.
 	dir, _, err := st.FS.Directories.Ensure(ctx, s.db, blobfs.RootID, imagesDirectory)
 	if err != nil {
-		return Identity{}, err
+		return LogoIdentity{}, err
 	}
 	id := blobfs.NewID()
 	file, err := st.Write(ctx, s.db.DB, u.Body, u.Size, func(tx *sqlate.Tx) (blobfs.File, error) {
@@ -52,7 +52,7 @@ func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload
 		return st.FS.Files.Create(ctx, tx, st.Objects, dir.ID, id+ext, u.ContentType, bfdata.WithID(id))
 	})
 	if err != nil {
-		return Identity{}, err
+		return LogoIdentity{}, err
 	}
 	replaced, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (blobfs.File, error) {
 		if err := st.FS.Files.Hold(ctx, tx, file.ID); err != nil {
@@ -72,7 +72,7 @@ func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload
 	})
 	if err != nil {
 		// The activation rolled back, so no image references the new file.
-		return Identity{}, errors.Join(err, st.Retire(ctx, s.db.DB, func(*sqlate.Tx) (string, error) { return file.ID, nil }))
+		return LogoIdentity{}, errors.Join(err, st.Retire(ctx, s.db.DB, func(*sqlate.Tx) (string, error) { return file.ID, nil }))
 	}
 	if replaced.ID != "" {
 		// The new logo is active and the replaced file unreferenced and
@@ -80,10 +80,10 @@ func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload
 		// replacement stands; the stale reclaim finishes the file if no
 		// retry does.
 		if err := st.Purge(ctx, s.db.DB, replaced); err != nil {
-			return Identity{}, fmt.Errorf("retire the replaced logo %s: %w", replaced.ID, err)
+			return LogoIdentity{}, fmt.Errorf("retire the replaced logo %s: %w", replaced.ID, err)
 		}
 	}
-	return Identity{ID: file.ID, Version: file.Version}, nil
+	return LogoIdentity{ID: file.ID}, nil
 }
 
 // logo reads the organization's active logo. Only an available file is

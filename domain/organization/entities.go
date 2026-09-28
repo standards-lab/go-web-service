@@ -113,6 +113,13 @@ type Identity struct {
 	Version int64  `json:"version"`
 }
 
+// LogoIdentity is the logo PUT's success envelope: the new logo file's id,
+// and no version, since the logo routes take no If-Match and a version
+// there would be a validator nothing accepts.
+type LogoIdentity struct {
+	ID string `json:"id"`
+}
+
 // seedRow is one organization of a named state, in the vocabulary of the
 // API: an organization names its parent by code, the empty code being the
 // root, and the rows come parents first.

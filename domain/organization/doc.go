@@ -72,5 +72,7 @@
 // above, not a precondition. Its read's ETag is the object store's tag for
 // the active logo's bytes, with Last-Modified the file's last change, and a
 // conditional GET naming either answers 304; a replacement is a new object
-// with a new tag.
+// with a new tag. The PUT answers 201 Created with the logo's Location and
+// the new file's id, and no version, whether or not it replaced a logo:
+// every PUT creates a new file.
 package organization

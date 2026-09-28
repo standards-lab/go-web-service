@@ -95,13 +95,13 @@ func (s *Service) Delete(ctx context.Context, id string, version int64) error {
 
 // PutLogo stores the upload as the organization's logo and makes it the
 // active one, retiring the logo it replaces, and returns the new file's
-// identity. A media type outside the logo's allowlist is refused before any
+// id. A media type outside the logo's allowlist is refused before any
 // I/O; a nonexistent organization is sql.ErrNoRows, and a concurrent
 // replacement that activated first is a unique violation.
-func (s *Service) PutLogo(ctx context.Context, id string, u web.Upload) (Identity, error) {
+func (s *Service) PutLogo(ctx context.Context, id string, u web.Upload) (LogoIdentity, error) {
 	ext, err := logoExtension(u.MediaType)
 	if err != nil {
-		return Identity{}, err
+		return LogoIdentity{}, err
 	}
 	return s.store.putLogo(ctx, id, u, ext)
 }

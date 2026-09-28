@@ -29,7 +29,7 @@ mise run slab -- org get-by-path acme/engineering
 
 ```sh
 # the logo: store, read back, revalidate, replace, remove
-mise run slab -- org logo put <acme-id> acme.png                   # 201, the new file's id and version
+mise run slab -- org logo put <acme-id> acme.png                   # 201, the new file's id
 mise run slab -- org logo get <acme-id> --out /tmp/acme.png        # headers; bytes to the file
 mise run slab -- org logo get <acme-id> --if-none-match '"<etag>"' # 304 Not Modified
 mise run slab -- org logo put <acme-id> other.png                  # replaces; the old file is retired

@@ -8,9 +8,11 @@
 // processtest builds cmd/server once per suite run ([Main]), runs it as a
 // subprocess configured by APP_* environment variables on a reserved port
 // ([Start], [Launch]), reads its exit code ([Service.Stop]), and relays the
-// database through a loopback forwarder a test severs to prove the outage
-// path; go-web-sdk's webtest drives it through its HTTP surface and observes
-// its liveness probe ([Service.Ready]). State control goes through the admin
+// database or the object store through a loopback forwarder a test severs
+// to prove the outage path and the sweep's refusals; go-web-sdk's webtest
+// drives it through its HTTP surface and observes its liveness probe
+// ([Service.Ready]). [Objects] reads the object store beneath the API, so a
+// test can assert an object is gone. State control goes through the admin
 // mount ([Reset], [States], [Revert], [Schema], [Seed]), so nothing in the
 // runtime exists for the tests' sake. The suite files, tagged integration, need a
 // running compose stack; the harness itself and its own test do not, so the

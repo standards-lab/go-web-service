@@ -22,7 +22,7 @@ const defaultShutdownTimeout = 10 * time.Second
 
 // Config is the service's root configuration: the library capability blocks
 // (the object store among them) plus the service-owned reads policy, the
-// admin switches, and the shutdown timeout.
+// admin switches, the sweep's schedule, and the shutdown timeout.
 type Config struct {
 	Log             logging.Config       `json:"log"`
 	Server          web.Config           `json:"server"`
@@ -32,6 +32,7 @@ type Config struct {
 	RateLimit       ratelimit.Config     `json:"rate_limit"`
 	Reads           ReadsConfig          `json:"reads"`
 	Admin           AdminConfig          `json:"admin"`
+	Sweep           SweepConfig          `json:"sweep"`
 	ShutdownTimeout libconfig.Duration   `json:"shutdown_timeout"`
 }
 
@@ -52,6 +53,7 @@ func (c *Config) Merge(src *Config) {
 	c.RateLimit.Merge(&src.RateLimit)
 	c.Reads.Merge(&src.Reads)
 	c.Admin.Merge(&src.Admin)
+	c.Sweep.Merge(&src.Sweep)
 }
 
 // Finalize applies the root default, reads the root's own environment
@@ -99,6 +101,9 @@ func (c *Config) Finalize(envPrefix string) error {
 	}
 	if err := c.Admin.Finalize(envPrefix); err != nil {
 		return fmt.Errorf("admin: %w", err)
+	}
+	if err := c.Sweep.Finalize(envPrefix); err != nil {
+		return fmt.Errorf("sweep: %w", err)
 	}
 	return nil
 }

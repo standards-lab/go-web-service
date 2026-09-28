@@ -93,13 +93,13 @@ meter providers before the pool connects, and a shutdown hook flushes them after
 drains, so it brackets the numbered stages rather than holding one of its own. Startup then does
 the database work itself, in lifecycle stages: the pool connects, the schema is verified and any
 pending migration applied, the configured seed set is applied (the `local` overlay names
-`default`, the reference tree), and each domain verifies its statements against the migrated
-schema. The service then logs `server ready` on `localhost:8080` (the `local` overlay binds
+`default`, the reference tree), each domain verifies its statements against the migrated
+schema, and the sweep reactor starts. The service then logs `server ready` on `localhost:8080` (the `local` overlay binds
 loopback and runs debug logging). From a second shell:
 
 ```sh
 curl localhost:8080/healthz   # 200 {"status":"ok"}
-curl localhost:8080/readyz    # 200 {"status":"ready","checks":[...]}  — lifecycle, database, schema
+curl localhost:8080/readyz    # 200 {"status":"ready","checks":[...]}  — lifecycle, database, storage, schema, sweeper
 ```
 
 Ctrl-C drains in-flight requests and exits with `server stopped`. That serve, probe, and
@@ -157,9 +157,15 @@ organization's document root, which its first write creates:
 
 The moves and the deletes take the row's version in `If-Match`: 428 when it is missing, 412
 when it is stale. A recursive delete marks the branch deleting and answers 202 with the
-directory's read as its `Location`; a sweep then removes the rows and their objects. Until it
-does, the directory reads `deleting`, its listings answer 404, and a write into it answers 409
-"the directory is being deleted". A repeated recursive delete answers 202 again. Every conflict
+directory's read as its `Location`; the sweep then removes the rows and their objects. The
+sweep is a reactor the delete nudges, which also wakes on an interval (30 seconds by default)
+for work no nudge announced, and reclaims uploads and deletes left unfinished past the stale age
+(an hour). Until it finishes, the directory reads `deleting`, its listings answer 404, and a
+write into it answers 409 "the directory is being deleted". A repeated recursive delete answers
+202 again, and nudges the sweep again. An object the sweep cannot delete leaves its file, and
+the directories above it, for a later pass; the sweep logs the refusal and runs on. A recursive
+delete of `root` removes the organization's document root with it, and its next write creates a
+new one. Every conflict
 carries one of the fixed details: "an entry with that name already exists", "the directory is
 not empty", "the directory is being deleted", "the file is referenced", or "the request
 conflicts with the current state".
@@ -230,7 +236,8 @@ against the compose stack, in CI on every merge to main and on demand from the A
 The suite lives in the `integration` package under the `integration` build tag. Its harness is
 the toolkit the SDKs ship beside what it exercises: go-core's `process/processtest` builds
 `cmd/server` once, runs it as a subprocess configured by `APP_*` variables on a reserved port,
-and relays the database through a loopback forwarder the outage test severs; go-web-sdk's
+and relays the database or the object store through a loopback forwarder a test severs, for
+the outage and for a sweep the store refuses; go-web-sdk's
 `webtest` drives it through its API. The service adds only its configuration and state control
 through the admin mount; nothing in the service exists for the tests' sake. The task runs
 the same `compose.yml` as its own project (`go-web-service-integration`, Postgres on 5433), so
@@ -253,8 +260,9 @@ Configuration layers in a fixed precedence, later sources winning:
    `APP_DATABASE_USER`, `APP_DATABASE_PASSWORD`, `APP_DATABASE_PORT`, and the pool settings),
    `APP_OBSERVABILITY_ENDPOINT` and `APP_OBSERVABILITY_SAMPLE_RATIO`, the rate limit
    (`APP_RATE_LIMIT_REQUESTS`, `APP_RATE_LIMIT_WINDOW`), the reads paging policy
-   (`APP_READS_DEFAULT_SIZE`, `APP_READS_MAX_SIZE`), and the admin seed set (`APP_ADMIN_SEED`, a
-   state name).
+   (`APP_READS_DEFAULT_SIZE`, `APP_READS_MAX_SIZE`), the admin seed set (`APP_ADMIN_SEED`, a
+   state name), and the sweep's interval, pass size, and stale age (`APP_SWEEP_INTERVAL`,
+   `APP_SWEEP_BATCH`, `APP_SWEEP_STALE_AGE`).
 
 Every file is optional: a deployment can run on the base file and environment variables alone,
 or on environment variables only.

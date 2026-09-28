@@ -232,6 +232,16 @@ func (s *store) remove(ctx context.Context, id string, root bool, version int64)
 	return err
 }
 
+// unbindRemoved removes the owner row of dir in the sweep's transaction
+// that removes it, when dir is top-level and so may be a document root;
+// the delete matches no row for a directory no organization binds.
+func (s *store) unbindRemoved(ctx context.Context, tx *sqlate.Tx, dir blobfs.Directory) error {
+	if dir.ParentID == nil || *dir.ParentID != blobfs.RootID {
+		return nil
+	}
+	return s.unbind(ctx, tx, dir.ID)
+}
+
 // moveDirectory moves the directory under a new parent within the same
 // root, under blobfs's tree lock and cycle check and the version guard. The
 // root itself stays where it is.

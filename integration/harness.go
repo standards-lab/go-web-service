@@ -1,12 +1,16 @@
 package integration
 
 import (
+	"context"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"testing"
 
 	"github.com/standards-lab/go-core/process/processtest"
+	"github.com/standards-lab/go-storage"
+	"github.com/standards-lab/go-storage/azureblob"
 	"github.com/standards-lab/go-web-sdk/webtest"
 )
 
@@ -23,6 +27,9 @@ const (
 	defaultStorageAccount        = "devstoreaccount1"
 	defaultStorageKey            = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
 	defaultObservabilityEndpoint = "127.0.0.1:4317"
+	// storageContainer is config.json's container, which the harness
+	// leaves the service on.
+	storageContainer = "go-web-service"
 )
 
 // getenv is the parent's value of name, or def when it sets none.
@@ -61,6 +68,10 @@ type Options struct {
 	// routes the service through a processtest.Forwarder. Empty uses the
 	// compose database.
 	Database string
+	// Storage overrides the object store's address as host:port in its
+	// endpoint, the way a test routes the service through a
+	// processtest.Forwarder. Empty uses the compose store.
+	Storage string
 	// Env appends further KEY=VALUE overrides, applied last.
 	Env []string
 }
@@ -129,6 +140,10 @@ func environment(opts Options, addr, dbHost, dbPort string) []string {
 	if v := os.Getenv("APP_OBSERVABILITY_ENDPOINT"); v != "" {
 		endpoint = v
 	}
+	storageEndpoint := storageURL()
+	if opts.Storage != "" {
+		storageEndpoint.Host = opts.Storage
+	}
 
 	env := []string{
 		"APP_ENV=",
@@ -139,7 +154,7 @@ func environment(opts Options, addr, dbHost, dbPort string) []string {
 		"APP_DATABASE_HOST=" + host,
 		"APP_DATABASE_PORT=" + port,
 		"APP_DATABASE_PASSWORD=" + password,
-		"APP_STORAGE_ENDPOINT=" + getenv("APP_STORAGE_ENDPOINT", defaultStorageEndpoint),
+		"APP_STORAGE_ENDPOINT=" + storageEndpoint.String(),
 		"APP_STORAGE_ACCOUNT=" + getenv("APP_STORAGE_ACCOUNT", defaultStorageAccount),
 		"APP_STORAGE_KEY=" + getenv("APP_STORAGE_KEY", defaultStorageKey),
 		"APP_OBSERVABILITY_ENDPOINT=" + endpoint,
@@ -158,3 +173,46 @@ func (s *Service) URL() string { return "http://" + s.addr }
 // Client returns the client bound to the service, one per process so its
 // connection is reused across calls.
 func (s *Service) Client() *webtest.Client { return s.client }
+
+// storageURL is the compose store's endpoint, the parent's
+// APP_STORAGE_ENDPOINT or the default. A value that does not parse is the
+// default, as an unset one is.
+func storageURL() *url.URL {
+	u, err := url.Parse(getenv("APP_STORAGE_ENDPOINT", defaultStorageEndpoint))
+	if err != nil || u.Host == "" {
+		u, _ = url.Parse(defaultStorageEndpoint)
+	}
+	return u
+}
+
+// StorageAddr is the compose store's address, host:port, the target a
+// test forwards the service's object store through.
+func StorageAddr() string { return storageURL().Host }
+
+// Objects starts a client of the container the service stores its objects
+// in, against the compose store the harness points the service at, so a
+// test can assert what the store holds beneath the API: an object the
+// service should have deleted is storage.ErrNotFound on Stat. It is the
+// harness's reader, not the service's; the store is shut down at cleanup.
+func Objects(t testing.TB) *storage.Store {
+	t.Helper()
+	cfg := storage.Config{
+		Endpoint:  storageURL().String(),
+		Container: storageContainer,
+		Account:   getenv("APP_STORAGE_ACCOUNT", defaultStorageAccount),
+		Key:       getenv("APP_STORAGE_KEY", defaultStorageKey),
+	}
+	if err := cfg.Finalize(""); err != nil {
+		t.Fatalf("object store config: %v", err)
+	}
+	client, err := azureblob.New(cfg)
+	if err != nil {
+		t.Fatalf("object store client: %v", err)
+	}
+	store := storage.New(client, cfg)
+	if err := store.Start(context.Background()); err != nil {
+		t.Fatalf("start the object store client: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Shutdown(context.Background()) })
+	return store
+}

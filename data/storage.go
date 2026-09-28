@@ -36,10 +36,13 @@ func NewStorage(fs *bfdata.Store, objects *storage.Store) *Storage {
 // Objects is the one place the service names its object-store library:
 // the adapter between blobfs's protocol steps and a started store. It is
 // the key validator blobfs's writes take as their first step's argument,
-// and the put, open, and delete the steps between them run.
+// the put, open, and delete the steps between them run, and the object
+// deleter blobfs's sweep calls.
 type Objects struct {
 	store *storage.Store
 }
+
+var _ bfdata.ObjectDeleter = (*Objects)(nil)
 
 // ValidateKey checks key against the store's own key rule, as blobfs's
 // write asks before it inserts a row.
@@ -72,6 +75,15 @@ func (o *Objects) Open(ctx context.Context, key string) (io.ReadCloser, error) {
 // missing container is ErrContainerGone.
 func (o *Objects) Delete(ctx context.Context, key string) error {
 	return o.classify(o.store.Delete(ctx, key))
+}
+
+// DeleteObject is Delete under the name blobfs's sweep calls it by, so the
+// adapter is the sweep's bfdata.ObjectDeleter. It is idempotent as the
+// sweep requires: go-storage's Delete of a missing key succeeds, on every
+// provider. A missing container is ErrContainerGone, which the sweep
+// takes as a refusal, leaving the file deleting for a later pass.
+func (o *Objects) DeleteObject(ctx context.Context, key string) error {
+	return o.Delete(ctx, key)
 }
 
 // classify separates a missing container from the store's other errors. A

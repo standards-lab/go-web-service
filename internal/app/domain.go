@@ -21,11 +21,13 @@ type Domain struct {
 // newDomain wires the domain layer over infra: each domain package's
 // service is constructed here from the infrastructure fields it uses, never
 // the Infrastructure struct itself, and registers its startup verification
-// on lc at the domains' stage, after the schema's.
-func newDomain(infra *Infrastructure, lc *lifecycle.Coordinator) *Domain {
+// on lc at the domains' stage, after the schema's. sweep is the sweep
+// reactor's wake source, the document layer's Sweeper, which it nudges
+// after each branch it marks.
+func newDomain(infra *Infrastructure, sweep document.Sweeper, lc *lifecycle.Coordinator) *Domain {
 	org := organization.New(infra.SQL, infra.Storage)
 	org.Register(lc)
-	doc := document.New(infra.SQL, infra.Storage, idleSweep{})
+	doc := document.New(infra.SQL, infra.Storage, sweep)
 	doc.Register(lc)
 	return &Domain{Organization: org, Document: doc}
 }

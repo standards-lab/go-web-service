@@ -32,5 +32,10 @@
   "admin": {
     "seed": ""
   },
+  "sweep": {
+    "interval": "30s",
+    "batch": 100,
+    "stale_age": "1h"
+  },
   "shutdown_timeout": "10s"
 }

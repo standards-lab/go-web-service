@@ -51,6 +51,22 @@ func (n *nudges) Nudge() { n.seen = append(n.seen, n.rec.Ops()) }
 // serviceNudged is serviceOver with the sweeper the service nudges.
 func serviceNudged(t *testing.T, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *storagetest.Fake, *nudges) {
 	t.Helper()
+	s, rec, fake, sweep, _ := build(t, responses...)
+	return s, rec, fake, sweep
+}
+
+// serviceTx is serviceOver with the database, for a test that opens the
+// transaction a hook runs in, as the sweep does.
+func serviceTx(t *testing.T, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *data.Database) {
+	t.Helper()
+	s, rec, _, _, db := build(t, responses...)
+	return s, rec, db
+}
+
+// build constructs the service over the scripted driver, returning every
+// part a test may observe.
+func build(t *testing.T, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *storagetest.Fake, *nudges, *data.Database) {
+	t.Helper()
 	dialect := sqltest.ReturningDialect{}
 	pool, rec := sqltest.Open(t, responses...)
 	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
@@ -70,7 +86,7 @@ func serviceNudged(t *testing.T, responses ...sqltest.Response) (*document.Servi
 	t.Cleanup(func() { _ = objects.Shutdown(context.Background()) })
 	db := data.New(sqlate.Wrap(pool, dialect), catalog)
 	sweep := &nudges{rec: rec}
-	return document.New(db, data.NewStorage(fs, objects), sweep), rec, fake, sweep
+	return document.New(db, data.NewStorage(fs, objects), sweep), rec, fake, sweep, db
 }
 
 // root scripts the owner row's read: the organization's document root, or

@@ -18,7 +18,9 @@
 // complete before the infrastructure beneath them closes. The stages are
 // the ordering rule: the pool at stage 0, the schema at stage 1 (verify,
 // apply, verify, seed), the domains at stage 2, each verifying its own
-// statements against the migrated schema. Telemetry holds no stage number:
+// statements against the migrated schema, and the sweep reactor at stage
+// 3, started once the tables it sweeps are verified and drained after the
+// server and before the domains and the pool. Telemetry holds no stage number:
 // it starts in a startup hook before stage 0 and stops in a shutdown hook
 // after the last stage, so it brackets every numbered stage. The probes
 // register on the router's native mux, outside every module's middleware,
@@ -28,7 +30,10 @@
 // Routes and reactors are the two ways a domain service enters the running
 // process: a route is driven by a caller, a reactor by an occurrence the
 // process receives or discovers. Both take *Domain; neither is a domain
-// service itself.
+// service itself. A reactor is the staged sdk reactor, registered with
+// lifecycle's Add and its Err passed to Monitor. A source a domain signals
+// is built before the domain and handed to both halves: the sweep's wake,
+// which the document layer nudges and the sweep reactor receives from.
 //
 // [App.Run] is the hot start plus shutdown, delegated to the coordinator,
 // and returns the process exit code.

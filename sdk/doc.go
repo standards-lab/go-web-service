@@ -7,5 +7,9 @@
 // strict body decode landed in go-web-sdk v0.6.0. web.go now stages two
 // tenants for go-web-sdk: the typed path-value parse, the third request
 // helper beside IfMatch and DecodeJSON, and the guarded-command read that
-// composes the three. The v1.data.evaluation task rules on every tenant.
+// composes the three. reactor.go stages one tenant for go-core: the
+// reactor, one source of occurrences joined to one function for the
+// process lifetime, with the Every and Wake sources; it is the
+// spike-messaging reactor with Wake added, and moves to go-core as its own
+// package. The v1.data.evaluation task rules on every tenant.
 package sdk

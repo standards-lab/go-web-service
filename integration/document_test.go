@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/standards-lab/go-core/process/processtest"
 	"github.com/standards-lab/go-web-sdk/webtest"
 
 	"github.com/standards-lab/go-web-service/integration"
@@ -38,9 +39,19 @@ type filePage struct {
 	Total *int   `json:"total"`
 }
 
+// The document API's contract, the deleting state included. The object
+// store is relayed through a forwarder, so a case that asserts a marked
+// branch holds it: with the store severed, the sweep the delete nudges is
+// refused each file's object, and a directory holding a file stays
+// deleting (the sweep's own cases are TestDocumentSweep's).
 func TestDocument(t *testing.T) {
-	s := integration.Start(t, integration.Options{Seed: integration.Default})
+	f := processtest.Forward(t, integration.StorageAddr())
+	s := integration.Start(t, integration.Options{Seed: integration.Default, Storage: f.Addr()})
 	c := s.Client()
+	hold := func(t *testing.T) {
+		f.Sever()
+		t.Cleanup(func() { f.Restore(t) })
+	}
 
 	run := func(name string, fn func(t *testing.T, docs string)) {
 		t.Run(name, func(t *testing.T) {
@@ -87,6 +98,8 @@ func TestDocument(t *testing.T) {
 
 	run("a recursive delete is accepted and repeats", func(t *testing.T, docs string) {
 		reports := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)
+		_ = webtest.Decode[identity](t, c.Put(t, docs+"/directories/"+reports.ID+"/files/q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}), http.StatusCreated)
+		hold(t)
 		deleteBranch(t, c, docs, reports.ID)
 		// The client's version is the one before the mark; the retry is
 		// accepted at it all the same.
@@ -103,11 +116,13 @@ func TestDocument(t *testing.T) {
 		reports := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)
 		archive := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": reports.ID, "name": "archive"}), http.StatusCreated)
 		q3 := webtest.Decode[identity](t, c.Put(t, docs+"/directories/"+reports.ID+"/files/q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}), http.StatusCreated)
+		_ = webtest.Decode[identity](t, c.Put(t, docs+"/directories/"+archive.ID+"/files/q2.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}), http.StatusCreated)
 		_ = webtest.Decode[identity](t, c.Put(t, docs+"/directories/root/files/kept.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("kept")}), http.StatusCreated)
 		if f := webtest.Decode[filePage](t, c.Get(t, docs+"/directories/"+reports.ID+"/files"), http.StatusOK); len(f.Items) != 1 || f.Items[0].Status != "available" {
 			t.Fatalf("reports' files before the mark = %+v", f.Items)
 		}
 
+		hold(t)
 		deleteBranch(t, c, docs, reports.ID)
 
 		for id, name := range map[string]string{reports.ID: "reports", archive.ID: "archive"} {
@@ -141,25 +156,38 @@ func TestDocument(t *testing.T) {
 		conflict(t, c.Post(t, docs+"/directories", map[string]string{"parent_id": reports.ID, "name": "archive"}), "an entry with that name already exists")
 		conflict(t, c.Delete(t, docs+"/directories/"+reports.ID, webtest.IfMatch(reports.Version)), "the directory is not empty")
 
+		_ = webtest.Decode[identity](t, c.Put(t, docs+"/directories/"+archive.ID+"/files/q2.txt", q3), http.StatusCreated)
+		hold(t)
 		deleteBranch(t, c, docs, archive.ID)
 		conflict(t, c.Post(t, docs+"/directories", map[string]string{"parent_id": archive.ID, "name": "q4"}), "the directory is being deleted")
 		conflict(t, c.Put(t, docs+"/directories/"+archive.ID+"/files/q4.txt", q3), "the directory is being deleted")
 	})
 }
 
-// deleteBranch deletes the directory with id recursively at the version
-// it reads at, and asserts the 202 and its Location, the directory's read,
-// which reports it deleting: the sweep that removes the branch is not
-// wired yet, so the branch stays marked for the rest of the case.
+// deleteBranch deletes the directory with id recursively, as markBranch
+// does, and asserts its Location's read reports it deleting. The caller
+// holds the sweep, the object store severed with a file in each directory
+// the case reads, so the branch stays marked for the rest of the case.
 func deleteBranch(t *testing.T, c *webtest.Client, docs, id string) {
+	t.Helper()
+	loc := markBranch(t, c, docs, id)
+	if marked := webtest.Decode[directory](t, c.Get(t, loc), http.StatusOK); marked.Status != "deleting" {
+		t.Fatalf("%s after the delete = %+v; want it deleting", loc, marked)
+	}
+}
+
+// markBranch deletes the directory with id recursively at the version it
+// reads at, and asserts the 202 and its Location, the directory's read,
+// which it returns; the id may be the root's alias, whose Location names
+// the root's id. The sweep the delete nudges may remove the branch at any
+// moment after.
+func markBranch(t *testing.T, c *webtest.Client, docs, id string) string {
 	t.Helper()
 	d := webtest.Decode[directory](t, c.Get(t, docs+"/directories/"+id), http.StatusOK)
 	r := c.Delete(t, docs+"/directories/"+id+"?recursive=true", webtest.IfMatch(d.Version)).Expect(t, http.StatusAccepted)
 	loc := r.Header.Get("Location")
-	if loc != docs+"/directories/"+id || len(r.Body) != 0 {
+	if loc != docs+"/directories/"+d.ID || len(r.Body) != 0 {
 		t.Fatalf("202 Location %q, body %q; want the directory's read and no body", loc, r.Body)
 	}
-	if marked := webtest.Decode[directory](t, c.Get(t, loc), http.StatusOK); marked.Status != "deleting" {
-		t.Fatalf("%s after the delete = %+v; want it deleting", loc, marked)
-	}
+	return loc
 }

@@ -63,5 +63,7 @@
 // its listings are not found, and a write into it is a conflict. A
 // repeated recursive delete is the mark's retry, accepted again at any
 // version. The root's branch is marked like any other; its owner row
-// stands until the sweep removes the root.
+// stands until the sweep removes the root, when the layer's hook,
+// Service.UnbindRoot, removes the row in the same transaction. The
+// organization then has no root until its next write ensures a new one.
 package document

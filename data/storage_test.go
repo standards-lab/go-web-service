@@ -57,6 +57,28 @@ func TestObjects_DeleteOfAMissingObjectIsSuccess(t *testing.T) {
 	}
 }
 
+// The sweep's delete is idempotent: an object deleted twice, or never
+// stored, is success, as blobfs's ObjectDeleter requires.
+func TestObjects_DeleteObjectIsIdempotent(t *testing.T) {
+	o := objects(t, storagetest.NewFake())
+	ctx := context.Background()
+
+	if _, err := o.Put(ctx, "1/q3.txt", strings.NewReader("q3"), "text/plain", 2); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 2 {
+		if err := o.DeleteObject(ctx, "1/q3.txt"); err != nil {
+			t.Errorf("DeleteObject #%d = %v, want success", i+1, err)
+		}
+	}
+	if _, err := o.Open(ctx, "1/q3.txt"); !errors.Is(err, storage.ErrNotFound) {
+		t.Errorf("Open after DeleteObject = %v, want ErrNotFound", err)
+	}
+	if err := o.DeleteObject(ctx, "1/never-stored"); err != nil {
+		t.Errorf("DeleteObject of a missing object = %v, want success", err)
+	}
+}
+
 func TestObjects_AMissingContainerIsRefused(t *testing.T) {
 	fake := storagetest.NewFake()
 	o := objects(t, fake)
@@ -64,6 +86,9 @@ func TestObjects_AMissingContainerIsRefused(t *testing.T) {
 
 	if err := o.Delete(context.Background(), "1/logo.png"); !errors.Is(err, data.ErrContainerGone) {
 		t.Errorf("Delete = %v, want ErrContainerGone", err)
+	}
+	if err := o.DeleteObject(context.Background(), "1/logo.png"); !errors.Is(err, data.ErrContainerGone) {
+		t.Errorf("DeleteObject = %v, want ErrContainerGone", err)
 	}
 	if _, err := o.Put(context.Background(), "1/logo.png", strings.NewReader("png"), "image/png", 3); !errors.Is(err, data.ErrContainerGone) {
 		t.Errorf("Put = %v, want ErrContainerGone", err)

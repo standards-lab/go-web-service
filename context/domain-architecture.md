@@ -107,7 +107,8 @@ Library promotion candidates stage in the base `sdk` package: flat, a package me
 accumulates no sub-packages, with each file named for the library its contents are bound for.
 Staging is cheap and deliberate; the `v1.data.evaluation` task rules on every tenant. The
 tenants are `PathID`, the typed path-value parse, and `Command`, the guarded-command read
-composing it with the SDK's `IfMatch` and `DecodeJSON`, both bound for go-web-sdk.
+composing it with the SDK's `IfMatch` and `DecodeJSON`, both bound for go-web-sdk, and the
+reactor (`reactor.go`, with the `Every` and `Wake` sources), bound for go-core.
 
 ## The operation-shape principle
 

@@ -184,6 +184,122 @@ func TestDocument(t *testing.T) {
 		conflict(t, c.Post(t, docs+"/directories", map[string]string{"parent_id": archive.ID, "name": "q4"}), "the directory is being deleted")
 		conflict(t, c.Put(t, docs+"/directories/"+archive.ID+"/files/q4.txt", q3), "the directory is being deleted")
 	})
+
+	run("a download round-trips its bytes and revalidates", func(t *testing.T, docs string) {
+		const body, contentType = "a,b\n1,2\n", "text/csv; charset=utf-8"
+		report := webtest.Decode[identity](t, c.Put(t, docs+"/directories/root/files/report.csv", webtest.Raw{ContentType: contentType, Body: []byte(body)}), http.StatusCreated)
+		content := docs + "/files/" + report.ID + "/content"
+
+		r := c.Get(t, content).Expect(t, http.StatusOK)
+		if string(r.Body) != body || r.Header.Get("Content-Type") != contentType || r.Header.Get("Content-Disposition") != `attachment; filename="report.csv"` {
+			t.Errorf("download = %q, Content-Type %q, Content-Disposition %q", r.Body, r.Header.Get("Content-Type"), r.Header.Get("Content-Disposition"))
+		}
+		etag, modified := r.Header.Get("ETag"), r.Header.Get("Last-Modified")
+		if etag == "" || modified == "" || r.Header.Get("Cache-Control") != "private, no-cache" {
+			t.Fatalf("download headers = %v; want an ETag, a Last-Modified, and private, no-cache", r.Header)
+		}
+
+		for _, h := range []webtest.Header{{Name: "If-None-Match", Value: etag}, {Name: "If-Modified-Since", Value: modified}} {
+			r := c.Get(t, content, h)
+			if r.Status != http.StatusNotModified || len(r.Body) != 0 || r.Header.Get("ETag") != etag {
+				t.Errorf("GET with %s = %d, body %q, ETag %q; want 304, no body, the same ETag", h.Name, r.Status, r.Body, r.Header.Get("ETag"))
+			}
+		}
+		// The download's ETag is the object's, never a version.
+		_ = c.Delete(t, docs+"/files/"+report.ID, webtest.Header{Name: "If-Match", Value: etag}).Problem(t, http.StatusBadRequest)
+	})
+
+	// Organization B's API reaches none of organization A's documents: an
+	// A id at any B route answers exactly as an absent id does, and the
+	// root alias resolves to each organization's own root.
+	run("an organization reaches none of another's documents", func(t *testing.T, adocs string) {
+		bdocs := "/api/documents/" + tree(t, c)["engineering"].ID
+		mkdir := func(docs, parent, name string) identity {
+			return webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": parent, "name": name}), http.StatusCreated)
+		}
+		put := func(docs, dir, name string) identity {
+			return webtest.Decode[identity](t, c.Put(t, docs+"/directories/"+dir+"/files/"+name, webtest.Raw{ContentType: "text/plain", Body: []byte(name)}), http.StatusCreated)
+		}
+		reports, inbox := mkdir(adocs, "root", "reports"), mkdir(bdocs, "root", "inbox")
+		archive := mkdir(adocs, reports.ID, "archive")
+		q3, memo := put(adocs, reports.ID, "q3.txt"), put(bdocs, "root", "memo.txt")
+		aRoot := webtest.Decode[directory](t, c.Get(t, adocs+"/directories/root"), http.StatusOK)
+		bRoot := webtest.Decode[directory](t, c.Get(t, bdocs+"/directories/root"), http.StatusOK)
+		if aRoot.ID == bRoot.ID {
+			t.Fatalf("both organizations' root alias = %s; want a root each", aRoot.ID)
+		}
+
+		// Each attempt is sent with an A id, then with an absent one in
+		// its place: both are 404 with the same problem.
+		attempts := map[string]func(id string) *webtest.Response{
+			"read a directory":     func(id string) *webtest.Response { return c.Get(t, bdocs+"/directories/"+id) },
+			"read A's root":        func(id string) *webtest.Response { return c.Get(t, bdocs+"/directories/"+id) },
+			"list its directories": func(id string) *webtest.Response { return c.Get(t, bdocs+"/directories/"+id+"/directories") },
+			"list its files":       func(id string) *webtest.Response { return c.Get(t, bdocs+"/directories/"+id+"/files") },
+			"create in a directory": func(id string) *webtest.Response {
+				return c.Post(t, bdocs+"/directories", map[string]string{"parent_id": id, "name": "x"})
+			},
+			"upload into a directory": func(id string) *webtest.Response {
+				return c.Put(t, bdocs+"/directories/"+id+"/files/x.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("x")})
+			},
+			"move a directory": func(id string) *webtest.Response {
+				return c.Post(t, bdocs+"/directories/"+id+"/move", map[string]string{"parent_id": "root", "name": "archive"}, webtest.IfMatch(archive.Version))
+			},
+			"move a directory into one": func(id string) *webtest.Response {
+				return c.Post(t, bdocs+"/directories/"+inbox.ID+"/move", map[string]string{"parent_id": id, "name": "inbox"}, webtest.IfMatch(inbox.Version))
+			},
+			"delete a directory": func(id string) *webtest.Response {
+				return c.Delete(t, bdocs+"/directories/"+id, webtest.IfMatch(archive.Version))
+			},
+			"delete a branch": func(id string) *webtest.Response {
+				return c.Delete(t, bdocs+"/directories/"+id+"?recursive=true", webtest.IfMatch(reports.Version))
+			},
+			"read a file":     func(id string) *webtest.Response { return c.Get(t, bdocs+"/files/"+id) },
+			"download a file": func(id string) *webtest.Response { return c.Get(t, bdocs+"/files/"+id+"/content") },
+			"delete a file": func(id string) *webtest.Response {
+				return c.Delete(t, bdocs+"/files/"+id, webtest.IfMatch(q3.Version))
+			},
+			"move a file": func(id string) *webtest.Response {
+				return c.Post(t, bdocs+"/files/"+id+"/move", map[string]string{"directory_id": "root", "name": "q3.txt"}, webtest.IfMatch(q3.Version))
+			},
+			"move a file into a directory": func(id string) *webtest.Response {
+				return c.Post(t, bdocs+"/files/"+memo.ID+"/move", map[string]string{"directory_id": id, "name": "memo.txt"}, webtest.IfMatch(memo.Version))
+			},
+		}
+		target := map[string]string{
+			"read A's root":    aRoot.ID,
+			"move a directory": archive.ID, "delete a directory": archive.ID,
+			"read a file": q3.ID, "download a file": q3.ID, "delete a file": q3.ID, "move a file": q3.ID,
+		}
+		for name, attempt := range attempts {
+			id := reports.ID
+			if tid, ok := target[name]; ok {
+				id = tid
+			}
+			got := attempt(id).Problem(t, http.StatusNotFound)
+			absent := attempt(absentID).Problem(t, http.StatusNotFound)
+			if got.Title != absent.Title || got.Detail != absent.Detail || got.Type != absent.Type {
+				t.Errorf("%s: %+v; want it as an absent id's, %+v", name, got, absent)
+			}
+		}
+
+		// Nothing of either tree moved: A's reads as it was, and each root
+		// lists its own organization's entries alone.
+		if d := webtest.Decode[directory](t, c.Get(t, adocs+"/directories/"+archive.ID), http.StatusOK); d.Status != "active" || d.Parent == nil || *d.Parent != reports.ID {
+			t.Errorf("A's archive = %+v; want it active under reports", d)
+		}
+		if r := c.Get(t, adocs+"/files/"+q3.ID+"/content").Expect(t, http.StatusOK); string(r.Body) != "q3.txt" {
+			t.Errorf("A's q3 = %q", r.Body)
+		}
+		for docs, want := range map[string]string{adocs: "reports", bdocs: "inbox"} {
+			if p := webtest.Decode[directoryPage](t, c.Get(t, docs+"/directories/root/directories"), http.StatusOK); len(p.Items) != 1 || p.Items[0].Name != want {
+				t.Errorf("%s root's directories = %+v; want %s alone", docs, p.Items, want)
+			}
+		}
+		if f := webtest.Decode[filePage](t, c.Get(t, bdocs+"/directories/root/files"), http.StatusOK); len(f.Items) != 1 || f.Items[0].Name != "memo.txt" {
+			t.Errorf("B root's files = %+v; want memo.txt alone", f.Items)
+		}
+	})
 }
 
 // deleteBranch deletes the directory with id recursively, as markBranch

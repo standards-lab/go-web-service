@@ -73,19 +73,31 @@
 // the object just put, since a sweep that ran before the put landed could
 // not have deleted it.
 //
-// Every move and delete takes its version from If-Match: a missing header
-// is 428, a stale version 412. A file delete is blobfs's delete protocol,
-// 204. A directory delete removes an empty directory, 204; removing the
-// root removes its owner row with it. With recursive=true
-// it deletes the branch, the directory with everything beneath it, in two
-// stages: blobfs marks the branch deleting in one transaction, the request
-// answers 202 with the directory's read as its Location, and the sweep the
-// service is given is nudged after the commit to remove the rows and
-// their objects. Until the sweep finishes, the directory reads deleting,
-// its listings are not found, and a write into it is a conflict. A
-// repeated recursive delete is the mark's retry, accepted again at any
-// version. The root's branch is marked like any other; its owner row
-// stands until the sweep removes the root, and goes with it. Either way,
-// the organization then has no root until its next write ensures a new
-// one.
+// Two validators share HTTP's entity-tag syntax, and neither stands in for
+// the other. A row's version, the integer each of its changes advances, is
+// the version field of every read and command body; no row is sent with
+// an ETag header, and a client quotes the version it read as the If-Match
+// of a move or a delete, directory or file ("3"). Those act on a row the
+// client read and another request may have changed since, so a missing
+// header is 428, a weak or non-numeric tag 400, and a stale version 412.
+// A create or an upload names a new entry, with no version to hold; a
+// taken name is its conflict. The download is a different resource from
+// the file's row: its ETag is the object store's tag for the bytes and its
+// Last-Modified the row's last change, and a conditional GET naming either
+// is answered 304 without opening the object. A download's ETag is never a
+// version, and If-Match refuses one as malformed.
+//
+// A file delete is blobfs's delete protocol, 204. A directory delete
+// removes an empty directory, 204; removing the root removes its owner row
+// with it. With recursive=true it deletes the branch, the directory with
+// everything beneath it, in two stages: blobfs marks the branch deleting in
+// one transaction, the request answers 202 with the directory's read as its
+// Location, and the sweep the service is given is nudged after the commit
+// to remove the rows and their objects. Until the sweep finishes, the
+// directory reads deleting, its listings are not found, and a write into it
+// is a conflict. A repeated recursive delete is the mark's retry, accepted
+// again at any version. The root's branch is marked like any other; its
+// owner row stands until the sweep removes the root, and goes with it.
+// Either way, the organization then has no root until its next write
+// ensures a new one.
 package document

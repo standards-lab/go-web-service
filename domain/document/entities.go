@@ -29,7 +29,7 @@ const RootAlias = "root"
 // single-directory read computes it, so a listing omits it. Status is
 // active, or deleting once the directory's branch is marked for its
 // delete; a listing hides deleting directories, so only a read by id
-// shows one. Version is the concurrency token a move guards on.
+// shows one. Version is the concurrency token a move or a delete guards on.
 type Directory struct {
 	ID        string          `json:"id"`
 	ParentID  *string         `json:"parent_id"`

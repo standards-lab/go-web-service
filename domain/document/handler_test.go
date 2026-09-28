@@ -15,6 +15,7 @@ import (
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate/sqltest"
 
+	"github.com/standards-lab/go-web-service/data"
 	"github.com/standards-lab/go-web-service/domain/document"
 )
 
@@ -177,13 +178,6 @@ func TestPutFile_AnswersCreatedWithLocation(t *testing.T) {
 	}
 }
 
-// A taken name is the unique violation blobfs classifies, a conflict.
-func TestPutFile_ATakenNameIs409(t *testing.T) {
-	violation := sqltest.Response{Err: takenName()}
-	h := module(t, root(rootID), within(true), violation)
-	problem(t, upload(t, h, base+"/directories/"+dirID+"/files/report.txt", "text/plain", "report", 6), 409)
-}
-
 func TestCreateDirectory_AnswersCreatedWithLocation(t *testing.T) {
 	h := module(t, root(rootID), root(rootID), dirRows(directory(dirID, rootID, "reports", 1)))
 	rec := send(t, h, "POST", base+"/directories", "", `{"parent_id":"root","name":"reports"}`)
@@ -275,12 +269,6 @@ func TestContent_OfAPendingFileIs404(t *testing.T) {
 	problem(t, send(t, h, "GET", base+"/files/"+fileID+"/content", "", ""), 404)
 }
 
-// Without recursive, a directory with contents is a conflict.
-func TestDeleteDirectory_NotEmptyIs409(t *testing.T) {
-	h := module(t, root(rootID), within(true), sqltest.Response{Err: notEmpty()})
-	problem(t, send(t, h, "DELETE", base+"/directories/"+dirID, `"1"`, ""), 409)
-}
-
 // A directory read carries its status, and a directory in a branch marked
 // for its delete still reads by id, deleting.
 func TestDirectory_CarriesItsStatus(t *testing.T) {
@@ -322,54 +310,22 @@ func TestListings_WithinADeletingBranchAre404(t *testing.T) {
 	}
 }
 
-// A conflict answers 409 with its fixed detail and none of the error's own
-// text, which names blobfs's operation, its ids, and its constraints: an
-// upload under a taken name, the delete of a directory with contents, and
-// a create under a directory whose branch is being deleted.
-func TestRoutes_ConflictsCarryAFixedDetail(t *testing.T) {
-	marked := dirRows(deleting(directory(dirID, rootID, "reports", 1)))
-	cases := map[string]struct {
-		responses                   []sqltest.Response
-		method, path, ifMatch, body string
-		detail                      string
-	}{
-		"taken name": {
-			[]sqltest.Response{root(rootID), within(true), {Err: takenName()}},
-			"PUT", base + "/directories/" + dirID + "/files/report.txt", "", "report",
-			"an entry with that name already exists",
-		},
-		"not empty": {
-			[]sqltest.Response{root(rootID), within(true), {Err: notEmpty()}},
-			"DELETE", base + "/directories/" + dirID, `"1"`, "",
-			"the directory is not empty",
-		},
-		"deleting parent": {
-			// The insert selects nothing from the deleting parent, and blobfs
-			// reads the parent, twice, to tell deleting from missing.
-			[]sqltest.Response{root(rootID), within(true), dirRows(), marked, marked},
-			"POST", base + "/directories", "", `{"parent_id":"` + dirID + `","name":"q3"}`,
-			"the directory is being deleted",
-		},
+// The layer's error writer composes data.Status, whose conflicts carry a
+// curated detail: one conflict, an upload under a taken name, proves the
+// wiring, answering 409 with data.DetailNameTaken and none of the error's
+// own text, which names blobfs's operation, its ids, and its constraints.
+// data.Status's own test holds every conflict's detail, and the
+// integration suite each one's end to end.
+func TestRoutes_AConflictCarriesItsCuratedDetail(t *testing.T) {
+	h := module(t, root(rootID), within(true), sqltest.Response{Err: takenName()})
+	rec := upload(t, h, base+"/directories/"+dirID+"/files/report.txt", "text/plain", "report", 6)
+	if body := problem(t, rec, 409); body["detail"] != data.DetailNameTaken {
+		t.Errorf("detail = %v, want %q", body["detail"], data.DetailNameTaken)
 	}
-	for name, c := range cases {
-		t.Run(name, func(t *testing.T) {
-			h := module(t, c.responses...)
-			var rec *httptest.ResponseRecorder
-			if c.method == "PUT" {
-				rec = upload(t, h, c.path, "text/plain", c.body, int64(len(c.body)))
-			} else {
-				rec = send(t, h, c.method, c.path, c.ifMatch, c.body)
-			}
-			body := problem(t, rec, 409)
-			if body["detail"] != c.detail {
-				t.Errorf("detail = %v, want %q", body["detail"], c.detail)
-			}
-			for _, leak := range []string{"data:", "blobfs", "constraint", "_fk_", "_uq_", rootID} {
-				if strings.Contains(rec.Body.String(), leak) {
-					t.Errorf("body %s carries %q", rec.Body, leak)
-				}
-			}
-		})
+	for _, leak := range []string{"data:", "blobfs", "constraint", "_fk_", "_uq_", rootID} {
+		if strings.Contains(rec.Body.String(), leak) {
+			t.Errorf("body %s carries %q", rec.Body, leak)
+		}
 	}
 }
 

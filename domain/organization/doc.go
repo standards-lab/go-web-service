@@ -60,4 +60,17 @@
 // and the losing file is retired by the shared delete protocol, as a logo
 // delete retires the active one. The read serves an available file's bytes
 // by proxy through the shared read, revalidated by its entity tag.
+//
+// The layer's validators are two, sharing HTTP's entity-tag syntax. An
+// organization's version, the integer each command advances, is the
+// version field of its reads and command bodies, never an ETag header, and
+// a client quotes the version it read as the If-Match of an edit, a
+// transfer, or a delete ("3"). The logo takes no version: it is a
+// singleton addressed by its organization, so its PUT replaces whatever is
+// active and its DELETE retires whatever is, the last write winning, and
+// two replacements racing to activate are told apart by the conflict
+// above, not a precondition. Its read's ETag is the object store's tag for
+// the active logo's bytes, with Last-Modified the file's last change, and a
+// conditional GET naming either answers 304; a replacement is a new object
+// with a new tag.
 package organization

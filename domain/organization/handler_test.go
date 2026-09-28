@@ -3,16 +3,15 @@ package organization_test
 import (
 	"database/sql/driver"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/standards-lab/go-web-sdk"
-	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/sqltest"
 
+	"github.com/standards-lab/go-web-service/data"
 	"github.com/standards-lab/go-web-service/domain/organization"
 )
 
@@ -204,38 +203,23 @@ func TestDeleteLogo_WithoutALogoIs404(t *testing.T) {
 	problem(t, send(t, h, "DELETE", "/organizations/"+validID+"/logo", "", ""), 404)
 }
 
-// A conflict answers 409 with the fixed detail and none of the error's own
-// text: a code the parent already holds, the unique violation the engine
-// raises on the create, and a transfer under the organization's own
-// subtree, the layer's cycle. The instance names the request path by
-// design, so the leak checks look for what only the error names.
-func TestRoutes_ConflictsCarryAFixedDetail(t *testing.T) {
-	taken := &sqlate.ConstraintError{
-		Constraint: "organization_uq_parent_code", Class: sqlate.ErrUniqueViolation,
-		Err: errors.New(`duplicate key value violates unique constraint "organization_uq_parent_code"`),
+// The layer's own matcher reports the cycle as a conflict with
+// data.DetailConflict, the detail data.Status gives every conflict without
+// a text of its own: one conflict, a transfer under the organization's own
+// subtree, proves the wiring, with none of the error's own text. The
+// library's conflicts reach the same writer through data.Status, whose own
+// test holds every detail; the integration suite proves each end to end.
+// The instance names the request path by design, so the leak checks look
+// for what only the error names.
+func TestRoutes_AConflictCarriesItsCuratedDetail(t *testing.T) {
+	cycle := []sqltest.Response{{Affected: 0}, {Columns: []string{"count"}, Rows: [][]driver.Value{{int64(1)}}}}
+	rec := send(t, module(t, cycle...), "POST", "/organizations/"+validID+"/transfer", `"1"`, `{"parent_id":"`+parentID+`"}`)
+	if body := problem(t, rec, 409); body["detail"] != data.DetailConflict {
+		t.Errorf("detail = %v, want %q", body["detail"], data.DetailConflict)
 	}
-	cases := map[string]struct {
-		responses                   []sqltest.Response
-		method, path, ifMatch, body string
-	}{
-		"taken code": {[]sqltest.Response{{Err: taken}}, "POST", "/organizations", "", `{"code":"acme","name":"Acme"}`},
-		"cycle": {
-			[]sqltest.Response{{Affected: 0}, {Columns: []string{"count"}, Rows: [][]driver.Value{{int64(1)}}}},
-			"POST", "/organizations/" + validID + "/transfer", `"1"`, `{"parent_id":"` + parentID + `"}`,
-		},
-	}
-	for name, c := range cases {
-		t.Run(name, func(t *testing.T) {
-			rec := send(t, module(t, c.responses...), c.method, c.path, c.ifMatch, c.body)
-			body := problem(t, rec, 409)
-			if body["detail"] != "the request conflicts with the current state" {
-				t.Errorf("detail = %v", body["detail"])
-			}
-			for _, leak := range []string{"organization_uq", "constraint", "cycle", parentID} {
-				if strings.Contains(rec.Body.String(), leak) {
-					t.Errorf("body %s carries %q", rec.Body, leak)
-				}
-			}
-		})
+	for _, leak := range []string{"cycle", parentID} {
+		if strings.Contains(rec.Body.String(), leak) {
+			t.Errorf("body %s carries %q", rec.Body, leak)
+		}
 	}
 }

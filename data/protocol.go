@@ -29,14 +29,14 @@ import (
 // row declares, and completes the row on the pool, returning it available.
 //
 // A put or a completion that fails abandons the write through Retire, so
-// the row's name is free for a retry; an abandon that fails too leaves the
-// row pending or deleting, a stale row blobfs's sweep reclaims, which is
+// the row's name is free for a retry. An abandon that fails too leaves the
+// row pending or deleting, a stale row blobfs's sweep reclaims. That is
 // why begin must insert no row that references the file: a reference
-// would refuse the reclaim's purge. A completion refused with
-// blobfs.ErrDeleting or blobfs.ErrNotFound, a reclaim or a branch's sweep
-// that reached the row before the put landed, deletes the object just put
-// under the key the write holds, since that sweep could not have deleted
-// it, and leaves the row to the sweep: the writer rule.
+// would refuse the reclaim's purge. The writer rule covers a completion
+// refused with blobfs.ErrDeleting or blobfs.ErrNotFound, which means a
+// reclaim or a branch's sweep reached the row before the put landed: the
+// write deletes the object just put under the key it holds, since that
+// sweep could not have deleted it, and leaves the row to the sweep.
 func (s *Storage) Write(ctx context.Context, db *sqlate.DB, body io.Reader, size int64, begin func(*sqlate.Tx) (blobfs.File, error)) (blobfs.File, error) {
 	file, err := db.Transact(ctx, begin)
 	if err != nil {
@@ -58,12 +58,12 @@ func (s *Storage) Write(ctx context.Context, db *sqlate.DB, body io.Reader, size
 // loser of the insert has its transaction aborted by the violation, so
 // begin runs once more in a fresh one, which finds the winner's row. Once
 // the pending row commits, the other writer finds it and resumes it, so
-// the two may share one row. The write is shaped for that: its abandon
+// the two may share one row. The write is shaped for that. Its abandon
 // begins the delete only at the pending version it holds, so it never
 // retires a row the other writer completed, which an image may reference
-// by then; and a completion the other writer won, a stale version or a
-// row available already, is no failure, the row read back and returned as
-// found. The two puts store the same bytes under the same key, all or
+// by then. A completion the other writer won, a stale version or a row
+// already available, is no failure: the write reads the row back and
+// returns it as found. The two puts store the same bytes under the same key, all or
 // nothing, so the object is whole whichever lands last.
 //
 // The key is the row's id and name, so a file written again under its

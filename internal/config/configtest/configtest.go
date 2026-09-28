@@ -28,8 +28,7 @@ func Minimal() *config.Config {
 // server on a loopback ephemeral port, debug logging so requests leave
 // records, and every connectable subsystem aimed at a closed loopback port
 // so a dial is refused immediately instead of timing out, the object store
-// with its retries off. The empty prefix
-// disables environment overrides.
+// with its retries off. The empty prefix disables environment overrides.
 func Config(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := Minimal()

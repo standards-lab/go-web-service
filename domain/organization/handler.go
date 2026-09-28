@@ -37,10 +37,11 @@ type handler struct {
 // If-Match. The logo is a sub-resource at /{id}/logo: PUT stores the raw
 // body as the active logo, replacing any; GET proxies its bytes,
 // revalidated by ETag; and DELETE retires it. Every rejection is an RFC
-// 9457 problem through the group's error writer: the SDK maps its own request errors, the layer's matcher
-// its own vocabulary, and the data package's matcher the library's. The
-// composition root mounts the group into the API module and supplies
-// limits from the service's reads configuration.
+// 9457 problem through the group's error writer: the SDK maps its own
+// request errors, the layer's matcher its own vocabulary, and the data
+// package's matcher the library's. The composition root mounts the group
+// into the API module and supplies limits from the service's reads
+// configuration.
 func Routes(service *Service, limits web.Limits) *web.Group {
 	h := &handler{service: service, limits: limits}
 	g := web.NewGroup("/organizations")
@@ -197,8 +198,8 @@ func (h *handler) deleteLogo(w http.ResponseWriter, r *http.Request) error {
 
 // status is the layer's own error vocabulary as one web.ProblemMatcher: a
 // validation rejection or a malformed path id (400) and the cycle (409),
-// which carries data.DetailConflict as every conflict data.Status reports
-// without a text of its own does. The SDK's request errors map themselves,
+// which carries data.DetailConflict, as does every conflict data.Status
+// reports without a text of its own. The SDK's request errors map themselves,
 // and the library's vocabulary (directives, the missing row, constraint
 // violations, the stale version, the outage) is data.Status, composed after
 // this one.

@@ -14,14 +14,15 @@ applies, its `profiles:` gate.
 
 ## Azurite
 
-`compose/azurite.yml` runs Azurite, Azure's blob storage emulator, the service's local object store
-(see [Stack](../README.md#stack)). Like Postgres it carries no profile, so `mise run db-up` starts
-both and `db-down` and `db-reset` stop them. Its blob endpoint listens on `127.0.0.1:10000`
-(`AZURITE_BLOB_PORT` to change it), under Azurite's well-known development account
-`devstoreaccount1`, whose published key is the one `secrets.example.json` carries; it is never a
-production credential. Azurite runs with `--skipApiVersionCheck`, because the Azure SDK the
-service's provider pins sends a service version newer than the image accepts by default. The
-service creates its container on start. Data persists in the `go-web-service-azurite` volume.
+`compose/azurite.yml` runs Azurite, Azure's blob storage emulator, as the service's local object
+store (see [Stack](../README.md#stack)). Like Postgres it carries no profile, so `mise run db-up`
+starts both and `db-down` and `db-reset` stop them. Its blob endpoint listens on
+`127.0.0.1:10000` (`AZURITE_BLOB_PORT` to change it) under Azurite's well-known development
+account, `devstoreaccount1`. `secrets.example.json` carries that account's published key, which
+is never a production credential. Azurite runs with `--skipApiVersionCheck`, because the Azure
+SDK the service's provider pins sends a service version newer than the image accepts by
+default. The service creates its container on start. Data persists in the
+`go-web-service-azurite` volume.
 
 ## The observability profile
 

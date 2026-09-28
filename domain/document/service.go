@@ -23,9 +23,9 @@ type Service struct {
 // its delete is marked: a nudge that work is waiting, which returns at
 // once and never fails the request, since the sweep finds its work in the
 // database and a missed nudge only delays it. The layer declares it and
-// the composition root injects it; the sweep reactor's wake source
-// satisfies it. The sweep asks nothing of the layer in turn: a root's owner
-// row goes with the directory through its cascading foreign key.
+// the composition root injects it; the sweep's wake source satisfies it.
+// The sweep asks nothing of the layer in turn: a root's owner row goes
+// with the directory through its cascading foreign key.
 type Sweeper interface {
 	Nudge()
 }
@@ -41,7 +41,7 @@ func New(db *data.Database, st *data.Storage, sweep Sweeper) *Service {
 // composition root runs it at startup, once the schema is corrected.
 func (s *Service) Verify(ctx context.Context) error { return s.store.Verify(ctx) }
 
-// Seed is the layer's contribution of stored files to the named states
+// Seed is the layer's seed contribution, a file seed, to the named states
 // the data package's seeder applies: the document hierarchies a state
 // carries, each file written by the shared write protocol once the seed's
 // rows commit. The composition root hands it to the seeder after the

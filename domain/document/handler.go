@@ -40,11 +40,12 @@ type handler struct {
 // new file's name in its directory (PUT /directories/{id}/files/{name}).
 // The files: the metadata read (GET /files/{id}), the download
 // (GET /files/{id}/content), the delete, and the move. The moves and the
-// deletes take their version precondition from If-Match. Every rejection is an RFC 9457
-// problem through the group's error writer: the SDK maps its own request
-// errors, the layer's matcher its own vocabulary, and the data package's
-// matcher the library's. The composition root mounts the group into the API
-// module and supplies limits from the service's reads configuration.
+// deletes take their version precondition from If-Match. Every rejection
+// is an RFC 9457 problem through the group's error writer: the SDK maps
+// its own request errors, the layer's matcher its own vocabulary, and the
+// data package's matcher the library's. The composition root mounts the
+// group into the API module and supplies limits from the service's reads
+// configuration.
 func Routes(service *Service, limits web.Limits) *web.Group {
 	h := &handler{service: service, limits: limits}
 	g := web.NewGroup("/documents")

@@ -251,7 +251,7 @@ func (s *store) moveDirectory(ctx context.Context, organizationID, id string, ve
 // ensuring the root when the directory is its alias, by the data package's
 // write protocol: the scope check and the pending row commit together
 // before any byte is stored, the put runs outside any transaction, and the
-// completion on the pool. A put or a completion that fails retires the
+// completion runs on the pool. A put or a completion that fails retires the
 // pending row, so its name is free for a retry; one whose retire fails too
 // leaves the row for the sweep. A completion refused because the row's
 // delete began or the sweep removed it, the mark of a branch that raced the
@@ -321,11 +321,11 @@ func (s *store) moveFile(ctx context.Context, organizationID, id string, version
 	return Identity{ID: file.ID, Version: file.Version}, err
 }
 
-// seed is the layer's contribution of stored files to the data package's
-// named states: the hierarchies a state carries under "documents". The
-// seeder runs it after the seed's transaction commits, the organizations
-// standing by then, since a file's write puts its object outside any
-// transaction.
+// seed is the layer's seed contribution, a file seed, to the data
+// package's named states: the hierarchies a state carries under
+// "documents". The seeder runs it after the seed's transaction commits,
+// when the organizations already stand, since a file's write puts its
+// object outside any transaction.
 type seed struct{ store *store }
 
 var _ data.FileSeed = seed{}
@@ -393,8 +393,8 @@ func (s *store) seedEntries(ctx context.Context, parent string, entries []seedEn
 // entry already there by name is left as it is and keeps its own id, the
 // directory's contents still ensured beneath it. An entry whose id a row
 // already carries under another name, one a client moved or renamed, is
-// left where the client put it, a directory with its contents, and so is
-// one whose delete is under way, which the sweep finishes and the next
+// left where the client put it, a directory with its contents. So is an
+// entry whose delete is under way, which the sweep finishes and the next
 // seed writes again.
 func (s *store) seedEntry(ctx context.Context, parent string, e seedEntry) (int, error) {
 	st := s.storage

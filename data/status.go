@@ -14,7 +14,7 @@ import (
 	"github.com/standards-lab/sqlate/query"
 )
 
-// The details a conflict carries on the wire, one fixed text per kind. A
+// The curated details a conflict carries on the wire, one text per kind. A
 // 409's detail is always one of these and never the error's own text,
 // which names the library's operation, its ids, and its constraints.
 const (

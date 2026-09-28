@@ -39,8 +39,8 @@ accumulate under [Unreleased] until the first cut.
   (`APP_SWEEP_INTERVAL`, `APP_SWEEP_BATCH`, `APP_SWEEP_STALE_AGE`; 30s, 100, 1h), and the
   `sweeper` check on `/readyz`.
 - The quiesce gate: the schema-changing admin verbs (`up`, `down`, `steps`, and the state reset)
-  hold it exclusively and each sweep pass shared, so the two never run at once. It is per
-  process.
+  hold it exclusively and each sweep pass holds it shared, so the two never run at once. The
+  gate is per process.
 - The shared file protocols in `data`, staged for blobfs: the two-phase write with its
   retry-safe form for fixed ids, the two-phase delete, and the read of an available file; both
   domains run on them.
@@ -65,14 +65,14 @@ accumulate under [Unreleased] until the first cut.
   the service's RFC 9457 problem-response contract, one request per real error condition, each
   with its own trace pointer, resetting first so a run never drifts the seed data. Not a v1
   layer — the architect's own instrument for demos and self-serve exploration.
-- Named database states: one file per state under `data/seeds/`, keyed by each domain's
+- Named database states: one file per state under `data/seeds/`, keyed by each domain's seed
   contribution (`organizations`, `logos`, `documents`), with the files a state names under
-  `data/seeds/fixtures/`: `default` is the reference tree, a logo for each organization, and
+  `data/seeds/fixtures/`. `default` is the reference tree, a logo for each organization, and
   acme's document tree; `empty` is nothing. `GET /admin/database/states` lists them;
   `POST /admin/database/state` resets the database to one, every migration set reverted and
   applied, the state seeded, and answers with the transition; `POST /admin/database/seed`
   takes an optional `{"state": "…"}` to apply a named set over what is there. Both answer with
-  what they stored by contribution: the rows commit in one transaction, then the files are
+  what they stored by seed contribution: the rows commit in one transaction, then the files are
   written. `mise run db-state <state>` runs the reset against the local service.
 - The integration tier: the root `integration` package, a harness that runs the built service as
   a subprocess against the compose stack and a `//go:build integration` suite asserting the
@@ -135,7 +135,7 @@ accumulate under [Unreleased] until the first cut.
 - The lifecycle stages are named once, in the composition root's stage table: infrastructure,
   schema (go-database's `admin.Stage`), verify, reactors, and root. The domains declare no
   stage; the root registers each domain's `Verify`.
-- Every 409 carries a fixed detail naming its kind, never the error's text: "an entry with that
+- Every 409 carries a curated detail naming its kind, never the error's text: "an entry with that
   name already exists", "the directory is not empty", "the directory is being deleted", "the
   file is referenced", or "the request conflicts with the current state".
 - The seeder composes the domains' seed contributions: each domain seeds its own tables with
@@ -159,9 +159,9 @@ accumulate under [Unreleased] until the first cut.
 ### Fixed
 
 - The logo write: the image row is inserted only once its file completes, in the activation's
-  transaction, so a failed put or completion leaves a plain pending row the sweep reclaims,
-  never an image that refused the reclaim and made the organization undeletable, and a failed
-  retire no longer leaves an inactive image no endpoint could clear.
+  transaction. A failed put or completion leaves a plain pending row the sweep reclaims, never
+  an image that refused the reclaim and made the organization undeletable. A failed retire no
+  longer leaves an inactive image no endpoint could clear.
 - A state reset and a sweep pass no longer deadlock (SQLSTATE 40P01): the quiesce gate orders
   them.
 

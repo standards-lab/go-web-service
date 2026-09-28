@@ -33,9 +33,9 @@ const imagesDirectory = "organization-images"
 // protocol abandons or blobfs's stale reclaim removes, and never an image
 // that blocks the organization's delete.
 //
-// The completed file is then activated in one transaction: the file held,
-// so no delete begins under the reference, the replaced logo's image
-// removed and its delete begun, and the file's image inserted as the
+// The completed file is then activated in one transaction, which holds the
+// file, so no delete begins under the reference; removes the replaced
+// logo's image and begins its delete; and inserts the file's image as the
 // organization's active one. The replaced file is then purged, its object
 // and its row. A concurrent replacement that activated first fails the
 // insert with a unique violation; the new file is retired so it does not
@@ -129,11 +129,11 @@ func (s *store) release(ctx context.Context, tx *sqlate.Tx, fileID string) (blob
 	return s.storage.FS.Files.Delete(ctx, tx, fileID)
 }
 
-// logoSeed is the layer's contribution of stored files to the data
+// logoSeed is the layer's seed contribution, a file seed, to the data
 // package's named states: the logos a state carries under "logos". The
-// seeder runs it after the seed's transaction commits, the organizations
-// standing by then, since a logo's write puts its object outside any
-// transaction.
+// seeder runs it after the seed's transaction commits, when the
+// organizations already stand, since a logo's write puts its object
+// outside any transaction.
 type logoSeed struct{ store *store }
 
 var _ data.FileSeed = logoSeed{}

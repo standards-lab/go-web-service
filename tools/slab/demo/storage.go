@@ -51,11 +51,11 @@ const cursorPageSize = 1
 
 // sweepLimit bounds the wait for the sweep, as --wait's duration bounds
 // dirs delete. The delete nudges the sweep, so a small branch is gone well
-// inside it; the reactor's own interval (30 seconds) is the fallback the
+// inside it; the sweep's own interval (30 seconds) is the fallback the
 // limit leaves room for.
 const sweepLimit = 45 * time.Second
 
-// detailNameTaken is the fixed detail of a taken name's 409:
+// detailNameTaken is the curated detail of a taken name's 409:
 // data.DetailNameTaken, restated because slab does not import the service.
 const detailNameTaken = "an entry with that name already exists"
 
@@ -69,7 +69,7 @@ const (
 )
 
 // declaredSets are the sets the schema step expects the service to
-// declare: go-database's blobfs set and the application's own.
+// declare: blobfs's own set and the application's own.
 var declaredSets = []string{"blobfs", "app"}
 
 // seedFile is the part of data/seeds/<state>.json the scenario reads: the
@@ -106,9 +106,9 @@ type seeded struct {
 	Organizations int `json:"organizations"`
 }
 
-// seedCounts is what a reset of state s reports seeding: every
-// organization, every logo, and every document entry, directories and
-// files, the roots not counted.
+// seedCounts is what a reset to the seed file's state reports seeding:
+// every organization, every logo, and every document entry, directories
+// and files, the roots not counted.
 func (s seedFile) seedCounts() seeded {
 	n := 0
 	var count func([]seedEntry)

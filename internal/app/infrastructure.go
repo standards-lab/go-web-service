@@ -31,13 +31,13 @@ import (
 // the domains see it: the session over the same pool with the dialect,
 // grouped with the pattern catalog every statement compiles against.
 // Storage is the object store as the domains see it: blobfs's store over
-// the same session, and data's adapter over the started object store its
-// keys name; ObjectStore is that store itself, which the storage admin
-// domain administers. Sets are
-// the migration sets the admin service's migrator runs, blobfs's beneath
-// the service's own. The struct stops at the composition root: the layer
-// files read its fields, and a package receives its dependencies as
-// constructor parameters, never the struct itself.
+// the same session, and the data package's adapter over the started object
+// store its keys name. ObjectStore is that store itself, which the storage
+// admin domain administers. Sets are the migration sets the admin
+// service's migrator runs, blobfs's beneath the service's own. The struct
+// stops at the composition root: the layer files read its fields, and a
+// package receives its dependencies as constructor parameters, never the
+// struct itself.
 type Infrastructure struct {
 	Logger      *slog.Logger
 	DB          *database.DB
@@ -53,14 +53,14 @@ type Infrastructure struct {
 // service cannot exist without a startup, shutdown, or readiness
 // declaration. The database and the object store register at
 // stageInfrastructure with their readiness checks, so both are started
-// before the schema service seeds objects; blobfs's store verifies its
+// before the schema stage seeds objects; blobfs's store verifies its
 // statements at stageVerify, once the schema is corrected, beside the
-// domains that verify their own. Construction opens nothing: connectivity belongs to a
-// service's Start. The pattern catalog is built here, once: the library's
-// namespace, blobfs's, and the application's; a port adds the engine's
-// overlay beside them. This file is the one place a provider is named:
-// the database's, the object store's, and blobfs's engine with its
-// migration set.
+// domains that verify their own. Construction opens nothing: connectivity
+// belongs to a service's Start. The pattern catalog is built here, once:
+// the library's namespace, blobfs's, and the application's; a port adds
+// the engine's overlay beside them. This file is the one place a provider
+// is named: the database's, the object store's, and blobfs's engine with
+// its migration set.
 func newInfrastructure(
 	w io.Writer,
 	cfg *config.Config,

@@ -39,6 +39,6 @@ const (
 	stageReactors = stageVerify + 1
 
 	// stageRoot is the request edge: the server (app.go), started after
-	// every numbered stage and drained first.
+	// every other stage and drained first.
 	stageRoot = lifecycle.StageRoot
 )

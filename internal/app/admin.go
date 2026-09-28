@@ -39,13 +39,13 @@ type Admin struct {
 // data package's: the migration sets behind the migrator, the seeder, the
 // catalog, and the statements registry. The seeder composes the domains'
 // seed contributions from dom, in the tables' dependency order, so the
-// data package reads the states without naming a domain's table: the
-// organizations' rows, applied in the seed's transaction, then the stored
-// files that name them, the logos and the document trees, written after
-// it commits. gate is
-// the process's quiesce gate, which the database admin domain's routes
-// hold around a schema change. Startup's own schema correction takes no
-// gate: it runs at stageSchema, before the sweep's stage starts.
+// data package reads the states without naming a domain's table: first
+// the organizations' rows, applied in the seed's transaction, then the
+// stored files that name them, the logos and the document trees, written
+// after it commits. gate is the process's quiesce gate, which the database
+// admin domain's routes hold around a schema change. Startup's own schema
+// correction takes no gate: it runs at stageSchema, before the sweep's
+// stage starts.
 func newAdmin(
 	infra *Infrastructure,
 	dom *Domain,

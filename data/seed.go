@@ -20,10 +20,10 @@ import (
 //go:embed seeds/*.json seeds/fixtures
 var seedFiles embed.FS
 
-// Contribution is one domain's part of the named states: the rows a state
-// file carries under Key, which the domain declares, since the tables and
-// their rows are the domain's, and the composition root hands to
-// [NewSeeder], so this package reads the states without naming any
+// Contribution is one domain's seed contribution to the named states: the
+// rows a state file carries under Key. The domain declares it, since the
+// tables and their rows are the domain's, and the composition root hands
+// it to [NewSeeder], so this package reads the states without naming any
 // domain's table. A contribution is either a [Seed], rows applied in the
 // seed's transaction, or a [FileSeed], files written through the storage
 // protocols after that transaction commits; it is never both.
@@ -51,8 +51,8 @@ type Seed interface {
 // object store holds. A file's write cannot join the seed's transaction,
 // since blobfs's two-phase write commits the pending row before any byte
 // is stored and puts the object outside any transaction, so the seeder
-// runs every FileSeed after the row transaction commits, the rows the
-// files name standing by then.
+// runs every FileSeed after the row transaction commits, when the rows the
+// files name already stand.
 type FileSeed interface {
 	Contribution
 	// Write stores the files rows declare, the state's JSON under Key,
@@ -142,12 +142,12 @@ func (s *Seeder) States() []string {
 // Seed applies the named state: every Seed's rows in one transaction, in
 // the order the contributions were given, then, once it commits, every
 // FileSeed's files, each through the storage protocols. It is idempotent,
-// an existing row or file being left as it is, so it runs at every
-// startup of an environment that names a set and on demand from the
-// admin mount. The counts are what this run inserted, rows or files, for
-// every contribution; one the state does not carry, or a seeded
-// database, reports zero. A key no contribution reads is a defect in the
-// file, refused before any I/O, the first such key by name named.
+// leaving an existing row or file as it is, so it runs at every startup of
+// an environment that names a set and on demand from the admin mount. The
+// counts are what this run inserted, rows or files, for every
+// contribution; one the state does not carry, or a seeded database,
+// reports zero. A key no contribution reads is a defect in the file,
+// refused before any I/O; the refusal names the first such key by name.
 //
 // A failure in the transaction rolls every row back, and no file is
 // written. A failure writing files leaves the committed rows and the

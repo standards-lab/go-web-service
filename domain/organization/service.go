@@ -33,22 +33,22 @@ func New(db *data.Database, st *data.Storage) *Service {
 // schema is corrected.
 func (s *Service) Verify(ctx context.Context) error { return s.store.Verify(ctx) }
 
-// Seed is the layer's contribution to the named states the data package's
-// seeder applies: the organization tree a state carries, seeded by the
-// layer's own statements. The composition root hands it to the seeder.
+// Seed is the layer's seed contribution to the named states the data
+// package's seeder applies: the organization tree a state carries, seeded
+// by the layer's own statements. The composition root hands it to the seeder.
 func (s *Service) Seed() data.Seed { return seed{store: s.store} }
 
-// LogoSeed is the layer's contribution of stored files to the named
-// states: the logos a state names, each written by the shared write
+// LogoSeed is the layer's second seed contribution, a file seed, to the
+// named states: the logos a state names, each written by the shared write
 // protocol once the seed's rows commit and activated for an organization
 // that has none. The composition root hands it to the seeder after Seed.
 func (s *Service) LogoSeed() data.FileSeed { return logoSeed{store: s.store} }
 
 // List returns one page of organizations and the read's paging, honoring
 // the parsed query's page or cursor, sort, and filters. A cursor that did
-// not come from this read is the request's error. An unknown sort or filter field,
-// an operator the read model does not support, or a value the engine
-// cannot read unwraps to query.ErrDirectives.
+// not come from this read is the request's error. An unknown sort or
+// filter field, an operator the read model does not support, or a value
+// the engine cannot read unwraps to query.ErrDirectives.
 func (s *Service) List(ctx context.Context, q web.Query) ([]Organization, web.Paging, error) {
 	return s.store.list(ctx, q)
 }

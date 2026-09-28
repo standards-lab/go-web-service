@@ -23,8 +23,8 @@ type Domain struct {
 // the Infrastructure struct itself. A domain service holds no resource and
 // runs nothing, so it knows no lifecycle; what it has for startup is its
 // Verify, which the root declares on lc at stageVerify, once the schema is
-// corrected. sweep is the sweep reactor's wake source, the document
-// layer's Sweeper, which it nudges after each branch it marks.
+// corrected. sweep is the sweep's wake source, the document layer's
+// Sweeper, which it nudges after each branch it marks.
 func newDomain(infra *Infrastructure, sweep document.Sweeper, lc *lifecycle.Coordinator) *Domain {
 	org := organization.New(infra.SQL, infra.Storage)
 	lc.Add(lifecycle.Service{Name: "organization", Stage: stageVerify, Start: org.Verify})

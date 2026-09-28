@@ -16,7 +16,7 @@ const (
 	defaultSweepStaleAge = time.Hour
 )
 
-// SweepConfig is the sweep reactor's block: Interval is how often it
+// SweepConfig is the sweep's block: Interval is how often it
 // wakes when nothing nudges it, Batch the records one pass of blobfs's
 // sweep handles, and StaleAge the age past which a pending or deleting
 // file row counts as stale and is reclaimed. StaleAge must exceed the

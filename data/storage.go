@@ -39,10 +39,9 @@ func NewStorage(fs *bfdata.Store, objects *storage.Store) *Storage {
 
 // Objects is the adapter between blobfs's protocol steps and a started
 // store, the one place the domains' file operations reach the object-store
-// library, so no domain imports it. It is
-// the key validator blobfs's writes take as their first step's argument,
-// the put, open, and delete the steps between them run, and the object
-// deleter blobfs's sweep calls.
+// library, so no domain imports it. It is the key validator blobfs's
+// writes take as their first step's argument, the put, open, and delete
+// the steps between them run, and the object deleter blobfs's sweep calls.
 type Objects struct {
 	store *storage.Store
 }

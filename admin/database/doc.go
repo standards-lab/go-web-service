@@ -17,10 +17,10 @@
 //   - admin handler: the domain's route group, mounted into the admin mount.
 //
 // The verbs that change the schema (up, down, steps, and the state reset)
-// hold the process's quiesce gate exclusively, which the package declares
-// as SchemaGate and the composition root injects, so the sweep, which
-// holds it shared for each pass, never runs a pass under one. The gate is
-// per process; SchemaGate says what it leaves out.
+// hold the process's quiesce gate exclusively. The package declares the
+// gate as SchemaGate and the composition root injects it. The sweep holds
+// it shared for each pass, so it never runs a pass under one of those
+// verbs. The gate is per process; SchemaGate says what it leaves out.
 //
 // The composition root constructs the admin service and mounts this
 // package's Routes. The mount's isolation, its own listener, authentication,

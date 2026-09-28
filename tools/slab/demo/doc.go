@@ -12,14 +12,14 @@
 //
 // Each file holds one scenario: its literal and the step methods that run
 // it. A scenario file exports its constructor (Compile, Organization,
-// Problems, Storage) and registers nothing: commands.go holds Scenarios, the explicit
-// ordered list, and Commands, which builds the demo subtree from that list
-// and panics on a duplicate name. calls.go holds a call or check only when
+// Problems, Storage) and registers nothing: commands.go holds Scenarios,
+// the explicit ordered list, and Commands, which builds the demo subtree
+// from that list and panics on a duplicate name. calls.go holds a call or check only when
 // two scenarios make it identically; a step whose point is showing its own
 // literal request keeps that request in its scenario file. The wire types
 // and routes come from domain/organization, domain/document, and
 // admin/database, which restate the service's contract once for every slab
-// command; the storage scenario waits for the sweep through
+// command. The storage scenario waits for the sweep through
 // document.AwaitSweep, the one definition of dirs delete's --wait.
 //
 // A step's method name is its Intent in lowerCamel, with articles and

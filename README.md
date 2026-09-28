@@ -17,10 +17,10 @@ this one.
   authored SQL. Locally it runs from the compose file. A managed deployment is planned on
   Azure Database for PostgreSQL or Amazon RDS through the same provider, changing only the
   configuration.
-- Object storage: Azure Blob Storage, through [go-storage](https://github.com/standards-lab/go-storage)
-  and its `azureblob` provider, with [blobfs](https://github.com/standards-lab/blobfs) and its
-  `postgres` engine keeping the file tree's rows in the same Postgres. Locally it runs Azurite
-  from the compose file.
+- Object storage: Azure Blob Storage, through
+  [go-storage](https://github.com/standards-lab/go-storage) and its `azureblob` provider, with
+  [blobfs](https://github.com/standards-lab/blobfs) and its `postgres` engine keeping the file
+  tree's rows in the same Postgres. Locally it runs Azurite from the compose file.
 - Observability: OpenTelemetry, reached through a `docker compose` profile (`mise run otel-up`)
   that runs the collector and a local Loki, Tempo, Mimir, and Grafana stack — see
   [`compose/README.md`](compose/README.md). The service exports traces and metrics over OTLP and
@@ -71,19 +71,21 @@ code around the statements:
 - `domain/organization/statements/create.sql`: native through the identity pattern only.
 
 The read path, the lineage CTE, the guarded commands, the logo's and the document root's
-statements, and the document seed's path walk (`domain/document/statements/seed_organization.sql`)
-use the standard tier. This command lists the native files:
+statements, and the document seed's path walk
+(`domain/document/statements/seed_organization.sql`) use the standard tier. This command lists
+the native files:
 
 ```sh
 grep -rl --include='*.sql' -- '--| tier: native' .
 ```
 
-Object storage is interchangeable with review: the service reaches the store only through
+Object storage is interchangeable with review. The service reaches the store only through
 go-storage's standard operations (put, get, delete, the container's ensure and probe, and the
 provider's key rule), so moving to another object store, S3 for one, changes the provider
-import in the composition root and the `storage` configuration, plus a review of what the
-common API leaves unstated: the store's consistency, and the ETag it mints, which the download
-and the logo serve as their validator. blobfs's rows move with the SQL engine, not the store.
+import in the composition root and the `storage` configuration. The move also needs a review of
+what the common API leaves unstated: the store's consistency, and the ETag it mints, which the
+download and the logo serve as their validator. blobfs's rows move with the SQL engine, not the
+store.
 
 HTTP has no provider, and OpenTelemetry adds nothing to the list: the service uses only the
 OpenTelemetry API, SDK, and OTLP, so a backend swap changes only the collector's configuration.
@@ -93,7 +95,7 @@ OpenTelemetry API, SDK, and OTLP, so a backend swap changes only the collector's
 [mise](https://mise.jdx.dev/) provisions the toolchain and runs the tasks. The database password
 and the object store's key live in the gitignored secrets layer; copy the committed example to
 create it. A missing `secrets.json` is not a load error: the configuration loads without them,
-and the service then exits at construction, with `storage: azureblob: storage key required`, so
+and the service then exits at construction with `storage: azureblob: storage key required`, so
 this step comes first:
 
 ```sh
@@ -116,15 +118,16 @@ stages the composition root's stage table (`internal/app/stages.go`) names, in o
 drain runs them in reverse:
 
 - `infrastructure`: the pool connects, and the object store ensures its container and answers a
-  probe. Both are up before the schema stage, whose seed writes the seeded files into the store.
-- `schema`: the migration sets are verified, any pending migration applied, and the configured
-  seed set applied (the `local` overlay names `default`). The stage is go-database's
-  `admin.Stage`, a library value the table names rather than chooses.
+  probe. Both are up before the `schema` stage, whose seed writes the seeded files into the
+  store.
+- `schema`: the migration sets are verified, any pending migration is applied, and the
+  configured seed set is applied (the `local` overlay names `default`). The stage is
+  go-database's `admin.Stage`: the table names the library's value instead of choosing its own.
 - `verify`: blobfs's store and each domain verify their statements against the migrated
   schema. The domains declare no stage and register nothing themselves; the composition root
   registers each domain's `Verify` here.
-- `reactors`: the sweep reactor starts (see [Sweep](#sweep)).
-- `root`: the server, started last and drained first.
+- `reactors`: the sweep starts (see [Sweep](#sweep)).
+- `root`: the server, which starts last and drains first.
 
 The service then logs `server ready` on `localhost:8080` (the `local` overlay binds loopback and
 runs debug logging). From a second shell:
@@ -158,27 +161,30 @@ The organization domain is mounted under `/api`:
 The list takes `page`, `size`, and `sort` (`sort=-path,code`), and every other parameter as a
 filter on a field of the read model: `code=acme` is equality, `code=acme&code=finance` is
 membership, and `name[like]=%25ing` names an operator in brackets. Its envelope carries the
-filtered `total`, `more`, and a `next` cursor; sending `cursor=<next>` in place of `page` (with the
-same sort and filters) continues after the last row, so a tree that changes between requests
-neither skips nor repeats one. A continued page omits `page`; a sort on `parent_id`, the one
-nullable field, pages by number alone. The guarded commands (`PUT`,
-transfer, `DELETE`) take the row's version in `If-Match: "3"`; a missing header answers 428 and a
-stale version 412. Every rejection is an RFC 9457 problem. A conflict, 409, carries a fixed
-`detail` naming its kind and never the underlying error's text: "the request conflicts with the
-current state" for a taken code, a missing parent, a cycle, a concurrent logo replacement, and a
-delete of an organization that still has children, a logo, or a document root. A seeded
-organization holds a logo, so its delete answers 409 until its logo is deleted.
+filtered `total`, `more`, and a `next` cursor. Sending `cursor=<next>` in place of `page`, with
+the same sort and filters, continues after the last row, so a tree that changes between
+requests neither skips nor repeats one. A continued page omits `page`; a sort on `parent_id`,
+the one nullable field, pages by number alone.
+
+The guarded commands (`PUT`, transfer, `DELETE`) take the row's version in `If-Match: "3"`; a
+missing header answers 428 and a stale version 412. Every rejection is an RFC 9457 problem. A
+conflict, 409, carries a curated `detail` naming its kind and never the underlying error's
+text: "the request conflicts with the current state" for a taken code, a missing parent, a
+cycle, a concurrent logo replacement, and a delete of an organization that still has children,
+a logo, or a document root. A seeded organization holds a logo, so its delete answers 409 until
+its logo is deleted.
 
 The logo is a raw body of at most 1 MiB in a raster type, PNG, JPEG, WebP, or GIF; any other
-type, SVG included, answers 415. A `PUT` answers 201 with the logo's `Location` and `{"id": …}`,
-the new file's id and no version, whether or not it replaced a logo, since every `PUT` stores a
-new file. The logo routes take no `If-Match`: the last write wins, and two replacements racing to
-activate are told apart by a 409, not a precondition. The `GET` is served `Cache-Control:
-no-cache` with the object's `ETag` and `Last-Modified`, so a client revalidates on every use.
+type, SVG included, answers 415. A `PUT` answers 201 with the logo's `Location` and
+`{"id": …}`, the new file's id, and carries no version. It answers 201 whether or not it
+replaced a logo, since every `PUT` stores a new file. The logo routes take no `If-Match`: the
+last write wins, and a 409, not a precondition, tells apart two replacements racing to
+activate. The `GET` is served `Cache-Control: no-cache` with the object's `ETag` and
+`Last-Modified`, so a client revalidates on every use.
 
 ```sh
 curl localhost:8080/api/organizations                          # the seeded reference data, paged
-curl 'localhost:8080/api/organizations/lookup?path=/acme/engineering'   # lookup by hierarchical path
+curl 'localhost:8080/api/organizations/lookup?path=/acme/engineering'  # lookup by path
 ```
 
 The document domain is mounted under `/api/documents/{org}`, each organization's hierarchy of
@@ -202,27 +208,29 @@ organization's document root, which its first write creates:
 The moves and the deletes take the row's version in `If-Match`: 428 when it is missing, 412
 when it is stale. A recursive delete marks the branch deleting and answers 202 with the
 directory's read as its `Location`; the [sweep](#sweep) then removes the rows and their
-objects. Until it finishes, the directory reads `deleting`, its listings answer 404, and a write
-into it answers 409 "the directory is being deleted". A repeated recursive delete answers
-202 again, and nudges the sweep again. An object the sweep cannot delete leaves its file, and
+objects. Until the sweep finishes, the directory reads `deleting`, its listings answer 404, and
+a write into it answers 409 "the directory is being deleted". A repeated recursive delete
+answers 202 and nudges the sweep again. An object the sweep cannot delete leaves its file, and
 the directories above it, for a later pass; the sweep logs the refusal and runs on. A recursive
-delete of `root` removes the organization's document root with it, and its next write creates a
-new one. Every conflict carries one of five fixed details: "an entry with that name already
+delete of `root` removes the organization's document root with it, and the next write creates a
+new one. Every conflict carries one of five curated details: "an entry with that name already
 exists", "the directory is not empty", "the directory is being deleted", "the file is
 referenced", or "the request conflicts with the current state".
 
 An id outside the organization's document root answers 404, as an absent one does, so no
-request reads, moves, or deletes across organizations. A download is served as `Content-Disposition:
-attachment` with `Cache-Control: private, no-cache`, never rendered inline, since stored HTML
-would run in the API's origin.
+request reads, moves, or deletes across organizations. A download is served as
+`Content-Disposition: attachment` with `Cache-Control: private, no-cache`, never rendered
+inline, since stored HTML would run in the API's origin.
 
-Two validators share HTTP's entity-tag syntax, and neither stands in for the other:
+Two validators share HTTP's entity-tag syntax, the version and the object ETag, and neither
+stands in for the other:
 
-- A row's version is a body field of every read and command response, never an `ETag` header.
-  A client quotes the version it read as the `If-Match` of a guarded command (`"3"`).
-- A download's and a logo's `ETag` is the object store's tag for the bytes, with `Last-Modified`
-  beside it; a conditional `GET` naming either (`If-None-Match`, `If-Modified-Since`) answers
-  304. A download's `ETag` is not a version, and `If-Match` refuses one as malformed.
+- The version is a row's body field in every read and command response, never an `ETag`
+  header. A client quotes the version it read as the `If-Match` of a guarded command (`"3"`).
+- The object ETag is the object store's tag for a download's or a logo's bytes, served as
+  `ETag` with `Last-Modified` beside it; a conditional `GET` naming either (`If-None-Match`,
+  `If-Modified-Since`) answers 304. The object ETag is not a version, and `If-Match` refuses a
+  download's as malformed.
 
 ## Admin
 
@@ -252,11 +260,11 @@ name the set they act on, refused with 400 when it is missing or undeclared.
 A named state is one file under `data/seeds/`, keyed by each domain's seed contribution:
 `organizations`, `logos`, and `documents`. `default` is the reference tree, a logo for each
 organization, and acme's document tree; `empty` is nothing. The files a state names sit under
-`data/seeds/fixtures/`. A seed applies idempotently, so `admin.seed` names the state a deployment
-initializes with at its first start and leaves alone at every later one. The seed's response,
-and the state's `seeded` member, count what the run stored under the same keys,
-`organizations`, `logos`, and `documents`. The rows commit in one transaction first, and the files are written after it
-commits, since a file's object is put outside any transaction.
+`data/seeds/fixtures/`. A seed applies idempotently, so `admin.seed` names the state a
+deployment initializes with at its first start and leaves alone at every later one. The seed's
+response, and the state's `seeded` member, count what the run stored under the same keys. The
+rows commit in one transaction first, and the files are written after it commits, since a
+file's object is put outside any transaction.
 
 The state operation is destructive, in the class of `down` and `force`, and
 `mise run db-state <state>` runs it against the local service. A reset reverts blobfs's tables
@@ -264,11 +272,11 @@ but leaves the objects in the container, which is accepted in development: a see
 a fixed id (the `5eed…` ids in the state file), so the reseed writes it again under the same key
 and replaces the object left there.
 
-The verbs that change the schema (`up`, `down`, `steps`, and the state reset) wait for a sweep
-pass in flight to finish, and the sweep starts no pass until they are done, through a quiesce
-gate the two share; a pass and a reset would otherwise deadlock on the document root's owner
-table. The gate is per process: with several replicas, another replica's sweep can still meet a
-reset, which is a development operation.
+The verbs that change the schema (`up`, `down`, `steps`, and the state reset) share a quiesce
+gate with the sweep: a verb waits for a sweep pass in flight to finish, and the sweep starts no
+pass until the verb is done. Without the gate, a pass and a reset would deadlock on the
+document root's owner table. The gate is per process: with several replicas, another replica's
+sweep can still meet a reset, which is a development operation.
 
 The object storage admin service is mounted under `/admin/storage`:
 
@@ -283,14 +291,15 @@ stands.
 
 ## Sweep
 
-A recursive directory delete, a write that stops partway, and a delete that stops partway leave
-rows for later: a branch marked deleting, a pending upload, a file whose delete began. The sweep
-finishes them, removing each file's object and then its row, and each directory once it is
-empty. It is data's background worker (`data.Storage.SweepWorker`), blobfs's sweep run in
-bounded passes while a pass reports more. It calls no domain service, so it is not a Reactor in
-the architecture's sense, one that calls a Domain Service; it is the exception the composition
-root stages as a reactor anyway, since the reactor is the process's one runner for work that
-lasts the process lifetime.
+The sweep finishes the rows that a recursive directory delete, a write that stops partway, and a
+delete that stops partway leave for later: a branch marked deleting, a pending upload, a file
+whose delete began. It removes each file's object and then its row, and each directory once it
+is empty. The sweep is the `data` package's background worker (`data.Storage.SweepWorker`),
+which runs blobfs's sweep in bounded passes while a pass reports more.
+
+A Reactor, in the architecture's sense, calls a Domain Service. The sweep calls none, so it is
+not one; it is the exception the composition root stages as a reactor anyway, since the reactor
+is the process's one runner for work that lasts the process lifetime.
 
 It wakes on each recursive delete, on an interval (`sweep.interval`, 30 seconds) for work no
 delete announced, and once at startup, so a branch marked before a restart is swept at the
@@ -334,27 +343,28 @@ recursive delete waited out through the sweep.
 
 Two tiers. The unit tier, `mise run test`, runs on every pull request and touches no service,
 network, or disk: a package that runs SQL proves it over sqlate's scripted driver, and one that
-stores objects over go-storage's fake. The data package's tests prove the shared file protocols,
-the seeder's composition of the domains' contributions, and the sweep's background worker, its
-pass loop, its logging policy, and its wait on the quiesce gate. The integration tier,
+stores objects over go-storage's fake. The `data` package's tests prove the shared file
+protocols, the seeder's composition of the domains' seed contributions, and the sweep worker:
+its pass loop, its logging policy, and its wait on the quiesce gate. The integration tier,
 `mise run integration`, runs the composed service black-box through its API against the compose
 stack, in CI on every merge to main and on demand from the Actions tab.
 
 The suite lives in the `integration` package under the `integration` build tag. Its harness is
 the toolkit the SDKs ship beside what it exercises: go-core's `process/processtest` builds
 `cmd/server` once, runs it as a subprocess configured by `APP_*` variables on a reserved port,
-and relays the database or the object store through a loopback forwarder a test severs, for
-the outage and for a sweep the store refuses (`Options.Database`, `Options.Storage`); go-web-sdk's
-`webtest` drives it through its API. `integration.Objects` reads the container beneath the API,
-so a test can assert an object is gone. A test that fails prints each service process's output,
-so a 500 comes with the service's own record of it. The service adds only its configuration and
+and relays the database or the object store through a loopback forwarder (`Options.Database`,
+`Options.Storage`) that a test severs for the outage and for a sweep the store refuses.
+go-web-sdk's `webtest` drives the service through its API. `integration.Objects` reads the
+container beneath the API, so a test can assert an object is gone. A failing test prints each
+service process's output, so a 500 comes with the service's own record of it. The service adds only its configuration and
 state control through the admin mount; nothing in the service exists for the tests' sake.
 
 The storage cases:
 
 - `TestDocument`: the document API's contract, the deleting state, the guarded deletes, the
-  curated conflicts, a download's round trip with its exact bytes and headers and its 304s, and
-  cross-organization isolation, one organization reaching none of another's directories or files.
+  conflicts' curated details, a download's round trip with its exact bytes and headers and its
+  304s, and cross-organization isolation, one organization reaching none of another's
+  directories or files.
 - `TestDocumentSweep`: a marked branch swept of its rows and objects, a refused pass that
   converges once the store returns, and the root's recursive delete.
 - `TestSweepAtStartup`: a branch marked before a restart is swept at the next start.
@@ -391,8 +401,8 @@ Configuration layers in a fixed precedence, later sources winning:
    the `APP_DATABASE_*` family (`APP_DATABASE_HOST`, `APP_DATABASE_NAME`,
    `APP_DATABASE_USER`, `APP_DATABASE_PASSWORD`, `APP_DATABASE_PORT`, and the pool settings),
    the `APP_STORAGE_*` family (below), `APP_OBSERVABILITY_ENDPOINT` and
-   `APP_OBSERVABILITY_SAMPLE_RATIO`, the rate limit
-   (`APP_RATE_LIMIT_REQUESTS`, `APP_RATE_LIMIT_WINDOW`), the reads paging policy
+   `APP_OBSERVABILITY_SAMPLE_RATIO`, the rate limit (`APP_RATE_LIMIT_REQUESTS`,
+   `APP_RATE_LIMIT_WINDOW`), the reads paging policy
    (`APP_READS_DEFAULT_SIZE`, `APP_READS_MAX_SIZE`), the admin seed set (`APP_ADMIN_SEED`, a
    state name), and the sweep's interval, pass size, and stale age (`APP_SWEEP_INTERVAL`,
    `APP_SWEEP_BATCH`, `APP_SWEEP_STALE_AGE`).
@@ -420,8 +430,8 @@ backstop wake; `batch` (`APP_SWEEP_BATCH`, 100), the records one pass handles; a
 The compose file honors `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_DB`, and
 `POSTGRES_PASSWORD` for the Postgres container and `AZURITE_BLOB_PORT` for Azurite's, but the
 service does not read them: moving a container off the defaults splits the two until the
-matching `APP_DATABASE_*` or `APP_STORAGE_ENDPOINT` variable (or secrets entry) follows. The defaults pair with `config.json` and `secrets.example.json`; change both sides
-together.
+matching `APP_DATABASE_*` or `APP_STORAGE_ENDPOINT` variable (or secrets entry) follows. The
+defaults pair with `config.json` and `secrets.example.json`; change both sides together.
 
 ## License
 

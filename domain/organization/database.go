@@ -141,7 +141,7 @@ func (s *store) detach(ctx context.Context, tx *sqlate.Tx, fileID string) error 
 	return err
 }
 
-// seed is the domain's contribution to the data package's named states:
+// seed is the domain's seed contribution to the data package's named states:
 // the organizations a state carries under "organizations", seeded by the
 // store's own statements in the seed's transaction.
 type seed struct{ store *store }

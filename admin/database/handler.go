@@ -26,12 +26,12 @@ var ErrUnconfirmed = errors.New(`database: a reset reverts every migration set a
 // root injects it; the process's quiesce gate satisfies it, and the sweep
 // holds the same gate shared for each pass.
 //
-// The gate exists because a schema change and the sweep deadlock:
-// reverting the migration that drops organization_directory, or the one
+// The gate exists because a schema change and the sweep deadlock.
+// Reverting the migration that drops organization_directory, or the one
 // that alters its cascading foreign key into blobfs_directory, locks the
 // two tables in the opposite order from a sweep pass's directory removal,
 // whose delete cascades from blobfs_directory into organization_directory,
-// and Postgres aborts one of them (SQLSTATE 40P01). The gate is per
+// so Postgres aborts one of them (SQLSTATE 40P01). The gate is per
 // process: it keeps this process's sweep out of this process's schema
 // change, and nothing else. A reset is a development operation; with
 // several replicas, another replica's sweep, or API traffic that removes a
@@ -57,7 +57,7 @@ type handler struct {
 //   - down, steps, and force: each a POST naming the migration set it acts
 //     on, whose response is the resulting status
 //   - seed: applies the configured set or the one its body names, and
-//     answers with what it stored by contribution: the rows it inserted,
+//     answers with what it stored by seed contribution: the rows it inserted,
 //     and the files it wrote once they committed
 //   - state: resets the database to the state its body names, once the
 //     body confirms it, and answers with the transition
@@ -223,15 +223,15 @@ func respond(w http.ResponseWriter) func(admin.Status, error) error {
 	}
 }
 
-// status is the domain's error vocabulary as one web.ProblemMatcher: a
-// rejected verb argument (400), a set the migrator does not declare (400),
-// a version outside the set (400), a state the seeder does not declare
-// (400), an unconfirmed reset (400), a seed the environment cannot serve
-// (403), and the schema states an operation cannot proceed from, dirty,
+// status is the domain's error vocabulary as one web.ProblemMatcher. A
+// rejected verb argument, a set the migrator does not declare, a version
+// outside the set, a state the seeder does not declare, and an unconfirmed
+// reset are 400; a seed the environment cannot serve is 403. The schema
+// states an operation cannot proceed from are conflicts (409): dirty,
 // pending, a history the set does not carry, a migration with no down, a
-// set above that has applied migrations, a set below with pending ones, as
-// conflicts (409). A dialect without the lock capability stays unmatched:
-// it is a wiring defect (500).
+// set above that has applied migrations, and a set below with pending
+// ones. A dialect without the lock capability stays unmatched: it is a
+// wiring defect (500).
 func status(err error) (web.Problem, bool) {
 	switch {
 	case errors.Is(err, admin.ErrValidation), errors.Is(err, admin.ErrUnknownSet),

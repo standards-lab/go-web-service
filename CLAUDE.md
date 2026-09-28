@@ -1,10 +1,10 @@
 # go-web-service
 
 The reference web service of Go Elemental, the Standards Lab organization's Go implementation of
-the Elemental Architecture: a production web service composed from go-core, go-web-sdk, go-database,
-sqlate, go-storage, blobfs, and go-observability on the go-web-sdk-template baseline, on one
-declared stack (Postgres for SQL, Azure Blob Storage for objects). Managed with the marathon
-workflow; start from `context/README.md`.
+the Elemental Architecture: a production web service composed from go-core, go-web-sdk,
+go-database, sqlate, go-storage, blobfs, and go-observability on the go-web-sdk-template
+baseline, on one declared stack (Postgres for SQL, Azure Blob Storage for objects). Managed with
+the marathon workflow; start from `context/README.md`.
 
 ## Repository specifics
 
@@ -28,7 +28,8 @@ workflow; start from `context/README.md`.
 - **SQL.** Every statement is an authored `.sql` file with a `--|` tier header, compiled by
   sqlate against the catalog at construction and verified against the live schema at startup.
   Schema migrations live under `data/migrations` and apply at startup, above blobfs's own set,
-  through the database admin service; `sqlint.toml` at the root names the sources and roles the lint checks.
+  through the database admin service; `sqlint.toml` at the root names the sources and roles the
+  lint checks.
 - **Stack.** Postgres is the declared SQL engine and Azure Blob Storage the declared object
   store, run locally through `compose.yml` (Azurite for the store). A provider variant is never
   a switch inside this service; it would be a separate focused reference.

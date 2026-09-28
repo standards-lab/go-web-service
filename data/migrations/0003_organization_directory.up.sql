@@ -7,8 +7,9 @@
 -- grain, and only the document layer reads or writes it. The foreign key
 -- into blobfs_directory refuses removing an owned directory while its
 -- owner row stands, so the removal deletes the row in the same
--- transaction; the one into organization refuses deleting an organization
--- that still owns a root.
+-- transaction (migration 0004 makes that key cascade instead); the one
+-- into organization refuses deleting an organization that still owns a
+-- root.
 CREATE TABLE organization_directory (
   directory_id uuid PRIMARY KEY,
   organization_id uuid NOT NULL,

@@ -11,7 +11,7 @@
 //
 // [New] is the cold start, with no I/O: it constructs infrastructure (each
 // service registering on the coordinator where it is constructed), the
-// admin layer over it, the domain over it, and the reactors over both, then
+// admin layer over it, the domain over it, and the reactors, then
 // assembles the router from the mounts and the middleware stack, and
 // declares the server as the coordinator's root-stage service, started
 // after every numbered stage and drained first, so in-flight requests
@@ -29,8 +29,10 @@
 //
 // Routes and reactors are the two ways a domain service enters the running
 // process: a route is driven by a caller, a reactor by an occurrence the
-// process receives or discovers. Both take *Domain; neither is a domain
-// service itself. A reactor is the staged sdk reactor, registered with
+// process receives or discovers. Routes take *Domain; a reactor takes it
+// once it dispatches to a domain call, which the sweep does not, since a
+// document root's owner row goes with its directory through the row's
+// cascading foreign key. Neither is a domain service itself. A reactor is the staged sdk reactor, registered with
 // lifecycle's Add and its Err passed to Monitor. A source a domain signals
 // is built before the domain and handed to both halves: the sweep's wake,
 // which the document layer nudges and the sweep reactor receives from.

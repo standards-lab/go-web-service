@@ -380,34 +380,6 @@ func TestStore_DeleteBranchAtAStaleVersion(t *testing.T) {
 	sameOps(t, rec, begin, q, q, x, q, sqltest.OpRollback, begin, q, x, x, commit)
 }
 
-// The sweep's hook removes a document root's owner row in the removal's
-// transaction, and a top-level directory no row binds is success: the
-// delete matches nothing. A directory below the top level cannot be a
-// root, and passes without SQL.
-func TestService_UnbindRootInTheRemovalsTransaction(t *testing.T) {
-	s, rec, db := serviceTx(t, exec(1), exec(0))
-	ctx := context.Background()
-	top := directory(rootID, blobfs.RootID, orgID, 3)
-	cases := []blobfs.Directory{
-		top,                                    // bound: its row goes
-		top,                                    // retried: no row is left, and that is success
-		directory(dirID, rootID, "reports", 2), // not top-level: no SQL
-	}
-	for _, dir := range cases {
-		_, err := db.Transact(ctx, func(tx *sqlate.Tx) (struct{}, error) {
-			return struct{}{}, s.UnbindRoot(ctx, tx, dir)
-		})
-		if err != nil {
-			t.Fatalf("UnbindRoot(%s) = %v", dir.ID, err)
-		}
-	}
-	sameOps(t, rec, begin, x, commit, begin, x, commit, begin, commit)
-	unbind := rec.Calls()[1]
-	if !strings.HasPrefix(unbind.SQL, "DELETE FROM organization_directory") || fmt.Sprint(unbind.Args) != fmt.Sprint([]any{rootID}) {
-		t.Errorf("unbind = %q %v; want the owner row of the removed directory", unbind.SQL, unbind.Args)
-	}
-}
-
 // The deletes guard on the If-Match version: a file or an empty directory
 // at another version is a version mismatch, and nothing is removed.
 func TestStore_DeletesAtAStaleVersion(t *testing.T) {

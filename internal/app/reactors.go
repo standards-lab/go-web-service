@@ -39,18 +39,19 @@ func newSweepWake(cfg *config.Config) *sdk.Waker {
 }
 
 // newReactors constructs the reactors and registers each on lc. It takes
-// infra for the connections a reactor owns and dom for the domain calls it
-// dispatches to, the two halves a reactor joins, and cfg for its
-// schedule. Each reactor runs for the process lifetime, so it registers on
-// the coordinator as an infrastructure service does, and lc monitors its
-// Err, so a reactor that fails ends the process. Every reactor's Grace is
+// infra for the connections a reactor owns, cfg for its schedule, and wake
+// for the source the sweep receives from. The sweep dispatches to no
+// domain call: a document root's owner row goes with its directory through
+// the row's cascading foreign key, so the sweep needs no removal hook.
+// Each reactor runs for the process lifetime, so it registers on the
+// coordinator as an infrastructure service does, and lc monitors its Err,
+// so a reactor that fails ends the process. Every reactor's Grace is
 // half the shutdown timeout: the drain runs the root stage first under the
 // one timeout, so the server keeps its share, and a reactor that had to
 // cancel its handlers says so before the coordinator's deadline drops the
 // report.
 func newReactors(
 	infra *Infrastructure,
-	dom *Domain,
 	cfg *config.Config,
 	wake *sdk.Waker,
 	lc *lifecycle.Coordinator,
@@ -59,7 +60,6 @@ func newReactors(
 
 	opts := []bfdata.SweepOption{
 		bfdata.Batch(*cfg.Sweep.Batch),
-		bfdata.OnRemoveDirectory(dom.Document.UnbindRoot),
 		bfdata.StaleOlderThan(cfg.Sweep.StaleAge.Duration()),
 	}
 	pass := func(ctx context.Context) (bfdata.SweepResult, error) {
@@ -93,8 +93,8 @@ type sweepPass func(ctx context.Context) (bfdata.SweepResult, error)
 // first reclaimer; it never builds a second standalone reactor.
 //
 // A pass's error never fails the reactor. blobfs returns a pass's
-// persistent refusals joined (an object delete the store refused, the
-// hook's error, a purge a foreign key refused), leaves each refused row
+// persistent refusals joined (an object delete the store refused, a
+// purge a foreign key refused), leaves each refused row
 // for a later pass, and sets no More for them; a read that fails ends the
 // pass with its error the same way. The two are not told apart, and need
 // not be: every step of the sweep is idempotent and the work is found in

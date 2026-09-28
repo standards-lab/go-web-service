@@ -187,14 +187,16 @@ func rootless[T any](id string, err error) ([]T, web.Paging, error) {
 	return nil, web.Paging{}, err
 }
 
-// deleteDirectory removes the empty directory at version. Removing the
-// root removes its owner row with it.
+// deleteDirectory removes the empty directory at version, its scope
+// checked first. Removing the root removes its owner row with it, through
+// the owner row's cascading foreign key, so the organization has no root
+// until its next write ensures a new one.
 func (s *store) deleteDirectory(ctx context.Context, organizationID, id string, version int64) error {
-	root, id, err := s.scope(ctx, s.db, organizationID, id)
+	_, id, err := s.scope(ctx, s.db, organizationID, id)
 	if err != nil {
 		return err
 	}
-	return s.remove(ctx, id, id == root, version)
+	return s.storage.FS.Directories.Delete(ctx, s.db, id, bfdata.AtVersion(version))
 }
 
 // markBranch begins the delete of the directory with everything beneath
@@ -211,34 +213,6 @@ func (s *store) markBranch(ctx context.Context, organizationID, id string, versi
 		_, err = s.storage.FS.Directories.MarkDeleting(ctx, tx, id, bfdata.AtVersion(version))
 		return id, err
 	})
-}
-
-// remove removes one empty directory at version. The root's owner row
-// goes in the same transaction, since its foreign key refuses the
-// directory's removal while it stands.
-func (s *store) remove(ctx context.Context, id string, root bool, version int64) error {
-	fs := s.storage.FS
-	at := bfdata.AtVersion(version)
-	if !root {
-		return fs.Directories.Delete(ctx, s.db, id, at)
-	}
-	_, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (struct{}, error) {
-		if err := s.unbind(ctx, tx, id); err != nil {
-			return struct{}{}, err
-		}
-		return struct{}{}, fs.Directories.Delete(ctx, tx, id, at)
-	})
-	return err
-}
-
-// unbindRemoved removes the owner row of dir in the sweep's transaction
-// that removes it, when dir is top-level and so may be a document root;
-// the delete matches no row for a directory no organization binds.
-func (s *store) unbindRemoved(ctx context.Context, tx *sqlate.Tx, dir blobfs.Directory) error {
-	if dir.ParentID == nil || *dir.ParentID != blobfs.RootID {
-		return nil
-	}
-	return s.unbind(ctx, tx, dir.ID)
 }
 
 // moveDirectory moves the directory under a new parent within the same

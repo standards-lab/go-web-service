@@ -153,9 +153,10 @@ func TestDocumentSweep(t *testing.T) {
 		keys := []string{put(t, docs, reports.ID, "q3.txt"), put(t, docs, "root", "readme.txt")}
 		root := webtest.Decode[directory](t, c.Get(t, docs+"/directories/root"), http.StatusOK)
 
-		// The sweep removes the root last, its owner row with it in the
-		// same transaction, so the organization reads as one without a
-		// root: the alias is not found, and its listing is empty.
+		// The sweep removes the root last, and its owner row goes with it
+		// through the row's cascading foreign key, so the organization
+		// reads as one without a root: the alias is not found, and its
+		// listing is empty.
 		markBranch(t, c, docs, "root")
 		swept(t, []string{docs + "/directories/root", docs + "/directories/" + root.ID, docs + "/directories/" + reports.ID}, keys)
 		if p := webtest.Decode[directoryPage](t, c.Get(t, docs+"/directories/root/directories"), http.StatusOK); len(p.Items) != 0 || p.Total == nil || *p.Total != 0 {

@@ -31,7 +31,6 @@ type store struct {
 	documentRootRows query.Rows[string]
 	organizationRows query.Rows[string]
 	bindRoot         query.Statement
-	unbindRoot       query.Statement
 }
 
 // newStore compiles the statements against the service's catalog, registers
@@ -47,7 +46,6 @@ func newStore(db *data.Database, st *data.Storage) *store {
 		documentRootRows: stmts.Statement("document_root").Scan(query.Scalar[string]),
 		organizationRows: stmts.Statement("find_organization").Scan(query.Scalar[string]),
 		bindRoot:         stmts.Statement("bind_root"),
-		unbindRoot:       stmts.Statement("unbind_root"),
 	}
 }
 
@@ -71,12 +69,6 @@ func (s *store) findOrganization(ctx context.Context, sess sqlate.Session, organ
 // bind records the directory as the organization's document root.
 func (s *store) bind(ctx context.Context, tx *sqlate.Tx, organizationID, directoryID string) error {
 	_, err := s.bindRoot.Exec(ctx, tx, query.Args{"directory_id": directoryID, "organization_id": organizationID})
-	return err
-}
-
-// unbind removes the owner row of the directory, if it is a document root.
-func (s *store) unbind(ctx context.Context, tx *sqlate.Tx, directoryID string) error {
-	_, err := s.unbindRoot.Exec(ctx, tx, query.Args{"directory_id": directoryID})
 	return err
 }
 

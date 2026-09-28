@@ -3,6 +3,7 @@ package document_test
 import (
 	"context"
 	"database/sql/driver"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -51,22 +52,6 @@ func (n *nudges) Nudge() { n.seen = append(n.seen, n.rec.Ops()) }
 // serviceNudged is serviceOver with the sweeper the service nudges.
 func serviceNudged(t *testing.T, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *storagetest.Fake, *nudges) {
 	t.Helper()
-	s, rec, fake, sweep, _ := build(t, responses...)
-	return s, rec, fake, sweep
-}
-
-// serviceTx is serviceOver with the database, for a test that opens the
-// transaction a hook runs in, as the sweep does.
-func serviceTx(t *testing.T, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *data.Database) {
-	t.Helper()
-	s, rec, _, _, db := build(t, responses...)
-	return s, rec, db
-}
-
-// build constructs the service over the scripted driver, returning every
-// part a test may observe.
-func build(t *testing.T, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *storagetest.Fake, *nudges, *data.Database) {
-	t.Helper()
 	dialect := sqltest.ReturningDialect{}
 	pool, rec := sqltest.Open(t, responses...)
 	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
@@ -86,7 +71,7 @@ func build(t *testing.T, responses ...sqltest.Response) (*document.Service, *sql
 	t.Cleanup(func() { _ = objects.Shutdown(context.Background()) })
 	db := data.New(sqlate.Wrap(pool, dialect), catalog)
 	sweep := &nudges{rec: rec}
-	return document.New(db, data.NewStorage(fs, objects), sweep), rec, fake, sweep, db
+	return document.New(db, data.NewStorage(fs, objects), sweep), rec, fake, sweep
 }
 
 // root scripts the owner row's read: the organization's document root, or
@@ -166,7 +151,7 @@ func fileRows(files ...blobfs.File) sqltest.Response {
 }
 
 // The wiring test: every owner-row handle binds once with its arguments,
-// through the two protocols that run them all, so a key that does not
+// through the protocol that runs them all, so a key that does not
 // match its file's parameters or a scan out of step with the SELECT list
 // fails here rather than on a request. The strict driver checks the
 // placeholder count on every call.
@@ -181,10 +166,10 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 		exec(1),      // ensure: the owner row
 		root(rootID), // create: the scope check
 		dirRows(directory(dirID, rootID, "reports", 1)), // create
-		// DeleteDirectory of the root, empty.
+		// DeleteDirectory of the root, empty: its owner row goes with it
+		// through the cascading foreign key, so no statement names the row.
 		root(rootID),
-		exec(1), // the owner row removed
-		exec(1), // the root removed
+		exec(1), // the root removed, on the pool
 	)
 	id, err := s.CreateDirectory(ctx, orgID, document.CreateDirectory{ParentID: document.RootAlias, Name: "reports"})
 	if err != nil || id != (document.Identity{ID: dirID, Version: 1}) {
@@ -197,28 +182,29 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 		t.Errorf("pending = %d, leaked = %d", rec.Pending(), rec.RowsLeaked())
 	}
 	calls := rec.Calls()
-	var bind, unbind sqltest.Call
+	var bind, remove sqltest.Call
 	for _, c := range calls {
 		switch {
 		case strings.HasPrefix(c.SQL, "INSERT INTO organization_directory"):
 			bind = c
 		case strings.HasPrefix(c.SQL, "DELETE FROM organization_directory"):
-			unbind = c
+			t.Errorf("unbind = %q; want the owner row left to the cascade", c.SQL)
+		case strings.HasPrefix(c.SQL, "DELETE FROM blobfs_directory"):
+			remove = c
 		}
 	}
 	if len(bind.Args) != 2 || bind.Args[0] != rootID || bind.Args[1] != orgID {
 		t.Errorf("bind = %+v; want the root bound to the organization", bind)
 	}
-	if len(unbind.Args) != 1 || unbind.Args[0] != rootID {
-		t.Errorf("unbind = %+v; want the root's owner row removed", unbind)
+	if fmt.Sprint(remove.Args) != fmt.Sprint([]any{rootID, int64(1)}) {
+		t.Errorf("remove = %+v; want the root at the If-Match version", remove)
 	}
 	ops := rec.Ops()
 	want := []sqltest.Op{
 		sqltest.OpQuery,
 		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpExec, sqltest.OpCommit,
 		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpCommit,
-		sqltest.OpQuery,
-		sqltest.OpBegin, sqltest.OpExec, sqltest.OpExec, sqltest.OpCommit,
+		sqltest.OpQuery, sqltest.OpExec,
 	}
 	if len(ops) != len(want) {
 		t.Fatalf("ops = %v\nwant %v", ops, want)
@@ -230,14 +216,14 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 	}
 }
 
-// Verify prepares the layer's four statements and nothing of blobfs's,
+// Verify prepares the layer's three statements and nothing of blobfs's,
 // which the composition root verifies on its own.
 func TestStore_VerifyPreparesEveryStatement(t *testing.T) {
 	s, rec, _ := serviceOver(t)
 	if err := s.Verify(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if prepared := rec.SQL(sqltest.OpPrepare); len(prepared) != 4 {
-		t.Errorf("prepared %d statements, want 4: %q", len(prepared), prepared)
+	if prepared := rec.SQL(sqltest.OpPrepare); len(prepared) != 3 {
+		t.Errorf("prepared %d statements, want 3: %q", len(prepared), prepared)
 	}
 }

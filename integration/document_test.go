@@ -96,6 +96,28 @@ func TestDocument(t *testing.T) {
 		_ = c.Get(t, docs+"/directories/"+reports.ID).Problem(t, http.StatusNotFound)
 	})
 
+	run("the empty root's delete unbinds it", func(t *testing.T, docs string) {
+		reports := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)
+		c.Delete(t, docs+"/directories/"+reports.ID, webtest.IfMatch(reports.Version)).Expect(t, http.StatusNoContent)
+		root := webtest.Decode[directory](t, c.Get(t, docs+"/directories/root"), http.StatusOK)
+
+		// The owner row goes with the root, so the organization reads as
+		// one without a root: the alias is not found, and its listing is
+		// an empty page.
+		c.Delete(t, docs+"/directories/root", webtest.IfMatch(root.Version)).Expect(t, http.StatusNoContent)
+		_ = c.Get(t, docs+"/directories/root").Problem(t, http.StatusNotFound)
+		_ = c.Get(t, docs+"/directories/"+root.ID).Problem(t, http.StatusNotFound)
+		if p := webtest.Decode[directoryPage](t, c.Get(t, docs+"/directories/root/directories"), http.StatusOK); len(p.Items) != 0 || p.Total == nil || *p.Total != 0 {
+			t.Errorf("the rootless organization's listing = %+v; want an empty page", p)
+		}
+
+		// The next write ensures a new root.
+		_ = webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)
+		if again := webtest.Decode[directory](t, c.Get(t, docs+"/directories/root"), http.StatusOK); again.ID == root.ID || again.Status != "active" {
+			t.Errorf("root after the next write = %+v; want a new, active root", again)
+		}
+	})
+
 	run("a recursive delete is accepted and repeats", func(t *testing.T, docs string) {
 		reports := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)
 		_ = webtest.Decode[identity](t, c.Put(t, docs+"/directories/"+reports.ID+"/files/q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}), http.StatusCreated)

@@ -41,11 +41,11 @@ func New(cfg *config.Config, w io.Writer) (*App, error) {
 	}
 
 	// The sweep's wake precedes the domain: the document layer nudges it,
-	// and the sweep reactor over the domain receives from it.
+	// and the sweep reactor receives from it.
 	wake := newSweepWake(cfg)
 	dom := newDomain(infra, wake, lc)
 
-	if _, err := newReactors(infra, dom, cfg, wake, lc); err != nil {
+	if _, err := newReactors(infra, cfg, wake, lc); err != nil {
 		return nil, err
 	}
 

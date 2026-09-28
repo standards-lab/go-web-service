@@ -3,7 +3,7 @@
 // /api/documents/{org} as reads of one directory's contents, metadata
 // reads, uploads, proxied downloads, moves, and deletes.
 //
-// The layer's SQL is the statements/ directory, the owner row's four
+// The layer's SQL is the statements/ directory, the owner row's three
 // statements; database.go is the domain's SQL client, the sole importer of
 // the query library: it compiles the directory against the service's
 // pattern catalog, registers the inventory, binds each statement to a
@@ -33,6 +33,18 @@
 // moves, or deletes across organizations, and a move stays under one root.
 // The root itself is not moved.
 //
+// The owner row goes with its directory: its foreign key into
+// blobfs_directory cascades, so whatever removes a root, the plain delete
+// of an empty root or the sweep of a recursive delete, removes the row in
+// the same statement, and the layer runs no statement and gives the sweep
+// no hook for it. blobfs forbids a cascade on its own foreign keys, since
+// one would remove file rows whose objects still exist and leave those
+// objects unreachable; that rule does not reach a consumer's key, and an
+// owner row holds no object, so its cascade strands nothing. A
+// consumer-side cascade also scales where the sweep's hook would not:
+// blobfs keeps one removal hook, so a second directory-grain layer
+// registering its own would silently replace the first.
+//
 // A conflict is a 409 whose detail is a fixed text, never the error's own,
 // which would name blobfs's operation, ids, and constraints: "an entry
 // with that name already exists", "the directory is not empty", "the
@@ -57,7 +69,7 @@
 // Every move and delete takes its version from If-Match: a missing header
 // is 428, a stale version 412. A file delete is blobfs's delete protocol,
 // 204. A directory delete removes an empty directory, 204; removing the
-// root removes its owner row in the same transaction. With recursive=true
+// root removes its owner row with it. With recursive=true
 // it deletes the branch, the directory with everything beneath it, in two
 // stages: blobfs marks the branch deleting in one transaction, the request
 // answers 202 with the directory's read as its Location, and the sweep the
@@ -66,7 +78,7 @@
 // its listings are not found, and a write into it is a conflict. A
 // repeated recursive delete is the mark's retry, accepted again at any
 // version. The root's branch is marked like any other; its owner row
-// stands until the sweep removes the root, when the layer's hook,
-// Service.UnbindRoot, removes the row in the same transaction. The
-// organization then has no root until its next write ensures a new one.
+// stands until the sweep removes the root, and goes with it. Either way,
+// the organization then has no root until its next write ensures a new
+// one.
 package document

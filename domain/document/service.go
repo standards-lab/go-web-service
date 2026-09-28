@@ -3,10 +3,8 @@ package document
 import (
 	"context"
 
-	"github.com/standards-lab/blobfs"
 	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-web-sdk"
-	"github.com/standards-lab/sqlate"
 
 	"github.com/standards-lab/go-web-service/data"
 )
@@ -31,8 +29,8 @@ type Service struct {
 // once and never fails the request, since the sweep finds its work in the
 // database and a missed nudge only delays it. The layer declares it and
 // the composition root injects it; the sweep reactor's wake source
-// satisfies it. What the sweep asks of the layer in turn is
-// [Service.UnbindRoot].
+// satisfies it. The sweep asks nothing of the layer in turn: a root's owner
+// row goes with the directory through its cascading foreign key.
 type Sweeper interface {
 	Nudge()
 }
@@ -88,7 +86,8 @@ func (s *Service) ListFiles(ctx context.Context, organizationID, id string, q we
 
 // DeleteDirectory removes the empty directory at version: a directory with
 // contents is blobfs.ErrNotEmpty and another version
-// query.ErrVersionMismatch. Removing the root removes its owner row with it.
+// query.ErrVersionMismatch. Removing the root removes its owner row with it,
+// through the row's cascading foreign key.
 func (s *Service) DeleteDirectory(ctx context.Context, organizationID, id string, version int64) error {
 	return s.store.deleteDirectory(ctx, organizationID, id, version)
 }
@@ -106,21 +105,6 @@ func (s *Service) DeleteBranch(ctx context.Context, organizationID, id string, v
 	}
 	s.sweep.Nudge()
 	return id, nil
-}
-
-// UnbindRoot is the sweep's hook for each directory it removes, run in the
-// removal's transaction before the removal: when the directory is a
-// document root, it removes the root's owner row, whose foreign key would
-// otherwise refuse the removal, so the row goes with the directory or
-// neither goes. This is how a recursive delete of the root ends: the
-// organization has no root until its next write ensures a new one. Only a
-// top-level directory can be a root, so any other passes without SQL, and
-// a directory no row binds is success, so a retried removal converges.
-// It is the one method whose signature is blobfs's, not the web
-// contract's: the composition root passes it to
-// bfdata.OnRemoveDirectory, and the transaction is the sweep's.
-func (s *Service) UnbindRoot(ctx context.Context, tx *sqlate.Tx, dir blobfs.Directory) error {
-	return s.store.unbindRemoved(ctx, tx, dir)
 }
 
 // MoveDirectory is an action: it moves the directory under a new parent

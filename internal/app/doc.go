@@ -4,8 +4,9 @@
 // list: infrastructure.go constructs the infrastructure services,
 // telemetry.go the telemetry service, admin.go the admin services and their
 // mount, domain.go the domain services and the API mount, reactors.go the
-// event-driven entry points; routes.go is the list of mounts and
-// middleware.go the router-level middleware stack, outermost first.
+// event-driven entry points; stages.go is the stage table every layer file
+// registers from, routes.go the list of mounts, and middleware.go the
+// router-level middleware stack, outermost first.
 // Extending the service means editing a layer file's body; the signatures,
 // cmd/server, and [App.Run] stay untouched.
 //
@@ -16,26 +17,42 @@
 // declares the server as the coordinator's root-stage service, started
 // after every numbered stage and drained first, so in-flight requests
 // complete before the infrastructure beneath them closes. The stages are
-// the ordering rule: the pool at stage 0, the schema at stage 1 (verify,
-// apply, verify, seed), the domains at stage 2, each verifying its own
-// statements against the migrated schema, and the sweep reactor at stage
-// 3, started once the tables it sweeps are verified and drained after the
-// server and before the domains and the pool. Telemetry holds no stage number:
-// it starts in a startup hook before stage 0 and stops in a shutdown hook
-// after the last stage, so it brackets every numbered stage. The probes
+// the ordering rule, and the stage table in stages.go is their one
+// declaration: the pool and the object store at stageInfrastructure, the
+// schema at stageSchema (verify, apply, verify, seed; go-database's
+// admin.Stage, named in the table), blobfs's store and the domains at
+// stageVerify, each verifying its own statements against the migrated
+// schema, the sweep reactor at stageReactors, started once the tables it
+// sweeps are verified and drained after the server and before everything
+// beneath it, and the server at stageRoot. A stage is the root's decision:
+// no domain declares one or imports the lifecycle, and each layer file
+// registers what it constructs at a stage the table names. Telemetry holds
+// no stage: it starts in a startup hook before the first stage and stops
+// in a shutdown hook after the last, so it brackets every numbered stage. The probes
 // register on the router's native mux, outside every module's middleware,
 // and query the coordinator live on every request. Wiring mistakes panic
 // at construction.
 //
 // Routes and reactors are the two ways a domain service enters the running
 // process: a route is driven by a caller, a reactor by an occurrence the
-// process receives or discovers. Routes take *Domain; a reactor takes it
-// once it dispatches to a domain call, which the sweep does not, since a
-// document root's owner row goes with its directory through the row's
-// cascading foreign key. Neither is a domain service itself. A reactor is the staged sdk reactor, registered with
-// lifecycle's Add and its Err passed to Monitor. A source a domain signals
-// is built before the domain and handed to both halves: the sweep's wake,
-// which the document layer nudges and the sweep reactor receives from.
+// process receives or discovers. Routes take *Domain, and a reactor takes
+// it for the domain call each occurrence dispatches to. Neither is a
+// domain service itself. A reactor is the staged sdk reactor, registered
+// with lifecycle's Add and its Err passed to Monitor.
+//
+// The sweep is the exception: it is staged as a reactor but calls no
+// domain service. It runs data's background worker (Storage.SweepWorker),
+// which finishes blobfs's deletes and reclaims its stale rows over the
+// storage infrastructure alone, since a document root's owner row goes
+// with its directory through the row's cascading foreign key and needs no
+// domain call. The reactor is the one runner the process has for work that
+// lasts the process lifetime, so the worker runs on it, and reactors.go
+// holds only its declaration: the options from cfg, the source, the stage,
+// and the registration. Its source is built before the domain and handed
+// to both halves: the sweep's wake, which the document layer nudges after
+// each branch it marks and the sweep reactor receives from. The wake is
+// nudged once at construction, so the sweep runs at startup and a branch
+// marked before a restart does not wait an interval.
 //
 // [App.Run] is the hot start plus shutdown, delegated to the coordinator,
 // and returns the process exit code.

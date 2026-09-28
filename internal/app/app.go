@@ -58,7 +58,7 @@ func New(cfg *config.Config, w io.Writer) (*App, error) {
 	server := web.NewServer(cfg.Server, router)
 	lc.Add(lifecycle.Service{
 		Name:     "server",
-		Stage:    lifecycle.StageRoot,
+		Stage:    stageRoot,
 		Start:    server.Start,
 		Shutdown: server.Shutdown,
 	})

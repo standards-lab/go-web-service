@@ -26,10 +26,13 @@ type Admin struct {
 // newAdmin wires the admin layer over infra, each admin service handed its
 // switches from cfg at the construction site. It takes lc because an admin
 // service owns a lifecycle stage: the database admin service verifies and
-// corrects the schema at stage 1, ahead of the domains that verify their
-// statements. The content it administers is the data package's: the
-// migration sets behind the migrator, the seeder, the catalog, and the
-// statements registry.
+// corrects the schema at stageSchema, ahead of the statements verified at
+// stageVerify. The root declares that service itself, as go-database's
+// Register would (the name, the Start, and the service as its readiness
+// check), so its stage is named at the call site from the stage table
+// rather than taken inside the library. The content it administers is the
+// data package's: the migration sets behind the migrator, the seeder, the
+// catalog, and the statements registry.
 func newAdmin(
 	infra *Infrastructure,
 	cfg *config.Config,
@@ -45,7 +48,12 @@ func newAdmin(
 		Registry: infra.SQL,
 		Logger:   infra.Logger,
 	})
-	db.Register(lc)
+	lc.Add(lifecycle.Service{
+		Name:  "schema",
+		Stage: stageSchema,
+		Start: db.Start,
+		Check: db,
+	})
 	return &Admin{Database: db, Storage: infra.Objects}, nil
 }
 

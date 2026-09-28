@@ -3,15 +3,10 @@ package document
 import (
 	"context"
 
-	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-web-sdk"
 
 	"github.com/standards-lab/go-web-service/data"
 )
-
-// Stage is the lifecycle stage the domains verify their statements in:
-// after the schema (1), before the root.
-const Stage = 2
 
 // Service is the document domain service: the layer's public API, one
 // method per endpoint, every operation delegated whole to the store. Every
@@ -42,13 +37,8 @@ func New(db *data.Database, st *data.Storage, sweep Sweeper) *Service {
 	return &Service{store: newStore(db, st), sweep: sweep}
 }
 
-// Register declares the domain's startup verification on lc.
-func (s *Service) Register(lc *lifecycle.Coordinator) {
-	lc.Add(lifecycle.Service{Name: "document", Stage: Stage, Start: s.Verify})
-}
-
-// Verify prepares every statement against the migrated schema; startup
-// runs it at the domains' stage.
+// Verify prepares every statement against the migrated schema; the
+// composition root runs it at startup, once the schema is corrected.
 func (s *Service) Verify(ctx context.Context) error { return s.store.Verify(ctx) }
 
 // CreateDirectory creates a directory under the command's parent,

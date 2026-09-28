@@ -33,9 +33,10 @@ layer:
   infrastructure integration (`storage.go`, `messaging.go`, and `ai.go` are planned). A
   service never touches an infrastructure API outside its translation file.
 - `service.go`: the single domain service, a concrete type constructed from the `data` package,
-  registering its statement verification at the domains' lifecycle stage, its methods the direct
-  map from endpoint to operation, every operation delegated whole to the store after the
-  command's own validation.
+  exposing its statement verification as `Verify` for the composition root to run at startup, its
+  methods the direct map from endpoint to operation, every operation delegated whole to the store
+  after the command's own validation. A domain declares no lifecycle stage and imports no part of
+  go-core's `lifecycle`.
 - `handler.go`: the single handler, the layer's route group of error-returning handlers over the
   group's error writer.
 
@@ -93,7 +94,13 @@ contract (`ParseQuery`); the lowering to the read model's header is `data.Direct
 ## Composition wiring
 
 `internal/app/domain.go` constructs each layer's service from the `data` package and registers
-it on the coordinator at the domains' stage, never handing the `Infrastructure` struct down.
+its `Verify` on the coordinator at `stageVerify`, never handing the `Infrastructure` struct down.
+Every stage the process uses is named once in `internal/app/stages.go`, in dependency order:
+`stageInfrastructure` (the pool and the object store), `stageSchema` (go-database's
+`admin.Stage`, named rather than chosen), `stageVerify` (blobfs's store and the domains),
+`stageReactors`, and `stageRoot` (the server). Each layer file registers at a stage from that
+table, so the ordering is the root's alone: a stage stays at the call site, never in a library or
+a domain.
 The base layers (`data`, `domain/<layer>`, `admin/<service>`) are root-level packages because
 the domain packages import `data` and the topology-and-naming principle forbids a root-level
 package importing `internal/*`.

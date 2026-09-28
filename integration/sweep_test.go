@@ -170,3 +170,52 @@ func TestDocumentSweep(t *testing.T) {
 		}
 	})
 }
+
+// A branch a process marked but never swept is swept at the next
+// process's start, not an interval later: the sweep's wake is nudged at
+// construction. The first process marks the branch with its object store
+// severed, so its sweep is refused and leaves the branch deleting, and
+// stops. The second starts with the store back and an interval of an
+// hour, so only the startup wake can sweep the branch within the wait.
+func TestSweepAtStartup(t *testing.T) {
+	f := processtest.Forward(t, integration.StorageAddr())
+	opts := integration.Options{
+		Seed:    integration.Default,
+		Storage: f.Addr(),
+		Env:     []string{"APP_SWEEP_INTERVAL=1h"},
+	}
+	first := integration.Start(t, opts)
+	c := first.Client()
+	integration.Reset(t, c, integration.Default)
+	docs := "/api/documents/" + tree(t, c)["acme"].ID
+	reports := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)
+	file := webtest.Decode[identity](t, c.Put(t, docs+"/directories/"+reports.ID+"/files/q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("q3")}), http.StatusCreated)
+	key := file.ID + "/q3.txt"
+	refusals := strings.Count(first.Output(), refusedRecord)
+
+	f.Sever()
+	restored := false
+	t.Cleanup(func() {
+		if !restored {
+			f.Restore(t)
+		}
+	})
+	markBranch(t, c, docs, reports.ID)
+	first.Await(t, "the sweep's refusal logged", func() bool {
+		return strings.Count(first.Output(), refusedRecord) > refusals
+	})
+	if code := first.Stop(t); code != 0 {
+		t.Fatalf("first process exit = %d:\n%s", code, first.Output())
+	}
+
+	f.Restore(t)
+	restored = true
+	second := integration.Start(t, opts)
+	c = second.Client()
+	processtest.WaitFor(t, "the branch swept at startup", func() bool {
+		return c.Get(t, docs+"/directories/"+reports.ID).Status == http.StatusNotFound
+	})
+	if _, err := integration.Objects(t).Stat(context.Background(), key); !errors.Is(err, storage.ErrNotFound) {
+		t.Errorf("stat %s after the startup sweep = %v; want not found", key, err)
+	}
+}

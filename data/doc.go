@@ -28,6 +28,18 @@
 // rule; Retire and Purge, its two-phase delete; and Serve, the read of an
 // available file. A domain enters them through a callback run in the
 // protocol's first transaction, so no domain concept reaches here.
+//
+// Storage.SweepWorker is the storage infrastructure's background worker:
+// blobfs's sweep, run in passes while a pass reports more, which finishes
+// the branch deletes the domains mark and reclaims stale rows, with the
+// service's policy for a pass's refusals (logged at warn, never returned).
+// The architecture defines a Reactor as an entry point that calls a Domain
+// Service; this worker calls none, so it is not one. It is the exception
+// the composition root stages as a reactor anyway, since the reactor is
+// the process's one runner for work that lasts the process lifetime. Its
+// pass loop is kept apart from the logging policy, staged for promotion to
+// blobfs beside Sweep.
+//
 // Domains and the admin service are peers over this package; nothing here
 // imports either.
 package data

@@ -1,0 +1,108 @@
+package data
+
+import (
+	"context"
+	"log/slog"
+	"time"
+
+	bfdata "github.com/standards-lab/blobfs/data"
+	"github.com/standards-lab/sqlate"
+
+	"github.com/standards-lab/go-web-service/sdk"
+)
+
+// The sweep's background worker: the storage infrastructure's own upkeep,
+// which finishes the deletes the domains begin (a branch a recursive
+// delete marks) and reclaims the stale rows a write or a delete that
+// stopped partway leaves. It calls blobfs and the object store, never a
+// domain service, so it is not a Reactor in the architecture's sense, one
+// that dispatches an occurrence to a Domain Service; it is infrastructure
+// work that needs a process-lifetime runner, and the composition root
+// stages it on the sdk reactor with a Wake source, since the reactor is
+// the one runner the process has. The worker is written in two halves so
+// each can move on its own: sweepUntilDone, the loop over blobfs's
+// bounded passes, staged for promotion to blobfs beside Sweep, and the
+// logging policy, which is this service's.
+//
+// It is the standalone sweeper of blobfs's deletes, the one reclamation
+// the service runs. The moment any other layer needs sweeper-like
+// reclamation (outbox cleanup, expired sessions, soft-delete purge, or any
+// cascade beyond pruning SQL rows), that step builds the general sweeper
+// and moves blobfs's sweep onto it as its first reclaimer; it never builds
+// a second standalone worker.
+
+// sweepPass is one bounded pass of blobfs's sweep with the service's
+// options, the unit the worker repeats.
+type sweepPass func(ctx context.Context) (bfdata.SweepResult, error)
+
+// SweepWorker returns the sweep's background worker as a reactor's Func:
+// on each wake it runs blobfs's sweep over db and the object store, with
+// opts, in passes while a pass reports More, and logs each pass to logger.
+// One wake finishes the work waiting, in passes of the configured batch,
+// and the next wake finds whatever arrived since.
+//
+// A pass's error never fails the worker. blobfs returns a pass's
+// persistent refusals joined (an object delete the store refused, a purge
+// a foreign key refused), leaves each refused row for a later pass, and
+// sets no More for them; a read that fails ends the pass with its error
+// the same way. The two are not told apart, and need not be: every step
+// of the sweep is idempotent and the work is found in the database on each
+// pass, so the next wake retries all of it, and the sweep has nothing to
+// redeliver. The worker logs the error at warn with the pass's counts and
+// returns nil, the spike's rule for a handler that tolerates a failure, so
+// a stuck row, a database or object-store outage, or an admin state reset
+// under a running pass never ends the process; the outage shows on the
+// database's and the store's own readiness checks instead. The one error
+// it returns is its context's, once the drain cancels it past the
+// reactor's Grace, which Shutdown reports as handlers cancelled.
+func (s *Storage) SweepWorker(db *sqlate.DB, logger *slog.Logger, opts ...bfdata.SweepOption) sdk.Func[time.Time] {
+	return sweepWorker(func(ctx context.Context) (bfdata.SweepResult, error) {
+		return s.FS.Sweep(ctx, db, s.Objects, opts...)
+	}, logger)
+}
+
+// sweepWorker joins the loop to the logging policy over any pass, the seam
+// the worker's tests script.
+func sweepWorker(pass sweepPass, logger *slog.Logger) sdk.Func[time.Time] {
+	report := logPass(logger)
+	return func(ctx context.Context, _ time.Time) error {
+		return sweepUntilDone(ctx, pass, report)
+	}
+}
+
+// sweepUntilDone runs pass while it reports More, checking ctx before
+// each, and hands every pass's result and error to report. It returns nil
+// once a pass reports no More, and ctx's error once ctx ends, before a
+// pass or during one; a pass's own error is report's to judge and never
+// ends the loop. It knows nothing of this service, and is the half staged
+// for blobfs.
+func sweepUntilDone(ctx context.Context, pass sweepPass, report func(bfdata.SweepResult, error)) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		res, err := pass(ctx)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		report(res, err)
+		if !res.More {
+			return nil
+		}
+	}
+}
+
+// logPass is the worker's logging policy: a pass that returned refusals
+// at warn with its error and counts, a pass that did work at info, and a
+// pass with nothing to do not at all.
+func logPass(logger *slog.Logger) func(bfdata.SweepResult, error) {
+	return func(res bfdata.SweepResult, err error) {
+		counts := []any{"files", res.Files, "directories", res.Directories, "stale", res.Stale, "more", res.More}
+		switch {
+		case err != nil:
+			logger.Warn("sweep pass refused", append(counts, "error", err)...)
+		case res.Files+res.Directories+res.Stale > 0:
+			logger.Info("sweep pass", counts...)
+		}
+	}
+}

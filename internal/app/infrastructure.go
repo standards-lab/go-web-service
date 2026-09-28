@@ -11,7 +11,6 @@ import (
 	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-core/logging"
 	"github.com/standards-lab/go-database"
-	"github.com/standards-lab/go-database/admin"
 	"github.com/standards-lab/go-database/postgres"
 	"github.com/standards-lab/go-observability"
 	"github.com/standards-lab/go-storage"
@@ -47,18 +46,15 @@ type Infrastructure struct {
 	Sets    []migrate.Set
 }
 
-// storageStage verifies blobfs's statements against the migrated schema,
-// once the schema service at admin.Stage has corrected it, beside the
-// domains that verify their own.
-const storageStage = admin.Stage + 1
-
 // newInfrastructure constructs the infrastructure services in one place, in
 // dependency order, each registering on lc where it is built as a
-// lifecycle.Service with the stage that places it in the startup order, so
-// a service cannot exist without a startup, shutdown, or readiness
-// declaration. The database and the object store register at stage 0 with
-// their readiness checks, so both are started before the schema service
-// seeds objects. Construction opens nothing: connectivity belongs to a
+// lifecycle.Service at its stage from the stage table (stages.go), so a
+// service cannot exist without a startup, shutdown, or readiness
+// declaration. The database and the object store register at
+// stageInfrastructure with their readiness checks, so both are started
+// before the schema service seeds objects; blobfs's store verifies its
+// statements at stageVerify, once the schema is corrected, beside the
+// domains that verify their own. Construction opens nothing: connectivity belongs to a
 // service's Start. The pattern catalog is built here, once: the library's
 // namespace, blobfs's, and the application's; a port adds the engine's
 // overlay beside them. This file is the one place a provider is named:
@@ -79,7 +75,7 @@ func newInfrastructure(
 	}
 	lc.Add(lifecycle.Service{
 		Name:     "database",
-		Stage:    0,
+		Stage:    stageInfrastructure,
 		Start:    db.Start,
 		Shutdown: db.Shutdown,
 		Check:    db,
@@ -92,7 +88,7 @@ func newInfrastructure(
 	objects := storage.New(client, cfg.Storage)
 	lc.Add(lifecycle.Service{
 		Name:     "storage",
-		Stage:    0,
+		Stage:    stageInfrastructure,
 		Start:    objects.Start,
 		Shutdown: objects.Shutdown,
 		Check:    objects,
@@ -107,7 +103,7 @@ func newInfrastructure(
 	}
 	lc.Add(lifecycle.Service{
 		Name:  "blobfs",
-		Stage: storageStage,
+		Stage: stageVerify,
 		Start: func(ctx context.Context) error { return fs.Verify(ctx, session) },
 	})
 	blobfsSet, err := blobfspg.Migrations()

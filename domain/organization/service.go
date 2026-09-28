@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-web-sdk"
 
 	"github.com/standards-lab/go-web-service/data"
@@ -13,10 +12,6 @@ import (
 // ErrCycle reports a transfer whose new parent sits inside the
 // organization's own subtree, the organization itself included.
 var ErrCycle = errors.New("transfer would create a cycle")
-
-// Stage is the lifecycle stage the domains verify their statements in:
-// after the schema (1), before the root.
-const Stage = 2
 
 // Service is the organization domain service: the layer's public API, one
 // method per endpoint, every operation delegated whole to the store.
@@ -33,13 +28,9 @@ func New(db *data.Database, st *data.Storage) *Service {
 	return &Service{store: newStore(db, st)}
 }
 
-// Register declares the domain's startup verification on lc.
-func (s *Service) Register(lc *lifecycle.Coordinator) {
-	lc.Add(lifecycle.Service{Name: "organization", Stage: Stage, Start: s.Verify})
-}
-
 // Verify prepares every statement and the read contract against the
-// migrated schema; startup runs it at the domains' stage.
+// migrated schema; the composition root runs it at startup, once the
+// schema is corrected.
 func (s *Service) Verify(ctx context.Context) error { return s.store.Verify(ctx) }
 
 // List returns one page of organizations and the read's paging, honoring

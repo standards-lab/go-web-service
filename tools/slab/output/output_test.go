@@ -57,6 +57,14 @@ func TestResponse_WritesTheStatusLineForAnEmptyBody(t *testing.T) {
 	}
 }
 
+func TestStatus_WritesTheStatusLineThenEachLine(t *testing.T) {
+	o, out := plain()
+	o.Status(http.StatusAccepted, "Location: /x/1", "being deleted")
+	if want := "202 Accepted\nLocation: /x/1\nbeing deleted\n"; out.String() != want {
+		t.Errorf("Status wrote %q, want %q", out.String(), want)
+	}
+}
+
 // Object shows the headers it knows in its own order, whatever order the
 // response carried them in, and skips the ones the response lacks and any
 // it does not know.

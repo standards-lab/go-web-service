@@ -83,13 +83,13 @@ organization's document root is created by its first write.
 
 ```sh
 mise run slab -- docs dirs create <acme-id> --parent-id root --name reports       # 201, the new directory's id and version
-mise run slab -- docs dirs get <acme-id> root                                  # the root, its path "/"
+mise run slab -- docs dirs get <acme-id> root                                  # the root, its path "/", status "active"
 mise run slab -- docs dirs list <acme-id> root --sort name                     # the root's child directories
 ```
 
 ```sh
 # upload, list, read back, revalidate:
-mise run slab -- docs files put <acme-id> <reports-id> q3.pdf                  # 201; stored as q3.pdf, application/pdf
+mise run slab -- docs files put <acme-id> <reports-id> q3.pdf                  # 201 at version 2; stored as q3.pdf, application/pdf
 mise run slab -- docs files put <acme-id> <reports-id> notes --name "Q3 notes" # no extension: application/octet-stream
 mise run slab -- docs files list <acme-id> <reports-id> --size 1               # page 1 and next; continue with --cursor <next>
 mise run slab -- docs files show <acme-id> <file-id>                           # the metadata: status, size, version
@@ -99,14 +99,30 @@ mise run slab -- docs files get <acme-id> <file-id> --if-none-match '"<etag>"' #
 
 ```sh
 # moves take the version they guard on, as the flag or inside --body:
-mise run slab -- docs files move <acme-id> <file-id> --version 1 --directory-id <reports-id> --name q3-final.pdf
+mise run slab -- docs files move <acme-id> <file-id> --version 2 --directory-id <reports-id> --name q3-final.pdf
 mise run slab -- docs dirs move <acme-id> <reports-id> --body '{"parent_id":"root","name":"archive","version":1}'
 ```
 
 ```sh
-mise run slab -- docs files delete <acme-id> <file-id>                         # 204
-mise run slab -- docs dirs delete <acme-id> <reports-id>                       # 409: "Q3 notes" is still in it
-mise run slab -- docs dirs delete <acme-id> <reports-id> --recursive           # 204: empties it first
+# the deletes take the version they guard on, as org delete does:
+mise run slab -- docs files delete <acme-id> <file-id>                         # cobra usage error: --version is required
+mise run slab -- docs files delete <acme-id> <file-id> --version 2             # 412: the move left it at version 3
+mise run slab -- docs files delete <acme-id> <file-id> --version 3             # 204
+mise run slab -- docs dirs delete <acme-id> <reports-id> --version 2           # 409: the directory is not empty
+```
+
+```sh
+# a recursive delete marks the branch and answers before the sweep removes it:
+mise run slab -- docs dirs delete <acme-id> <reports-id> --version 2 --recursive   # 202, its Location
+mise run slab -- docs dirs get <acme-id> <reports-id>                              # status "deleting", until the sweep is done
+mise run slab -- docs dirs list <acme-id> <reports-id>                             # 404: a listing within a deleting branch
+mise run slab -- docs dirs get <acme-id> <reports-id>                              # 404 once the sweep is done
+```
+
+```sh
+# or wait for the sweep in the same command:
+mise run slab -- docs dirs create <acme-id> --parent-id root --name scratch                # 201
+mise run slab -- docs dirs delete <acme-id> <scratch-id> --version 1 --recursive --wait 30s   # 202, then 404
 ```
 
 ## `admin database` — the admin mount

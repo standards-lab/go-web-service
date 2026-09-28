@@ -47,16 +47,27 @@ type Identity struct {
 }
 
 // Directory is one directory as the API presents it. Path is set on the
-// single-directory read only. The service's own type also carries status,
-// created_at, and updated_at; slab reads none of them, so they are left
-// unstated and pass through untouched in the raw JSON a command prints.
+// single-directory read only. Status is DirectoryActive, or
+// DirectoryDeleting from a recursive delete until the sweep removes the
+// branch; a listing never shows a deleting directory, so only the read does.
+// The service's own type also carries created_at and updated_at; slab reads
+// neither, so they are left unstated and pass through untouched in the raw
+// JSON a command prints.
 type Directory struct {
 	ID       string  `json:"id"`
 	ParentID *string `json:"parent_id"`
 	Name     string  `json:"name"`
 	Path     string  `json:"path,omitempty"`
+	Status   string  `json:"status"`
 	Version  int64   `json:"version"`
 }
+
+// The directory statuses, blobfs's names as the service writes them: a
+// string here, as File's status is, since slab does not import blobfs.
+const (
+	DirectoryActive   = "active"
+	DirectoryDeleting = "deleting"
+)
 
 // File is one file's metadata as the API presents it. Status is blobfs's
 // stage name, a string here since slab does not import blobfs, and Size is

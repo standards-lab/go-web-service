@@ -2,6 +2,7 @@ package document_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -36,6 +37,7 @@ type exchange struct {
 type service struct {
 	status   int
 	reply    string
+	location string
 	received []exchange
 }
 
@@ -51,6 +53,9 @@ func newService(t *testing.T, status int, reply string) (*service, *httptest.Ser
 			contentType: r.Header.Get("Content-Type"),
 			body:        string(body),
 		})
+		if s.location != "" {
+			w.Header().Set("Location", s.location)
+		}
 		// The service answers an error status with a problem document.
 		if s.status >= http.StatusBadRequest {
 			w.Header().Set("Content-Type", web.ProblemMediaType)
@@ -190,12 +195,12 @@ func TestCommands_SendTheRequestTheirRouteNames(t *testing.T) {
 			http.MethodPost, base + "/directories/" + dir + "/move", `{"name":"a","parent_id":"root"}`, "application/json", `"4"`,
 		},
 		"dirs delete": {
-			[]string{"dirs", "delete", org, dir}, http.StatusNoContent,
-			http.MethodDelete, base + "/directories/" + dir, "", "", "",
+			[]string{"dirs", "delete", org, dir, "--version", "3"}, http.StatusNoContent,
+			http.MethodDelete, base + "/directories/" + dir, "", "", `"3"`,
 		},
 		"dirs delete recursive": {
-			[]string{"dirs", "delete", org, dir, "--recursive"}, http.StatusNoContent,
-			http.MethodDelete, base + "/directories/" + dir + "?recursive=true", "", "", "",
+			[]string{"dirs", "delete", org, dir, "--version", "5", "--recursive"}, http.StatusAccepted,
+			http.MethodDelete, base + "/directories/" + dir + "?recursive=true", "", "", `"5"`,
 		},
 		"files list": {
 			[]string{"files", "list", org, "root", "--size", "10", "--sort", "name"}, http.StatusOK,
@@ -218,16 +223,19 @@ func TestCommands_SendTheRequestTheirRouteNames(t *testing.T) {
 			http.MethodPost, base + "/files/" + file + "/move", `{ "directory_id":"root" , "name":"x" }`, "application/json", `"2"`,
 		},
 		"files delete": {
-			[]string{"files", "delete", org, file}, http.StatusNoContent,
-			http.MethodDelete, base + "/files/" + file, "", "", "",
+			[]string{"files", "delete", org, file, "--version", "2"}, http.StatusNoContent,
+			http.MethodDelete, base + "/files/" + file, "", "", `"2"`,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			reply := `{"id":"x","version":1}`
-			if tc.status == http.StatusNoContent {
+			if tc.status == http.StatusNoContent || tc.status == http.StatusAccepted {
 				reply = ""
 			}
 			s, srv := newService(t, tc.status, reply)
+			if tc.status == http.StatusAccepted {
+				s.location = base + "/directories/" + dir
+			}
 			if _, err := run(t, srv, tc.args...); err != nil {
 				t.Fatal(err)
 			}
@@ -253,7 +261,7 @@ func TestCommands_RenderTheReply(t *testing.T) {
 		t.Errorf("stdout = %q, want %q", out, want)
 	}
 	_, srv = newService(t, http.StatusNoContent, "")
-	out, err = run(t, srv, "files", "delete", org, file)
+	out, err = run(t, srv, "files", "delete", org, file, "--version", "1")
 	if err != nil || out != "204 No Content\n" {
 		t.Errorf("delete = %q, %v; want the status line", out, err)
 	}
@@ -269,7 +277,7 @@ func TestCommands_ExpectTheirOneStatus(t *testing.T) {
 		want string
 	}{
 		"dirs create": {[]string{"dirs", "create", org, "--parent-id", "root", "--name", "x"}, "want 201"},
-		"dirs delete": {[]string{"dirs", "delete", org, dir}, "want 204"},
+		"dirs delete": {[]string{"dirs", "delete", org, dir, "--version", "1"}, "want 204"},
 		"files put":   {[]string{"files", "put", org, "root", upload}, "want 201"},
 	} {
 		_, srv := newService(t, http.StatusAccepted, `{}`)
@@ -297,18 +305,22 @@ func TestCommands_RefuseMissingInputBeforeAnyRequest(t *testing.T) {
 		args []string
 		want string
 	}{
-		"dirs create nothing":    {[]string{"dirs", "create", org}, "--parent-id and --name are required"},
-		"dirs create no name":    {[]string{"dirs", "create", org, "--parent-id", "root"}, "--parent-id and --name are required"},
-		"dirs create no parent":  {[]string{"dirs", "create", org, "--name", "x"}, "--parent-id and --name are required"},
-		"dirs move no version":   {[]string{"dirs", "move", org, dir, "--parent-id", "root", "--name", "x"}, `required flag(s) "version" not set`},
-		"dirs move no name":      {[]string{"dirs", "move", org, dir, "--version", "1", "--parent-id", "root"}, "--parent-id and --name are required"},
-		"dirs move body no key":  {[]string{"dirs", "move", org, dir, "--body", `{"parent_id":"root","name":"x"}`}, "--version is required"},
-		"files move no version":  {[]string{"files", "move", org, file, "--directory-id", "root", "--name", "x"}, `required flag(s) "version" not set`},
-		"files move no dir":      {[]string{"files", "move", org, file, "--version", "1", "--name", "x"}, "--directory-id and --name are required"},
-		"files move body no key": {[]string{"files", "move", org, file, "--body", `{"directory_id":"root","name":"x"}`}, "--version is required"},
-		"files put no file":      {[]string{"files", "put", org, "root", filepath.Join(t.TempDir(), "missing")}, "no such file"},
-		"list nameless filter":   {[]string{"files", "list", org, "root", "--filter", "=x"}, "--filter"},
-		"list page and cursor":   {[]string{"dirs", "list", org, "root", "--page", "2", "--cursor", "c"}, "if any flags in the group [page cursor] are set none of the others can be"},
+		"dirs create nothing":     {[]string{"dirs", "create", org}, "--parent-id and --name are required"},
+		"dirs create no name":     {[]string{"dirs", "create", org, "--parent-id", "root"}, "--parent-id and --name are required"},
+		"dirs create no parent":   {[]string{"dirs", "create", org, "--name", "x"}, "--parent-id and --name are required"},
+		"dirs move no version":    {[]string{"dirs", "move", org, dir, "--parent-id", "root", "--name", "x"}, `required flag(s) "version" not set`},
+		"dirs move no name":       {[]string{"dirs", "move", org, dir, "--version", "1", "--parent-id", "root"}, "--parent-id and --name are required"},
+		"dirs move body no key":   {[]string{"dirs", "move", org, dir, "--body", `{"parent_id":"root","name":"x"}`}, "--version is required"},
+		"files move no version":   {[]string{"files", "move", org, file, "--directory-id", "root", "--name", "x"}, `required flag(s) "version" not set`},
+		"files move no dir":       {[]string{"files", "move", org, file, "--version", "1", "--name", "x"}, "--directory-id and --name are required"},
+		"files move body no key":  {[]string{"files", "move", org, file, "--body", `{"directory_id":"root","name":"x"}`}, "--version is required"},
+		"dirs delete no version":  {[]string{"dirs", "delete", org, dir, "--recursive"}, `required flag(s) "version" not set`},
+		"files delete no version": {[]string{"files", "delete", org, file}, `required flag(s) "version" not set`},
+		"wait without recursive":  {[]string{"dirs", "delete", org, dir, "--version", "1", "--wait", "5s"}, "--wait needs --recursive"},
+		"negative wait":           {[]string{"dirs", "delete", org, dir, "--version", "1", "--recursive", "--wait", "-1s"}, "--wait -1s"},
+		"files put no file":       {[]string{"files", "put", org, "root", filepath.Join(t.TempDir(), "missing")}, "no such file"},
+		"list nameless filter":    {[]string{"files", "list", org, "root", "--filter", "=x"}, "--filter"},
+		"list page and cursor":    {[]string{"dirs", "list", org, "root", "--page", "2", "--cursor", "c"}, "if any flags in the group [page cursor] are set none of the others can be"},
 	} {
 		s, srv := newService(t, http.StatusOK, `{}`)
 		if _, err := run(t, srv, tc.args...); err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -443,5 +455,138 @@ func TestFilesGet_WritesTheBytesToOut(t *testing.T) {
 	}
 	if _, err := os.Stat(unsaved); !os.IsNotExist(err) {
 		t.Errorf("a 304 wrote %s: %v", unsaved, err)
+	}
+}
+
+// A recursive delete is accepted, not done: the command expects 202 and says
+// so, with the Location to read and what the sweep will do. A 204 in its
+// place is a mismatch, as is a 202 with nothing to follow.
+func TestDirsDelete_RecursiveReportsTheAcceptedBranch(t *testing.T) {
+	loc := "/api/documents/" + org + "/directories/" + dir
+	s, srv := newService(t, http.StatusAccepted, "")
+	s.location = loc
+	out, err := run(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "202 Accepted\n" +
+		"Location: " + loc + "\n" +
+		"the branch is deleting; the sweep removes it, and the Location answers 404 once it has\n"
+	if out != want {
+		t.Errorf("stdout = %q, want %q", out, want)
+	}
+
+	_, srv = newService(t, http.StatusNoContent, "")
+	if _, err := run(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive"); err == nil || !strings.Contains(err.Error(), "want 202") {
+		t.Errorf("a 204 to a recursive delete: err = %v, want the status mismatch", err)
+	}
+	_, srv = newService(t, http.StatusAccepted, "")
+	if _, err := run(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive"); err == nil || !strings.Contains(err.Error(), "no Location") {
+		t.Errorf("a 202 without Location: err = %v, want the refusal", err)
+	}
+}
+
+// sweeping is a fake service whose recursive delete answers 202, and whose
+// directory read answers the directory deleting for the first reads reads,
+// and 404 after. It returns the requests it received, as method and URI.
+func sweeping(t *testing.T, reads int) (*httptest.Server, *[]string) {
+	t.Helper()
+	loc := "/api/documents/" + org + "/directories/" + dir
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.RequestURI())
+		switch {
+		case r.Method == http.MethodDelete:
+			w.Header().Set("Location", loc)
+			w.WriteHeader(http.StatusAccepted)
+		case reads > 0:
+			reads--
+			w.Header().Set("Content-Type", web.JSONMediaType)
+			_, _ = io.WriteString(w, `{"id":"`+dir+`","name":"reports","status":"deleting","version":5}`)
+		default:
+			w.Header().Set("Content-Type", web.ProblemMediaType)
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"title":"Not Found","status":404}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &seen
+}
+
+// --wait reads the Location until it answers 404 and reports the sweep
+// done; a Location still answering 200 when the wait runs out is an error.
+func TestDirsDelete_WaitPollsTheLocationUntilTheSweepIsDone(t *testing.T) {
+	loc := "/api/documents/" + org + "/directories/" + dir
+	srv, seen := sweeping(t, 1)
+	out, err := run(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive", "--wait", "10s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"DELETE " + loc + "?recursive=true", "GET " + loc, "GET " + loc}
+	if strings.Join(*seen, ",") != strings.Join(want, ",") {
+		t.Errorf("requests = %q, want %q", *seen, want)
+	}
+	if !strings.HasPrefix(out, "202 Accepted\n") || !strings.Contains(out, "\n404 Not Found\nthe sweep removed the branch within ") {
+		t.Errorf("stdout = %q, want the 202 then the 404", out)
+	}
+
+	srv, _ = sweeping(t, 1000)
+	if _, err := run(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive", "--wait", "100ms"); err == nil || !strings.Contains(err.Error(), "still answers 200 after 100ms") {
+		t.Errorf("err = %v, want the wait to run out", err)
+	}
+}
+
+// dirs get prints the read as the service wrote it, its status among the
+// members, and the entity restates the member.
+func TestDirsGet_ShowsTheStatus(t *testing.T) {
+	_, srv := newService(t, http.StatusOK, `{"id":"`+dir+`","parent_id":null,"name":"reports","path":"/reports","status":"deleting","version":5}`)
+	out, err := run(t, srv, "dirs", "get", org, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `"status": "deleting"`) {
+		t.Errorf("stdout lacks the status:\n%s", out)
+	}
+	var d document.Directory
+	if err := json.Unmarshal([]byte(`{"id":"x","status":"deleting"}`), &d); err != nil || d.Status != document.DirectoryDeleting {
+		t.Errorf("Directory = %+v, %v; want status deleting", d, err)
+	}
+}
+
+// The guarded deletes' refusals print through the root's problem printer
+// as the service wrote them: the status and title, then the detail.
+func TestDeletes_PrintThePreconditionAndConflictProblems(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args   []string
+		status int
+		reply  string
+		want   string
+	}{
+		"428": {
+			[]string{"files", "delete", org, file, "--version", "1"}, http.StatusPreconditionRequired,
+			`{"title":"Precondition Required","status":428,"detail":"the request requires an If-Match header"}`,
+			"428 Precondition Required\ndetail: the request requires an If-Match header\n",
+		},
+		"412": {
+			[]string{"dirs", "delete", org, dir, "--version", "1"}, http.StatusPreconditionFailed,
+			`{"title":"Precondition Failed","status":412}`,
+			"412 Precondition Failed\n",
+		},
+		"409": {
+			[]string{"dirs", "delete", org, dir, "--version", "1"}, http.StatusConflict,
+			`{"title":"Conflict","status":409,"detail":"the directory is not empty"}`,
+			"409 Conflict\ndetail: the directory is not empty\n",
+		},
+	} {
+		_, srv := newService(t, tc.status, tc.reply)
+		_, err := run(t, srv, tc.args...)
+		if err == nil {
+			t.Fatalf("%s: no error", name)
+		}
+		var printed bytes.Buffer
+		output.New(io.Discard, &printed, nil).Error(err)
+		if printed.String() != tc.want {
+			t.Errorf("%s: printed %q, want %q", name, printed.String(), tc.want)
+		}
 	}
 }

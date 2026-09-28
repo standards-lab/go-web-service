@@ -55,18 +55,30 @@ func (o *Output) Style() style.Style {
 // something. A non-empty body that is not JSON is written as is, since a
 // passthrough command shows what the service sent rather than hiding it.
 func (o *Output) Response(status int, body []byte) {
-	st := o.Style()
 	body = bytes.TrimSpace(body)
 	if len(body) == 0 {
-		_, _ = fmt.Fprintf(o.stdout, "%s\n", st.Status(fmt.Sprintf("%d %s", status, http.StatusText(status))))
+		o.Status(status)
 		return
 	}
+	st := o.Style()
 	var pretty bytes.Buffer
 	if err := json.Indent(&pretty, body, "", "  "); err != nil {
 		_, _ = fmt.Fprintf(o.stdout, "%s\n", body)
 		return
 	}
 	_, _ = fmt.Fprintf(o.stdout, "%s\n", st.JSON(pretty.String()))
+}
+
+// Status writes a bodiless response to stdout: the status line, styled as
+// Response styles it, then each of lines as written. A command whose reply
+// is a status and a header or two, such as a 202 and its Location, says
+// what happened through it rather than printing the status line alone.
+func (o *Output) Status(status int, lines ...string) {
+	st := o.Style()
+	_, _ = fmt.Fprintf(o.stdout, "%s\n", st.Status(fmt.Sprintf("%d %s", status, http.StatusText(status))))
+	for _, line := range lines {
+		_, _ = fmt.Fprintln(o.stdout, line)
+	}
 }
 
 // objectHeaders are the headers an object response carries that Object

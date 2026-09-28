@@ -2,6 +2,7 @@ package document
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
@@ -79,15 +80,26 @@ func (c *Client) MoveDirectory(ctx context.Context, org, id string, version int6
 	return c.http.Post(ctx, directory(org, id)+"/move", body, httpx.IfMatch(version))
 }
 
-// DeleteDirectory sends DELETE Documents/{org}/directories/{id}, with
-// ?recursive=true when recursive is set, and no query otherwise, which the
-// service reads as false.
-func (c *Client) DeleteDirectory(ctx context.Context, org, id string, recursive bool) (*httpx.Response, error) {
+// DeleteDirectory sends DELETE Documents/{org}/directories/{id} with
+// If-Match at version, with ?recursive=true when recursive is set, and no
+// query otherwise, which the service reads as false.
+func (c *Client) DeleteDirectory(ctx context.Context, org, id string, version int64, recursive bool) (*httpx.Response, error) {
 	path := directory(org, id)
 	if recursive {
 		path += "?recursive=true"
 	}
-	return c.http.Delete(ctx, path)
+	return c.http.Delete(ctx, path, httpx.IfMatch(version))
+}
+
+// DirectoryAt sends GET location, a directory read's path as a recursive
+// delete's Location gave it. An absolute URL is sent as its path and query,
+// against the client's own base.
+func (c *Client) DirectoryAt(ctx context.Context, location string) (*httpx.Response, error) {
+	u, err := url.Parse(location)
+	if err != nil {
+		return nil, fmt.Errorf("location %q: %w", location, err)
+	}
+	return c.http.Get(ctx, u.RequestURI())
 }
 
 // PutFile sends PUT Documents/{org}/directories/{dir}/files/{name} with body
@@ -117,7 +129,8 @@ func (c *Client) MoveFile(ctx context.Context, org, id string, version int64, bo
 	return c.http.Post(ctx, file(org, id)+"/move", body, httpx.IfMatch(version))
 }
 
-// DeleteFile sends DELETE Documents/{org}/files/{id}.
-func (c *Client) DeleteFile(ctx context.Context, org, id string) (*httpx.Response, error) {
-	return c.http.Delete(ctx, file(org, id))
+// DeleteFile sends DELETE Documents/{org}/files/{id} with If-Match at
+// version.
+func (c *Client) DeleteFile(ctx context.Context, org, id string, version int64) (*httpx.Response, error) {
+	return c.http.Delete(ctx, file(org, id), httpx.IfMatch(version))
 }

@@ -56,15 +56,21 @@ scenario's narrated tour: a command sends one real request and returns its resul
   unchanged; `logo delete <id>` removes it.
 - **docs** — the document domain's eleven endpoints, every one under an organization id `<org>`,
   where a directory `<dir>` is an id or the `root` alias. `dirs` holds `create <org>` (`--parent-id
-  <dir>`, `--name`), `get <org> <dir>` (the metadata with the path), `list <org> <dir>` (the child
+  <dir>`, `--name`), `get <org> <dir>` (the metadata with the path and the
+  `status`, `active` or `deleting`), `list <org> <dir>` (the child
   directories, under `org list`'s paging and filter flags), `move <org> <dir>` (`--version`,
-  `--parent-id`, `--name`), and `delete <org> <dir>` (`--recursive` empties it first). `files` holds
+  `--parent-id`, `--name`), and `delete <org> <dir>` (`--version`; an empty directory is a 204, and
+  `--recursive` marks the whole branch deleting instead, a 202 that prints the `Location` to read
+  while the service's sweep removes the branch; `--wait <duration>` then polls that `Location`
+  until it answers 404, failing if the duration runs out first). `files` holds
   `list <org> <dir>` (the directory's files, the same flags), `put <org> <dir> <file>` (the stored
   name is the file's base name unless `--name` gives one; the media type is `--content-type`, else
   the extension's, else `application/octet-stream`, since the service accepts any), `show <org>
   <file-id>` (the metadata), `get <org> <file-id>` (the headers, `Content-Disposition` among them,
   with the bytes to `--out` and `--if-none-match` as on `logo get`), `move <org> <file-id>`
-  (`--version`, `--directory-id`, `--name`), and `delete <org> <file-id>`. `dirs create` and both
+  (`--version`, `--directory-id`, `--name`), and `delete <org> <file-id>` (`--version`). Both deletes
+  need `--version` for the request's `If-Match`, as `org delete` does; the service answers 428
+  without it and 412 when it is stale. `dirs create` and both
   moves take `--body` in place of their field flags, and on a move a top-level `"version"` in it
   stands in for `--version`, as on `org edit`.
 - **admin database** — the database admin service's twelve endpoints: `schema status`, `verify`,

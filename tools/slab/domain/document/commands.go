@@ -1,6 +1,7 @@
 package document
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"mime"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -248,29 +250,104 @@ func (d deps) dirsMoveCommand() *cobra.Command {
 	return cmd
 }
 
-// dirsDeleteCommand is DELETE Documents/{org}/directories/{id}. The
-// service refuses a directory that is not empty unless --recursive asks it
-// to empty the directory first.
+// dirsDeleteCommand is DELETE Documents/{org}/directories/{id} under
+// If-Match. There is no body, so --version is simply required. The service
+// removes an empty directory, 204, and refuses one that is not; --recursive
+// asks it to mark the whole branch deleting instead, answered 202 with the
+// directory's read as the Location, and the sweep removes the branch after.
+// --wait then polls that Location until it answers 404, for at most the
+// duration given.
 func (d deps) dirsDeleteCommand() *cobra.Command {
-	var recursive bool
+	var (
+		recursive bool
+		version   int64
+		wait      time.Duration
+	)
 	cmd := &cobra.Command{
 		Use:   "delete <org> <dir>",
-		Short: "Delete a directory, and with --recursive everything under it",
+		Short: "Delete an empty directory, or with --recursive mark its branch for the sweep",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			res, err := d.newClient().DeleteDirectory(cmd.Context(), args[0], args[1], recursive)
+			if cmd.Flags().Changed("wait") && !recursive {
+				return errors.New("--wait needs --recursive: only a recursive delete is swept")
+			}
+			if wait < 0 {
+				return fmt.Errorf("--wait %s: want a positive duration", wait)
+			}
+			client := d.newClient()
+			res, err := client.DeleteDirectory(cmd.Context(), args[0], args[1], version, recursive)
 			if err != nil {
 				return err
 			}
-			if err := output.Expect(res, http.StatusNoContent); err != nil {
+			if !recursive {
+				if err := output.Expect(res, http.StatusNoContent); err != nil {
+					return err
+				}
+				d.out.Response(res.Status, res.Body)
+				return nil
+			}
+			if err := output.Expect(res, http.StatusAccepted); err != nil {
 				return err
 			}
-			d.out.Response(res.Status, res.Body)
+			location := res.Header.Get("Location")
+			if location == "" {
+				return errors.New("the service answered 202 with no Location to follow")
+			}
+			d.out.Status(res.Status,
+				"Location: "+location,
+				"the branch is deleting; the sweep removes it, and the Location answers 404 once it has")
+			if wait == 0 {
+				return nil
+			}
+			took, err := awaitSweep(cmd.Context(), client, location, wait)
+			if err != nil {
+				return err
+			}
+			d.out.Status(http.StatusNotFound, fmt.Sprintf("the sweep removed the branch within %s", took.Round(time.Millisecond)))
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&recursive, "recursive", false, "delete the directory's files and directories first")
+	cmd.Flags().Int64Var(&version, "version", 0, "the version the directory was last seen at, sent as If-Match")
+	_ = cmd.MarkFlagRequired("version")
+	cmd.Flags().BoolVar(&recursive, "recursive", false, "mark the directory and everything under it deleting, for the sweep to remove")
+	cmd.Flags().DurationVar(&wait, "wait", 0, "with --recursive, poll the Location until the sweep has removed the branch, for at most this long (e.g. 30s)")
 	return cmd
+}
+
+// pollInterval is how long awaitSweep waits between reads of the Location.
+// The delete nudges the sweep, so a small branch is usually gone by the
+// first or second read.
+const pollInterval = 250 * time.Millisecond
+
+// awaitSweep reads location until it answers 404, the sweep having removed
+// the branch, and returns how long that took. A 200 is the directory still
+// deleting, read again after pollInterval; any other status is returned as
+// output.Expect's error. When limit passes first, or ctx ends, it returns
+// the reason.
+func awaitSweep(ctx context.Context, client *Client, location string, limit time.Duration) (time.Duration, error) {
+	start := time.Now()
+	deadline := start.Add(limit)
+	for {
+		res, err := client.DirectoryAt(ctx, location)
+		if err != nil {
+			return 0, err
+		}
+		if res.Status == http.StatusNotFound {
+			return time.Since(start), nil
+		}
+		if err := output.Expect(res, http.StatusOK); err != nil {
+			return 0, err
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return 0, fmt.Errorf("%s still answers 200 after %s: the sweep has not removed the branch yet", location, limit)
+		}
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-time.After(min(pollInterval, remaining)):
+		}
+	}
 }
 
 // filesListCommand is GET Documents/{org}/directories/{id}/files under the
@@ -442,14 +519,16 @@ func (d deps) filesMoveCommand() *cobra.Command {
 	return cmd
 }
 
-// filesDeleteCommand is DELETE Documents/{org}/files/{id}.
+// filesDeleteCommand is DELETE Documents/{org}/files/{id} under If-Match.
+// There is no body, so --version is simply required.
 func (d deps) filesDeleteCommand() *cobra.Command {
-	return &cobra.Command{
+	var version int64
+	cmd := &cobra.Command{
 		Use:   "delete <org> <file-id>",
 		Short: "Delete a file",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			res, err := d.newClient().DeleteFile(cmd.Context(), args[0], args[1])
+			res, err := d.newClient().DeleteFile(cmd.Context(), args[0], args[1], version)
 			if err != nil {
 				return err
 			}
@@ -460,4 +539,7 @@ func (d deps) filesDeleteCommand() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().Int64Var(&version, "version", 0, "the version the file was last seen at, sent as If-Match")
+	_ = cmd.MarkFlagRequired("version")
+	return cmd
 }

@@ -39,7 +39,17 @@
 // applies a state's organizations, each naming its parent by code, parents
 // first, by the layer's seed statements: an insert that leaves a sibling's
 // taken code as it stands, and the lookup that finds that row, so a seed
-// is idempotent.
+// is idempotent. LogoSeed is its second contribution, of stored files: the
+// logos a state names, each an organization's path, a fixed file id, and
+// a fixture under the data package's seeds/fixtures/. The seeder runs it
+// once the organizations commit, since a logo's object is put outside any
+// transaction. A fixture passes the upload's rules before any I/O; an
+// organization with an active logo is left alone; otherwise the file is
+// written under its fixed id by the shared write protocol's retry-safe
+// form and activated, in storage.go, beside the logo's other protocols.
+// The seed leaves alone what it does not own: a file under the id that
+// another organization's image binds, a file being deleted, and a logo
+// that became active meanwhile, the file it stored for it retired.
 //
 // The logo is ownership at blobfs's file grain: an organization_image row
 // binds one file to the organization, and a partial unique index admits one

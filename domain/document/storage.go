@@ -3,8 +3,10 @@ package document
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
 
 	"github.com/standards-lab/blobfs"
@@ -92,8 +94,9 @@ func (s *store) writable(ctx context.Context, organizationID, id string) (string
 // organization's id and its owner row, in one transaction after the
 // organization is read, so a nonexistent organization is the missing row.
 // A concurrent first write that bound the root first fails this one's
-// insert, and the root it bound is read on the pool.
-func (s *store) ensureRoot(ctx context.Context, organizationID string) (string, error) {
+// insert, and the root it bound is read on the pool. opts reach blobfs's
+// insert, the seed's fixed id among them.
+func (s *store) ensureRoot(ctx context.Context, organizationID string, opts ...bfdata.CreateOption) (string, error) {
 	root, err := s.documentRoot(ctx, s.db, organizationID)
 	if !errors.Is(err, sql.ErrNoRows) {
 		return root, err
@@ -102,7 +105,7 @@ func (s *store) ensureRoot(ctx context.Context, organizationID string) (string, 
 		if err := s.organizationExists(ctx, tx, organizationID); err != nil {
 			return "", fmt.Errorf("organization %s: %w", organizationID, err)
 		}
-		dir, _, err := s.storage.FS.Directories.Ensure(ctx, tx, blobfs.RootID, organizationID)
+		dir, _, err := s.storage.FS.Directories.Ensure(ctx, tx, blobfs.RootID, organizationID, opts...)
 		if err != nil {
 			return "", err
 		}
@@ -316,6 +319,121 @@ func (s *store) moveFile(ctx context.Context, organizationID, id string, version
 		return s.storage.FS.Files.Move(ctx, tx, id, dir, m.Name, version)
 	})
 	return Identity{ID: file.ID, Version: file.Version}, err
+}
+
+// seed is the layer's contribution of stored files to the data package's
+// named states: the hierarchies a state carries under "documents". The
+// seeder runs it after the seed's transaction commits, the organizations
+// standing by then, since a file's write puts its object outside any
+// transaction.
+type seed struct{ store *store }
+
+var _ data.FileSeed = seed{}
+
+// Key names the hierarchies in a state file and in the seed's counts.
+func (seed) Key() string { return "documents" }
+
+// Verify prepares the layer's statements, the seed's path walk among
+// them, and blobfs's, which the tree's writes run.
+func (s seed) Verify(ctx context.Context) error {
+	return errors.Join(s.store.Verify(ctx), s.store.storage.FS.Verify(ctx, s.store.db))
+}
+
+// Write seeds each hierarchy in file order and returns how many entries,
+// directories and files, it created. The files' bytes are inline, so the
+// fixtures go unread.
+func (s seed) Write(ctx context.Context, raw json.RawMessage, _ fs.FS) (int, error) {
+	trees, err := data.SeedRows[seedTree](raw)
+	if err != nil {
+		return 0, fmt.Errorf("seed documents: %w", err)
+	}
+	created := 0
+	for _, t := range trees {
+		n, err := s.store.seedTree(ctx, t)
+		created += n
+		if err != nil {
+			return created, fmt.Errorf("seed documents of %s: %w", t.Organization, err)
+		}
+	}
+	return created, nil
+}
+
+// seedTree ensures the organization's document root under the tree's root
+// id, then its entries beneath it. The root is not counted: it is the
+// hierarchy's anchor, not an entry.
+func (s *store) seedTree(ctx context.Context, t seedTree) (int, error) {
+	org, err := s.seedOrganization(ctx, s.db, t.Organization)
+	if err != nil {
+		return 0, err
+	}
+	root, err := s.ensureRoot(ctx, org, bfdata.WithID(t.Root))
+	if err != nil {
+		return 0, err
+	}
+	return s.seedEntries(ctx, root, t.Entries)
+}
+
+// seedEntries ensures each entry under the directory with id parent, in
+// file order, and returns how many it created, the subtrees' included.
+func (s *store) seedEntries(ctx context.Context, parent string, entries []seedEntry) (int, error) {
+	created := 0
+	for _, e := range entries {
+		n, err := s.seedEntry(ctx, parent, e)
+		created += n
+		if err != nil {
+			return created, fmt.Errorf("%s: %w", e.Name, err)
+		}
+	}
+	return created, nil
+}
+
+// seedEntry ensures one entry by blobfs's insert-or-find under the entry's
+// id: a directory on the pool, then its entries, and a file by the write
+// protocol's retry-safe form, its content put and the row completed. An
+// entry already there by name is left as it is and keeps its own id, the
+// directory's contents still ensured beneath it. An entry whose id a row
+// already carries under another name, one a client moved or renamed, is
+// left where the client put it, a directory with its contents, and so is
+// one whose delete is under way, which the sweep finishes and the next
+// seed writes again.
+func (s *store) seedEntry(ctx context.Context, parent string, e seedEntry) (int, error) {
+	st := s.storage
+	isDir, err := e.directory()
+	if err != nil {
+		return 0, err
+	}
+	if isDir {
+		dir, created, err := st.FS.Directories.Ensure(ctx, s.db, parent, e.Name, bfdata.WithID(e.ID))
+		if errors.Is(err, blobfs.ErrIDTaken) {
+			// A concurrent seed committed the directory between the
+			// lookup and the insert; the lookup finds it now. An id a
+			// moved directory holds is taken again.
+			dir, created, err = st.FS.Directories.Ensure(ctx, s.db, parent, e.Name, bfdata.WithID(e.ID))
+		}
+		if errors.Is(err, blobfs.ErrIDTaken) || errors.Is(err, blobfs.ErrDeleting) {
+			return 0, nil
+		}
+		if err != nil {
+			return 0, err
+		}
+		n, err := s.seedEntries(ctx, dir.ID, e.Entries)
+		if created {
+			n++
+		}
+		return n, err
+	}
+	_, stored, err := st.Ensure(ctx, s.db.DB, strings.NewReader(e.Content), int64(len(e.Content)), func(tx *sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
+		return st.FS.Files.Ensure(ctx, tx, st.Objects, parent, e.Name, e.ContentType, bfdata.WithID(e.ID))
+	})
+	switch {
+	case errors.Is(err, blobfs.ErrIDTaken), errors.Is(err, blobfs.ErrDeleting):
+		return 0, nil
+	case err != nil:
+		return 0, err
+	case stored:
+		return 1, nil
+	}
+	return 0, nil
 }
 
 // directoryOf presents a blobfs directory; the document root has no parent

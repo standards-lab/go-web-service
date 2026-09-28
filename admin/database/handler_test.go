@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,8 +35,8 @@ func (dialect) ServerVersion() string { return "SELECT version()" }
 // the scripted driver: the pool's lifecycle object, started so it answers
 // pings, the session, the migrator over the service's migration set
 // (unlocked, since the test dialect has no lock capability), the catalog,
-// the data package's seeder over a stand-in for the organization domain's
-// seed contribution, and the registry; seed names the state whose
+// the data package's seeder over stand-ins for the domains' seed
+// contributions, and the registry; seed names the state whose
 // set the service applies on a seed request naming none. The schema gate
 // is an open one no sweep holds.
 func module(t *testing.T, seed string, responses ...sqltest.Response) (http.Handler, *sqltest.Recorder) {
@@ -63,7 +64,7 @@ func gatedModule(t *testing.T, gate database.SchemaGate, seed string, responses 
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := admin.New(pdb, sdb, m, catalog, admin.Options{Seed: seed, Seeder: data.NewSeeder(d, organizations{}), Registry: d})
+	svc := admin.New(pdb, sdb, m, catalog, admin.Options{Seed: seed, Seeder: data.NewSeeder(d, organizations{}, files{"logos"}, files{"documents"}), Registry: d})
 	r := web.NewRouter()
 	r.Mount(web.NewModule(database.Routes(svc, gate)))
 	return r, rec
@@ -176,17 +177,28 @@ func (organizations) Apply(_ context.Context, _ *sqlate.Tx, raw json.RawMessage)
 	return len(rows), err
 }
 
+// files stands in for a domain's contribution of stored files under key:
+// it reads the state's rows and reports each as stored, writing nothing.
+type files struct{ key string }
+
+func (f files) Key() string                { return f.key }
+func (files) Verify(context.Context) error { return nil }
+func (files) Write(_ context.Context, raw json.RawMessage, _ fs.FS) (int, error) {
+	rows, err := data.SeedRows[json.RawMessage](raw)
+	return len(rows), err
+}
+
 // A bodyless seed applies the configured set; a body names another. Both
 // answer with the rows inserted by table.
 func TestSeed_AppliesTheConfiguredOrNamedSet(t *testing.T) {
 	h, rec := module(t, "default")
 	seeded := decode(t, send(t, h, "POST", "/database/seed", ""), 200)
-	if seeded["organizations"] != float64(7) {
-		t.Errorf("seeded = %v; want seven organizations", seeded)
+	if seeded["organizations"] != float64(7) || seeded["logos"] != float64(7) || seeded["documents"] != float64(1) {
+		t.Errorf("seeded = %v; want seven organizations, seven logos, and one tree", seeded)
 	}
 	seeded = decode(t, send(t, h, "POST", "/database/seed", `{"state":"empty"}`), 200)
-	if seeded["organizations"] != float64(0) {
-		t.Errorf("seeded = %v; want zero organizations from the empty state", seeded)
+	if seeded["organizations"] != float64(0) || seeded["logos"] != float64(0) || seeded["documents"] != float64(0) {
+		t.Errorf("seeded = %v; want every contribution at zero from the empty state", seeded)
 	}
 	if rec.Pending() != 0 {
 		t.Errorf("pending responses %d", rec.Pending())

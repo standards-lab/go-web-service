@@ -7,5 +7,82 @@
     { "parent": "acme", "code": "operations", "name": "Operations" },
     { "parent": "operations", "code": "logistics", "name": "Logistics" },
     { "parent": "acme", "code": "finance", "name": "Finance" }
+  ],
+  "logos": [
+    { "organization": "/acme", "id": "5eed0001-0000-4000-8000-000000000001", "fixture": "acme.png" },
+    { "organization": "/acme/engineering", "id": "5eed0001-0000-4000-8000-000000000002", "fixture": "engineering.png" },
+    { "organization": "/acme/engineering/platform", "id": "5eed0001-0000-4000-8000-000000000003", "fixture": "platform.png" },
+    { "organization": "/acme/engineering/product", "id": "5eed0001-0000-4000-8000-000000000004", "fixture": "product.png" },
+    { "organization": "/acme/operations", "id": "5eed0001-0000-4000-8000-000000000005", "fixture": "operations.png" },
+    { "organization": "/acme/operations/logistics", "id": "5eed0001-0000-4000-8000-000000000006", "fixture": "logistics.png" },
+    { "organization": "/acme/finance", "id": "5eed0001-0000-4000-8000-000000000007", "fixture": "finance.png" }
+  ],
+  "documents": [
+    {
+      "organization": "/acme",
+      "root": "5eed0002-0000-4000-8000-000000000000",
+      "entries": [
+        {
+          "id": "5eed0002-0000-4000-8000-000000000001",
+          "name": "README.txt",
+          "content_type": "text/plain; charset=utf-8",
+          "content": "Acme's shared documents, seeded by the default state.\n"
+        },
+        {
+          "id": "5eed0002-0000-4000-8000-000000000002",
+          "name": "engineering",
+          "entries": [
+            {
+              "id": "5eed0002-0000-4000-8000-000000000003",
+              "name": "architecture.txt",
+              "content_type": "text/plain; charset=utf-8",
+              "content": "One service, one Postgres, one object store.\n"
+            },
+            {
+              "id": "5eed0002-0000-4000-8000-000000000004",
+              "name": "platform",
+              "entries": [
+                {
+                  "id": "5eed0002-0000-4000-8000-000000000005",
+                  "name": "runbook.txt",
+                  "content_type": "text/plain; charset=utf-8",
+                  "content": "Restart the service; it corrects its schema at startup.\n"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "5eed0002-0000-4000-8000-000000000006",
+          "name": "finance",
+          "entries": [
+            {
+              "id": "5eed0002-0000-4000-8000-000000000007",
+              "name": "budget.csv",
+              "content_type": "text/csv; charset=utf-8",
+              "content": "unit,quarter,amount\nengineering,Q1,120000\noperations,Q1,80000\n"
+            }
+          ]
+        },
+        {
+          "id": "5eed0002-0000-4000-8000-000000000008",
+          "name": "operations",
+          "entries": [
+            {
+              "id": "5eed0002-0000-4000-8000-000000000009",
+              "name": "logistics",
+              "entries": [
+                {
+                  "id": "5eed0002-0000-4000-8000-00000000000a",
+                  "name": "carriers.csv",
+                  "content_type": "text/csv; charset=utf-8",
+                  "content": "carrier,region\nNorthwind,north\nSouthline,south\n"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
   ]
 }

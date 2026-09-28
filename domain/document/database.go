@@ -3,6 +3,8 @@ package document
 import (
 	"context"
 	"embed"
+	"fmt"
+	"strings"
 
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/query"
@@ -27,6 +29,7 @@ type store struct {
 	documentRootRows query.Rows[string]
 	organizationRows query.Rows[string]
 	bindRoot         query.Statement
+	seedOrgRows      query.Rows[string]
 }
 
 // newStore compiles the statements against the service's catalog, registers
@@ -42,6 +45,7 @@ func newStore(db *data.Database, st *data.Storage) *store {
 		documentRootRows: stmts.Statement("document_root").Scan(query.Scalar[string]),
 		organizationRows: stmts.Statement("organization_exists").Scan(query.Scalar[string]),
 		bindRoot:         stmts.Statement("bind_root"),
+		seedOrgRows:      stmts.Statement("seed_organization").Scan(query.Scalar[string]),
 	}
 }
 
@@ -60,6 +64,21 @@ func (s *store) documentRoot(ctx context.Context, sess sqlate.Session, organizat
 func (s *store) organizationExists(ctx context.Context, sess sqlate.Session, organizationID string) error {
 	_, err := s.organizationRows.One(ctx, sess, query.Args{"organization_id": organizationID})
 	return err
+}
+
+// seedOrganization resolves the organization path a seed names, "/acme"
+// or "/acme/engineering", one segment at a time from the root, or
+// sql.ErrNoRows.
+func (s *store) seedOrganization(ctx context.Context, sess sqlate.Session, path string) (string, error) {
+	var id any
+	for _, code := range strings.Split(strings.TrimPrefix(path, "/"), "/") {
+		next, err := s.seedOrgRows.One(ctx, sess, query.Args{"parent": id, "code": code})
+		if err != nil {
+			return "", fmt.Errorf("organization %s: %w", path, err)
+		}
+		id = next
+	}
+	return id.(string), nil
 }
 
 // bind records the directory as the organization's document root.

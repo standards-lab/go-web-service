@@ -12,6 +12,12 @@ import (
 	"github.com/standards-lab/go-web-service/integration"
 )
 
+// docsOrg is the organization whose documents the document and sweep cases
+// work in: one the default state seeds no document tree for, so each case
+// starts from an organization without a root. The seeded tree is acme's,
+// and TestSeededStorage reads it.
+const docsOrg = "finance"
+
 // The document API's directory and file, as it presents them: the fields
 // the suite reads.
 type directory struct {
@@ -56,7 +62,7 @@ func TestDocument(t *testing.T) {
 	run := func(name string, fn func(t *testing.T, docs string)) {
 		t.Run(name, func(t *testing.T) {
 			integration.Reset(t, c, integration.Default)
-			fn(t, "/api/documents/"+tree(t, c)["acme"].ID)
+			fn(t, "/api/documents/"+tree(t, c)[docsOrg].ID)
 		})
 	}
 

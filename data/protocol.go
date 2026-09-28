@@ -10,14 +10,15 @@ import (
 	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
+	"github.com/standards-lab/sqlate/query"
 )
 
 // The file protocols every domain runs over Storage, staged here for
-// promotion to blobfs: the two-phase write, the two-phase delete, and the
-// read of an available file. Each takes the pool it runs on as blobfs's
-// sweep does, and knows no domain: a domain's scope checks and its own
-// rows enter through the callback each protocol runs in its first
-// transaction.
+// promotion to blobfs: the two-phase write with its retry-safe form, the
+// two-phase delete, and the read of an available file. Each takes the pool
+// it runs on as blobfs's sweep does, and knows no domain: a domain's scope
+// checks and its own rows enter through the callback each protocol runs in
+// its first transaction.
 
 // Write is blobfs's two-phase write of the file begin creates, with body
 // of size bytes as its object. It runs begin in one transaction on db,
@@ -41,12 +42,85 @@ func (s *Storage) Write(ctx context.Context, db *sqlate.DB, body io.Reader, size
 	if err != nil {
 		return blobfs.File{}, err
 	}
+	return s.store(ctx, db, body, size, file)
+}
+
+// Ensure is the write protocol's retry-safe form, the one a seed runs for a
+// file it names by a fixed id: begin runs in one transaction on db, where
+// the domain calls Files.Ensure with that id, and reports what Ensure did.
+// A row it created, or a pending row an earlier write left, is written as
+// Write writes it, the object put under the row's key and the row
+// completed, and stored reports true. An available row is returned as it
+// stands, nothing put; a deleting one is blobfs.ErrDeleting, since its
+// delete is under way.
+//
+// Two writers, two processes seeding at once, may race for one row. The
+// loser of the insert has its transaction aborted by the violation, so
+// begin runs once more in a fresh one, which finds the winner's row. Once
+// the pending row commits, the other writer finds it and resumes it, so
+// the two may share one row. The write is shaped for that: its abandon
+// begins the delete only at the pending version it holds, so it never
+// retires a row the other writer completed, which an image may reference
+// by then; and a completion the other writer won, a stale version or a
+// row available already, is no failure, the row read back and returned as
+// found. The two puts store the same bytes under the same key, all or
+// nothing, so the object is whole whichever lands last.
+//
+// The key is the row's id and name, so a file written again under its
+// fixed id after a reset, which reverts blobfs's tables but not the
+// container, puts its object under the key the earlier write used. The put
+// replaces the object there whole, so the write completes over whatever
+// the container still held.
+func (s *Storage) Ensure(ctx context.Context, db *sqlate.DB, body io.Reader, size int64, begin func(*sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error)) (file blobfs.File, stored bool, err error) {
+	type ensured struct {
+		file    blobfs.File
+		outcome bfdata.WriteOutcome
+	}
+	first := func(tx *sqlate.Tx) (ensured, error) {
+		file, outcome, err := begin(tx)
+		return ensured{file, outcome}, err
+	}
+	e, err := db.Transact(ctx, first)
+	if errors.Is(err, blobfs.ErrNameTaken) || errors.Is(err, blobfs.ErrIDTaken) {
+		// A concurrent writer committed the row between the lookup and
+		// the insert, whose failure aborted the transaction; a fresh one
+		// finds it. An id a row holds under another name fails again.
+		e, err = db.Transact(ctx, first)
+	}
+	switch {
+	case err != nil:
+		return blobfs.File{}, false, err
+	case e.outcome == bfdata.WritePresent && e.file.Status != blobfs.StatusAvailable:
+		return blobfs.File{}, false, fmt.Errorf("file %s is %s: %w", e.file.ID, e.file.Status, blobfs.ErrDeleting)
+	case e.outcome == bfdata.WritePresent:
+		return e.file, false, nil
+	}
+	file, err = s.store(ctx, db, body, size, e.file, bfdata.AtVersion(e.file.Version))
+	if !errors.Is(err, query.ErrVersionMismatch) && !errors.Is(err, blobfs.ErrInvalidTransition) {
+		return file, err == nil, err
+	}
+	// Another writer completed the row first.
+	found, ferr := s.FS.Files.Find(ctx, db, e.file.ID)
+	if ferr != nil || found.Status != blobfs.StatusAvailable {
+		return blobfs.File{}, false, errors.Join(err, ferr)
+	}
+	return found, false, nil
+}
+
+// store is the write protocol after its first transaction: the put of
+// body under the pending file's key, outside any transaction, then the
+// completion on the pool, with the abandon and the writer rule Write
+// describes. guard is the abandon's version guard: none for a row the
+// writer holds alone, the pending version for a row Ensure may share. A
+// guarded write abandons nothing when its completion finds the version
+// moved on or the row available, since another writer completed it.
+func (s *Storage) store(ctx context.Context, db *sqlate.DB, body io.Reader, size int64, file blobfs.File, guard ...bfdata.VersionOption) (blobfs.File, error) {
 	// The cleanup outlives the request's cancellation: a client that hangs
 	// up mid-body cancels ctx, and the abandon and the writer rule's delete
 	// must still run rather than leave the row to the stale reclaim.
 	cleanup := context.WithoutCancel(ctx)
 	abandon := func(err error) (blobfs.File, error) {
-		return blobfs.File{}, errors.Join(err, s.Retire(cleanup, db, func(*sqlate.Tx) (string, error) { return file.ID, nil }))
+		return blobfs.File{}, errors.Join(err, s.Retire(cleanup, db, func(*sqlate.Tx) (string, error) { return file.ID, nil }, guard...))
 	}
 	obj, err := s.Objects.Put(ctx, file.Key, body, file.ContentType, size)
 	if err != nil {
@@ -56,6 +130,8 @@ func (s *Storage) Write(ctx context.Context, db *sqlate.DB, body io.Reader, size
 	switch {
 	case errors.Is(err, blobfs.ErrDeleting), errors.Is(err, blobfs.ErrNotFound):
 		return blobfs.File{}, errors.Join(err, s.Objects.Delete(cleanup, file.Key))
+	case len(guard) > 0 && (errors.Is(err, query.ErrVersionMismatch) || errors.Is(err, blobfs.ErrInvalidTransition)):
+		return blobfs.File{}, err
 	case err != nil:
 		return abandon(err)
 	}

@@ -129,6 +129,16 @@ type seedRow struct {
 	Name   string `json:"name"`
 }
 
+// logoSeedRow is one logo of a named state: the organization it belongs
+// to, by path, the file's id, fixed so a reset writes it again under the
+// same key, and the fixture that holds its bytes, by path under the seed's
+// fixtures.
+type logoSeedRow struct {
+	Organization string `json:"organization"`
+	ID           string `json:"id"`
+	Fixture      string `json:"fixture"`
+}
+
 // logoTypes is the logo's allowlist: the raster image media types a
 // browser renders inertly, each with the extension its stored name takes.
 // SVG is left out because it is script-capable.

@@ -328,6 +328,12 @@ func TestOrganization(t *testing.T) {
 		_ = c.Delete(t, organizations+"/"+leaf.ID, webtest.IfMatch(leaf.Version+1)).Problem(t, http.StatusPreconditionFailed)
 		_ = c.Delete(t, organizations+"/"+absentID, webtest.IfMatch(1)).Problem(t, http.StatusNotFound)
 		_ = c.Delete(t, organizations+"/"+parent.ID, webtest.IfMatch(parent.Version)).Problem(t, http.StatusConflict) // children block
+		// The default state seeds each organization a logo, and a logo
+		// blocks its organization's delete until the logo's own delete.
+		_ = c.Delete(t, organizations+"/"+leaf.ID, webtest.IfMatch(leaf.Version)).Problem(t, http.StatusConflict)
+		for _, o := range []organization{leaf, parent} {
+			c.Delete(t, organizations+"/"+o.ID+"/logo").Expect(t, http.StatusNoContent)
+		}
 
 		c.Delete(t, organizations+"/"+leaf.ID, webtest.IfMatch(leaf.Version)).Expect(t, http.StatusNoContent)
 		_ = c.Get(t, organizations+"/"+leaf.ID).Problem(t, http.StatusNotFound)

@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"maps"
 	"net/http"
 	"strings"
 	"testing"
@@ -205,10 +206,11 @@ func TestAdmin(t *testing.T) {
 		// The schema cases above recreated the table, so it is empty here.
 		integration.Revert(t, c)
 		schema(t, c.Post(t, admin+"/schema/up", nil))
-		if n := integration.Seed(t, c, ""); n["organizations"] != seededTotal {
-			t.Errorf("seed on an empty table inserted %v, want %d", n, seededTotal)
+		// The organizations' rows, then the stored files that name them.
+		if n := integration.Seed(t, c, ""); !maps.Equal(n, seededCounts) {
+			t.Errorf("seed on an empty table inserted %v, want %v", n, seededCounts)
 		}
-		if n := integration.Seed(t, c, ""); n["organizations"] != 0 {
+		if n := integration.Seed(t, c, ""); n["organizations"] != 0 || n["logos"] != 0 || n["documents"] != 0 {
 			t.Errorf("seed on a seeded table inserted %v, want zero", n)
 		}
 	})
@@ -245,7 +247,7 @@ func TestAdmin(t *testing.T) {
 		}
 		// Back to default from the seeded tree: rebuilt and seeded again.
 		tr = integration.Reset(t, c, integration.Default)
-		if tr.State != "default" || tr.Seeded["organizations"] != seededTotal || total(t) != seededTotal {
+		if tr.State != "default" || !maps.Equal(tr.Seeded, seededCounts) || total(t) != seededTotal {
 			t.Errorf("reset to default = %+v, total %d", tr, total(t))
 		}
 		// An undeclared name is a 400 that names it, on both routes.

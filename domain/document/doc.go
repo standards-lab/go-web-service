@@ -87,6 +87,20 @@
 // is answered 304 without opening the object. A download's ETag is never a
 // version, and If-Match refuses one as malformed.
 //
+// The layer seeds document hierarchies: Seed is its contribution of stored
+// files to the data package's named states, which the composition root
+// hands the seeder after the organizations'. A state names each tree by
+// its organization's path, resolved a code at a time by the layer's own
+// statement, with a fixed id for the root and for every entry, and the
+// files' content inline. The seeder runs it once the organizations commit,
+// since a file's object is put outside any transaction. The root is
+// ensured as a first write ensures it, the directories by blobfs's
+// insert-or-find on the pool, and the files by the shared write protocol's
+// retry-safe form, so a rerun finds every entry and a reset writes each
+// file again under the same key. An entry already there by name keeps its
+// own id and content; one a client moved or renamed, whose id a row holds
+// under another name, and one being deleted are left as they stand.
+//
 // A file delete is blobfs's delete protocol, 204. A directory delete
 // removes an empty directory, 204; removing the root removes its owner row
 // with it. With recursive=true it deletes the branch, the directory with

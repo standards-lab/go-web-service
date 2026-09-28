@@ -1,14 +1,19 @@
 package organization_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql/driver"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/standards-lab/blobfs"
@@ -280,4 +285,208 @@ func TestPutLogo_AnswersCreatedWithLocation(t *testing.T) {
 		t.Fatalf("status %d, Location %q, body %s", rec.Code, rec.Header().Get("Location"), rec.Body)
 	}
 	sameOps(t, db, q, begin, q, q, commit, q, begin, x, q, x, commit)
+}
+
+// seededLogoID is the fixed id a state gives the seeded logo's file.
+const seededLogoID = "5eed0001-0000-4000-8000-000000000001"
+
+// seedFixtures holds one fixture, a 1×1 PNG, as the seed's fixtures
+// directory would.
+func seedFixtures(t *testing.T) (fstest.MapFS, []byte) {
+	t.Helper()
+	var b bytes.Buffer
+	if err := png.Encode(&b, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	return fstest.MapFS{"acme.png": {Data: b.Bytes()}}, b.Bytes()
+}
+
+// logoRows is the logos a state names: acme's, by path, under the fixed id.
+var logoRows = json.RawMessage(`[{"organization":"/acme","id":"` + seededLogoID + `","fixture":"acme.png"}]`)
+
+// The logo seed writes the fixture under the row's fixed id by the write
+// protocol's retry-safe form, after the organization is resolved by path
+// and found without a logo, then activates it as the organization's logo.
+func TestLogoSeed_WritesAndActivatesTheFixture(t *testing.T) {
+	ctx := context.Background()
+	fixtures, body := seedFixtures(t)
+	s, rec, fake := serviceOver(t, sqltest.ReturningDialect{},
+		row(),          // the organization, by path
+		fileRows(),     // no active logo
+		directoryRow(), // the images directory, found on the pool
+		fileRows(),     // write: no file holds the name
+		fileRows(file(seededLogoID, blobfs.StatusPending, 1)),   // write: the pending file, under the fixed id
+		fileRows(file(seededLogoID, blobfs.StatusAvailable, 2)), // complete, on the pool
+		exec(1), fileRows(), exec(1), // activate: the hold, still no logo, the image
+	)
+	n, err := s.LogoSeed().Write(ctx, logoRows, fixtures)
+	if err != nil || n != 1 {
+		t.Fatalf("Write = %d, %v; want the logo seeded", n, err)
+	}
+	if path := rec.Calls()[0].Args; fmt.Sprint(path) != "[/acme]" {
+		t.Errorf("organization read with %v; want its path", path)
+	}
+	if insert := rec.Calls()[5]; !strings.HasPrefix(insert.SQL, "INSERT INTO blobfs_file") || insert.Args[0] != seededLogoID || insert.Args[1] != seededLogoID+".png" {
+		t.Errorf("insert = %q %v; want the file under its fixed id, named for it", insert.SQL, insert.Args)
+	}
+	if attach := rec.Calls()[11]; !strings.HasPrefix(attach.SQL, "INSERT INTO organization_image") || fmt.Sprint(attach.Args) != fmt.Sprint([]any{validID, seededLogoID}) {
+		t.Errorf("attach = %q %v; want the seeded file bound", attach.SQL, attach.Args)
+	}
+	blob, err := fake.Get(ctx, file(seededLogoID, blobfs.StatusPending, 1).Key, storage.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = blob.Body.Close() }()
+	if b, _ := io.ReadAll(blob.Body); !bytes.Equal(b, body) || blob.ContentType != "image/png" {
+		t.Errorf("stored %d bytes as %q; want the fixture as image/png", len(b), blob.ContentType)
+	}
+	sameOps(t, rec, q, q, q, begin, q, q, commit, q, begin, x, q, x, commit)
+}
+
+// An organization with an active logo, the seed's from an earlier run or a
+// client's, is left alone: nothing is written.
+func TestLogoSeed_LeavesAnActiveLogoAlone(t *testing.T) {
+	fixtures, _ := seedFixtures(t)
+	s, rec, fake := serviceOver(t, sqltest.ReturningDialect{},
+		row(), fileRows(file(newFileID, blobfs.StatusAvailable, 2)),
+	)
+	if n, err := s.LogoSeed().Write(context.Background(), logoRows, fixtures); err != nil || n != 0 {
+		t.Fatalf("Write = %d, %v; want nothing seeded", n, err)
+	}
+	if fake.Puts() != 0 {
+		t.Errorf("puts = %d; want none", fake.Puts())
+	}
+	sameOps(t, rec, q, q)
+}
+
+// A file an interrupted run completed but never activated is found by its
+// name and activated, nothing put again.
+func TestLogoSeed_ActivatesAFileAnEarlierRunCompleted(t *testing.T) {
+	fixtures, _ := seedFixtures(t)
+	s, rec, fake := serviceOver(t, sqltest.ReturningDialect{},
+		row(), fileRows(), directoryRow(),
+		fileRows(file(seededLogoID, blobfs.StatusAvailable, 2)), // write: the file, found
+		exec(1), fileRows(), exec(1),
+	)
+	if n, err := s.LogoSeed().Write(context.Background(), logoRows, fixtures); err != nil || n != 1 {
+		t.Fatalf("Write = %d, %v; want the found file activated", n, err)
+	}
+	if fake.Puts() != 0 {
+		t.Errorf("puts = %d; want none", fake.Puts())
+	}
+	sameOps(t, rec, q, q, q, begin, q, commit, begin, x, q, x, commit)
+}
+
+// A logo that became active between the check and the activation is left
+// alone, and the seeded file, which no image references, is retired.
+func TestLogoSeed_ALogoActivatedMeanwhileRetiresTheSeededFile(t *testing.T) {
+	ctx := context.Background()
+	fixtures, _ := seedFixtures(t)
+	s, rec, fake := serviceOver(t, sqltest.ReturningDialect{},
+		row(), fileRows(), directoryRow(),
+		fileRows(), fileRows(file(seededLogoID, blobfs.StatusPending, 1)),
+		fileRows(file(seededLogoID, blobfs.StatusAvailable, 2)),
+		exec(1), fileRows(file(newFileID, blobfs.StatusAvailable, 2)), // the hold; a client's logo
+		fileRows(file(seededLogoID, blobfs.StatusDeleting, 3)), exec(1), // the seeded file retired
+	)
+	if n, err := s.LogoSeed().Write(ctx, logoRows, fixtures); err != nil || n != 0 {
+		t.Fatalf("Write = %d, %v; want nothing seeded", n, err)
+	}
+	if _, err := fake.Get(ctx, file(seededLogoID, blobfs.StatusPending, 1).Key, storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
+		t.Errorf("the retired file's object outlived it: %v", err)
+	}
+	sameOps(t, rec, q, q, q, begin, q, q, commit, q, begin, x, q, commit, begin, q, commit, x)
+	for _, c := range rec.Calls() {
+		if strings.HasPrefix(c.SQL, "INSERT INTO organization_image") {
+			t.Errorf("the seeded file was bound: %q", c.SQL)
+		}
+	}
+}
+
+// What the seed does not own it leaves alone, retiring nothing: a file
+// found under the id that another organization's image binds, whose
+// organization a client renamed so the state's path names a new row, and
+// a file found deleting.
+func TestLogoSeed_LeavesAFileItDoesNotOwnAlone(t *testing.T) {
+	fixtures, _ := seedFixtures(t)
+	type seedCase struct {
+		responses []sqltest.Response
+		ops       []sqltest.Op
+	}
+	rollback := sqltest.OpRollback
+	cases := map[string]seedCase{
+		"bound elsewhere": {[]sqltest.Response{
+			row(), fileRows(), directoryRow(),
+			fileRows(file(seededLogoID, blobfs.StatusAvailable, 2)), // write: the file, found
+			exec(1), fileRows(), // the hold, no logo for this organization
+			{Err: &sqlate.ConstraintError{Constraint: "uq_organization_image_file", Class: sqlate.ErrUniqueViolation, Err: errors.New("unique")}},
+			fileRows(), // the active logo read again: still none
+		}, []sqltest.Op{q, q, q, begin, q, commit, begin, x, q, x, rollback, q}},
+		"deleting": {[]sqltest.Response{
+			row(), fileRows(), directoryRow(),
+			fileRows(file(seededLogoID, blobfs.StatusDeleting, 3)),
+		}, []sqltest.Op{q, q, q, begin, q, commit}},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, rec, fake := serviceOver(t, sqltest.ReturningDialect{}, c.responses...)
+			if n, err := s.LogoSeed().Write(context.Background(), logoRows, fixtures); err != nil || n != 0 {
+				t.Fatalf("Write = %d, %v; want the file left alone", n, err)
+			}
+			if fake.Puts() != 0 {
+				t.Errorf("puts = %d; want none", fake.Puts())
+			}
+			// Nothing after the activation: no delete begins.
+			sameOps(t, rec, c.ops...)
+		})
+	}
+}
+
+// Two seeds that share the file both activate it; the one that loses the
+// activation finds the file active for the organization and leaves it,
+// retiring nothing, though it stored the file too.
+func TestLogoSeed_ALostActivationToAConcurrentSeedLeavesTheFile(t *testing.T) {
+	fixtures, _ := seedFixtures(t)
+	s, rec, fake := serviceOver(t, sqltest.ReturningDialect{},
+		row(), fileRows(), directoryRow(),
+		fileRows(file(seededLogoID, blobfs.StatusPending, 1)),   // write: the other seed's pending row, resumed
+		fileRows(file(seededLogoID, blobfs.StatusAvailable, 2)), // complete
+		exec(1), fileRows(), // the hold, no logo yet
+		sqltest.Response{Err: &sqlate.ConstraintError{Constraint: "ux_organization_image_active", Class: sqlate.ErrUniqueViolation, Err: errors.New("unique")}},
+		fileRows(file(seededLogoID, blobfs.StatusAvailable, 2)), // the active logo read again: the seeded file
+	)
+	if n, err := s.LogoSeed().Write(context.Background(), logoRows, fixtures); err != nil || n != 0 {
+		t.Fatalf("Write = %d, %v; want the other seed's activation left", n, err)
+	}
+	if fake.Puts() != 1 {
+		t.Errorf("puts = %d; want the resumed row's put", fake.Puts())
+	}
+	sameOps(t, rec, q, q, q, begin, q, commit, q, begin, x, q, x, sqltest.OpRollback, q)
+}
+
+// A fixture the upload would refuse, a type outside the allowlist or a
+// body over its bound, or a row the file misspells, is refused before any
+// I/O.
+func TestLogoSeed_RefusesWhatTheUploadRefusesBeforeIO(t *testing.T) {
+	cases := map[string]struct {
+		fixtures fstest.MapFS
+		rows     string
+		want     string
+	}{
+		"svg":           {fstest.MapFS{"acme.png": {Data: []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)}}, string(logoRows), "a logo is PNG"},
+		"over 1 MiB":    {fstest.MapFS{"acme.png": {Data: make([]byte, 1<<20+1)}}, string(logoRows), "over the logo's"},
+		"missing":       {fstest.MapFS{}, string(logoRows), "acme.png"},
+		"unknown field": {fstest.MapFS{}, `[{"organization":"/acme","logo":"acme.png"}]`, "logo"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, rec, _ := serviceOver(t, sqltest.ReturningDialect{})
+			if _, err := s.LogoSeed().Write(context.Background(), json.RawMessage(c.rows), c.fixtures); err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("Write = %v; want a refusal naming %q", err, c.want)
+			}
+			if len(rec.Calls()) != 0 {
+				t.Errorf("a refused fixture reached the database: %v", rec.Ops())
+			}
+		})
+	}
 }

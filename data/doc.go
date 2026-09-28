@@ -9,12 +9,22 @@
 // root-level package never imports internal/*.
 //
 // The content is the schema (migrations/), the application's pattern
-// namespace (patterns/), and the named states (seeds/), each behind a
-// function the admin service triggers: Migrations, Patterns, and a Seeder.
-// The Seeder composes the domains' seed contributions, each a Seed the
-// domain declares over its own tables and statements and the composition
-// root hands in, so a state file is read here and every table's rows are
-// applied by the domain that owns it. Migrations declares the sets
+// namespace (patterns/), and the named states (seeds/, with the files a
+// state names under seeds/fixtures/), each behind a function the admin
+// service triggers: Migrations, Patterns, and a Seeder. The Seeder
+// composes the domains' seed contributions, each declared by the domain
+// over its own tables and statements and handed in by the composition
+// root, so a state file is read here and every contribution's rows are
+// applied by the domain that owns them. A contribution is of one of two
+// kinds. A Seed's rows apply in the seed's one transaction. A FileSeed's
+// rows are stored files, whose objects blobfs's two-phase write puts
+// outside any transaction, after the pending row commits, so the Seeder
+// runs every FileSeed once that transaction commits, the rows the files
+// name standing by then, and each file goes through Storage.Ensure, the
+// shared write protocol's retry-safe form. A seeded file carries a fixed
+// id, so a rerun finds it and a reset writes it again under the same key,
+// its put replacing whatever object the reset left in the container.
+// Migrations declares the sets
 // the libraries beneath the service ship, as the composition root passes
 // them, ahead of the service's own. Beside them sit the pieces every domain
 // would otherwise copy: the advisory-lock name registry, the lowering from
@@ -31,8 +41,9 @@
 // which reads its errors. Storage also
 // runs the file protocols every domain shares, staged for promotion to
 // blobfs: Write, blobfs's two-phase write with its abandon and its writer
-// rule; Retire and Purge, its two-phase delete; and Serve, the read of an
-// available file. A domain enters them through a callback run in the
+// rule, and Ensure, its retry-safe form over blobfs's insert-or-find,
+// which two writers of one fixed id may share; Retire and Purge, its
+// two-phase delete; and Serve, the read of an available file. A domain enters them through a callback run in the
 // protocol's first transaction, so no domain concept reaches here.
 //
 // Storage.SweepWorker is the storage infrastructure's background worker:

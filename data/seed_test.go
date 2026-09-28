@@ -1,9 +1,14 @@
 package data_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"image/png"
+	"io/fs"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -60,18 +65,56 @@ func (c *contribution) Apply(ctx context.Context, tx *sqlate.Tx, raw json.RawMes
 	return len(rows), c.err
 }
 
+// fileContribution is a domain's contribution of stored files as the
+// seeder sees it: it records the rows it was handed and the database's
+// operations as they stood when it ran, so a test sees whether the row
+// transaction had committed, and reads a fixture it was handed, unless err
+// refuses the write.
+type fileContribution struct {
+	key      string
+	order    *[]string
+	rec      *sqltest.Recorder
+	rows     []json.RawMessage
+	opsAtRun []sqltest.Op
+	fixture  []byte
+	verified bool
+	err      error
+}
+
+func (c *fileContribution) Key() string { return c.key }
+
+func (c *fileContribution) Verify(context.Context) error {
+	c.verified = true
+	return nil
+}
+
+func (c *fileContribution) Write(_ context.Context, raw json.RawMessage, fixtures fs.FS) (int, error) {
+	*c.order = append(*c.order, c.key)
+	c.opsAtRun = c.rec.Ops()
+	rows, err := data.SeedRows[json.RawMessage](raw)
+	if err != nil {
+		return 0, err
+	}
+	c.rows = rows
+	if c.fixture, err = fs.ReadFile(fixtures, "acme.png"); err != nil {
+		return 0, err
+	}
+	return len(rows), c.err
+}
+
 func TestSeeder_VerifiesItsOwnAndEveryContributions(t *testing.T) {
 	db, rec := newDatabase(t)
 	var order []string
 	c := &contribution{key: "organizations", order: &order}
-	s := data.NewSeeder(db, c)
+	f := &fileContribution{key: "logos", order: &order, rec: rec}
+	s := data.NewSeeder(db, c, f)
 
 	reg := db.Registry()
 	if len(reg) != 1 || reg[0].Name != "data" || len(reg[0].Statements.Statements()) != 1 {
 		t.Fatalf("registry = %+v; want the lock alone under data", reg)
 	}
-	if err := s.Verify(context.Background()); err != nil || !c.verified {
-		t.Fatalf("Verify: %v, contribution verified %v", err, c.verified)
+	if err := s.Verify(context.Background()); err != nil || !c.verified || !f.verified {
+		t.Fatalf("Verify: %v, contributions verified %v and %v", err, c.verified, f.verified)
 	}
 	if got := len(rec.SQL(sqltest.OpPrepare)); got != 1 {
 		t.Fatalf("prepared %d statements; want the lock", got)
@@ -94,6 +137,36 @@ func TestNewSeeder_PanicsOnADuplicateKey(t *testing.T) {
 	data.NewSeeder(db, &contribution{key: "a", order: &order}, &contribution{key: "a", order: &order})
 }
 
+// A contribution the seeder cannot run, neither a Seed nor a FileSeed or
+// both at once, is a wiring defect.
+func TestNewSeeder_PanicsOnAContributionOfNoOneKind(t *testing.T) {
+	db, _ := newDatabase(t)
+	cases := map[string]data.Contribution{
+		"neither": neither{},
+		"both":    both{},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r == nil || !strings.Contains(fmt.Sprint(r), name) {
+					t.Fatalf("NewSeeder recovered %v; want the panic to say %s", r, name)
+				}
+			}()
+			data.NewSeeder(db, c)
+		})
+	}
+}
+
+type neither struct{}
+
+func (neither) Key() string                  { return "x" }
+func (neither) Verify(context.Context) error { return nil }
+
+type both struct{ neither }
+
+func (both) Apply(context.Context, *sqlate.Tx, json.RawMessage) (int, error) { return 0, nil }
+func (both) Write(context.Context, json.RawMessage, fs.FS) (int, error)      { return 0, nil }
+
 // The states are the embedded files, by name, sorted.
 func TestSeeder_States_ListsTheFiles(t *testing.T) {
 	db, _ := newDatabase(t)
@@ -103,16 +176,18 @@ func TestSeeder_States_ListsTheFiles(t *testing.T) {
 }
 
 // The empty state applies no contribution and still reports every one, at
-// zero, in one transaction.
+// zero, in one transaction, writing no file.
 func TestSeeder_Seed_EmptyStateInsertsNothing(t *testing.T) {
 	db, rec := newDatabase(t)
 	var order []string
-	n, err := data.NewSeeder(db, &contribution{key: "organizations", order: &order}).Seed(context.Background(), "empty")
+	orgs := &contribution{key: "organizations", order: &order}
+	logos := &fileContribution{key: "logos", order: &order, rec: rec}
+	n, err := data.NewSeeder(db, orgs, logos).Seed(context.Background(), "empty")
 	if err != nil {
 		t.Fatalf("Seed: %v", err)
 	}
-	if v, ok := n["organizations"]; !ok || v != 0 || len(order) != 0 {
-		t.Fatalf("Seeded = %v, applied %v; want organizations at zero, nothing applied", n, order)
+	if v, ok := n["organizations"]; !ok || v != 0 || n["logos"] != 0 || len(n) != 2 || len(order) != 0 {
+		t.Fatalf("Seeded = %v, applied %v; want both at zero, nothing applied", n, order)
 	}
 	if ops := rec.Ops(); !slices.Equal(ops, []sqltest.Op{sqltest.OpBegin, sqltest.OpCommit}) {
 		t.Fatalf("ops = %v; want an empty transaction", ops)
@@ -133,36 +208,54 @@ func TestSeeder_Seed_UnknownStateIsRefused(t *testing.T) {
 }
 
 // A key no contribution reads is a defect in the file, refused before any
-// I/O: the default state's organizations with no contribution for them.
+// I/O: the default state with no contribution for any of its keys, the
+// first by name named.
 func TestSeeder_Seed_AnUnreadKeyIsRefused(t *testing.T) {
 	db, rec := newDatabase(t)
 	_, err := data.NewSeeder(db).Seed(context.Background(), "default")
-	if err == nil || !strings.Contains(err.Error(), `"organizations"`) {
-		t.Fatalf("err = %v; want the unread key named", err)
+	if err == nil || !strings.Contains(err.Error(), `"documents"`) {
+		t.Fatalf("err = %v; want the first unread key named", err)
 	}
 	if len(rec.Calls()) != 0 {
 		t.Fatalf("a refused state reached the database: %v", rec.Ops())
 	}
 }
 
-// Every contribution applies in the order given, in one transaction, and
-// the counts carry each one's key; one the state does not carry reports
-// zero.
-func TestSeeder_Seed_AppliesEveryContributionInOrder(t *testing.T) {
-	responses := make([]sqltest.Response, seedRows)
-	db, rec := newDatabase(t, responses...)
+// The default state's contributions: seven organizations, a logo for
+// each, and one document tree.
+func defaultContributions(order *[]string, rec *sqltest.Recorder) (*contribution, *fileContribution, *fileContribution) {
+	return &contribution{key: "organizations", order: order},
+		&fileContribution{key: "logos", order: order, rec: rec},
+		&fileContribution{key: "documents", order: order, rec: rec}
+}
+
+// The rows apply in one transaction, in the order given; the files write
+// after it commits, in the order given, each handed the embedded
+// fixtures; the counts carry every key, and one the state does not carry
+// reports zero.
+func TestSeeder_Seed_AppliesRowsThenFilesInOrder(t *testing.T) {
+	db, rec := newDatabase(t, make([]sqltest.Response, seedRows)...)
 	var order []string
-	orgs := &contribution{key: "organizations", order: &order}
-	later := &contribution{key: "documents", order: &order}
-	n, err := data.NewSeeder(db, orgs, later).Seed(context.Background(), "default")
+	orgs, logos, docs := defaultContributions(&order, rec)
+	absent := &contribution{key: "people", order: &order}
+	// The files are given before the rows, and still run after them.
+	n, err := data.NewSeeder(db, logos, docs, orgs, absent).Seed(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("Seed: %v", err)
 	}
-	if n["organizations"] != seedRows || n["documents"] != 0 || len(n) != 2 {
-		t.Fatalf("Seeded = %v; want %d organizations and documents at zero", n, seedRows)
+	if n["organizations"] != seedRows || n["logos"] != seedRows || n["documents"] != 1 || n["people"] != 0 || len(n) != 4 {
+		t.Fatalf("Seeded = %v; want %d organizations and logos, one tree, people at zero", n, seedRows)
 	}
-	if !slices.Equal(order, []string{"organizations"}) || len(orgs.rows) != seedRows {
-		t.Fatalf("applied %v with %d rows; want organizations' %d rows alone", order, len(orgs.rows), seedRows)
+	if !slices.Equal(order, []string{"organizations", "logos", "documents"}) || len(orgs.rows) != seedRows {
+		t.Fatalf("applied %v with %d rows; want the rows, then logos, then documents", order, len(orgs.rows))
+	}
+	for _, f := range []*fileContribution{logos, docs} {
+		if last := f.opsAtRun[len(f.opsAtRun)-1]; last != sqltest.OpCommit {
+			t.Errorf("%s ran at ops %v; want the row transaction committed", f.key, f.opsAtRun)
+		}
+		if !bytes.HasPrefix(f.fixture, []byte("\x89PNG")) {
+			t.Errorf("%s read a fixture of %d bytes; want the embedded PNG", f.key, len(f.fixture))
+		}
 	}
 	ops := rec.Ops()
 	if ops[0] != sqltest.OpBegin || ops[len(ops)-1] != sqltest.OpCommit || len(ops) != seedRows+2 {
@@ -170,17 +263,92 @@ func TestSeeder_Seed_AppliesEveryContributionInOrder(t *testing.T) {
 	}
 }
 
+// A row that fails rolls the transaction back, and no file is written.
 func TestSeeder_Seed_RollsBackOnFailure(t *testing.T) {
 	db, rec := newDatabase(t, make([]sqltest.Response, seedRows)...)
 	var order []string
-	s := data.NewSeeder(db, &contribution{key: "organizations", order: &order, err: errBoom})
-	if _, err := s.Seed(context.Background(), "default"); !errors.Is(err, errBoom) {
+	orgs, logos, docs := defaultContributions(&order, rec)
+	orgs.err = errBoom
+	if _, err := data.NewSeeder(db, orgs, logos, docs).Seed(context.Background(), "default"); !errors.Is(err, errBoom) {
 		t.Fatalf("err = %v; want the contribution's failure", err)
 	}
 	ops := rec.Ops()
-	if ops[len(ops)-1] != sqltest.OpRollback {
-		t.Fatalf("ops = %v; want a rollback last", ops)
+	if ops[len(ops)-1] != sqltest.OpRollback || !slices.Equal(order, []string{"organizations"}) {
+		t.Fatalf("ops = %v, applied %v; want a rollback last and no file written", ops, order)
 	}
+}
+
+// A file contribution that fails leaves the committed rows and stops the
+// seed there, its key named and the counts so far returned beside it.
+func TestSeeder_Seed_AFailedFileWriteStopsAfterTheCommit(t *testing.T) {
+	db, rec := newDatabase(t, make([]sqltest.Response, seedRows)...)
+	var order []string
+	orgs, logos, docs := defaultContributions(&order, rec)
+	logos.err = errBoom
+	n, err := data.NewSeeder(db, orgs, logos, docs).Seed(context.Background(), "default")
+	if !errors.Is(err, errBoom) || !strings.Contains(err.Error(), "logos") {
+		t.Fatalf("err = %v; want the logos' failure, named", err)
+	}
+	if n["organizations"] != seedRows || !slices.Equal(order, []string{"organizations", "logos"}) {
+		t.Fatalf("Seeded = %v, applied %v; want the rows counted and documents not run", n, order)
+	}
+	if ops := rec.Ops(); ops[len(ops)-1] != sqltest.OpCommit {
+		t.Fatalf("ops = %v; want the rows committed", ops)
+	}
+}
+
+// The logo fixtures are what the logo's upload accepts: PNGs that decode,
+// within its 1 MiB bound, one for each organization the default state
+// seeds.
+func TestSeedFixtures_AreLogosTheUploadAccepts(t *testing.T) {
+	db, rec := newDatabase(t, make([]sqltest.Response, seedRows)...)
+	var order []string
+	orgs, _, docs := defaultContributions(&order, rec)
+	logos := &fixtureReader{}
+	if _, err := data.NewSeeder(db, orgs, logos, docs).Seed(context.Background(), "default"); err != nil {
+		t.Fatal(err)
+	}
+	if len(logos.sizes) != seedRows {
+		t.Fatalf("read %d fixtures; want %d", len(logos.sizes), seedRows)
+	}
+	for name, size := range logos.sizes {
+		if size > 1<<20 {
+			t.Errorf("%s is %d bytes, over the logo's 1 MiB", name, size)
+		}
+	}
+}
+
+// fixtureReader is the logos' contribution reduced to its fixtures: it
+// decodes each fixture a row names as a PNG and records its size.
+type fixtureReader struct{ sizes map[string]int }
+
+func (*fixtureReader) Key() string                  { return "logos" }
+func (*fixtureReader) Verify(context.Context) error { return nil }
+func (f *fixtureReader) Write(_ context.Context, raw json.RawMessage, fixtures fs.FS) (int, error) {
+	type row struct {
+		Organization string `json:"organization"`
+		ID           string `json:"id"`
+		Fixture      string `json:"fixture"`
+	}
+	rows, err := data.SeedRows[row](raw)
+	if err != nil {
+		return 0, err
+	}
+	f.sizes = make(map[string]int, len(rows))
+	for _, r := range rows {
+		b, err := fs.ReadFile(fixtures, r.Fixture)
+		if err != nil {
+			return 0, err
+		}
+		if http.DetectContentType(b) != "image/png" {
+			return 0, fmt.Errorf("%s sniffs as %s", r.Fixture, http.DetectContentType(b))
+		}
+		if _, err := png.Decode(bytes.NewReader(b)); err != nil {
+			return 0, fmt.Errorf("%s: %w", r.Fixture, err)
+		}
+		f.sizes[r.Fixture] = len(b)
+	}
+	return len(rows), nil
 }
 
 // SeedRows decodes strictly: a field the row type does not carry is a

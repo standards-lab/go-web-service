@@ -20,7 +20,8 @@
 // complete before the infrastructure beneath them closes. The stages are
 // the ordering rule, and the stage table in stages.go is their one
 // declaration: the pool and the object store at stageInfrastructure, the
-// schema at stageSchema (verify, apply, verify, seed; go-database's
+// schema at stageSchema (verify, apply, verify, seed, the seed writing its
+// files to the object store started a stage earlier; go-database's
 // admin.Stage, named in the table), blobfs's store and the domains at
 // stageVerify, each verifying its own statements against the migrated
 // schema, the sweep reactor at stageReactors, started once the tables it

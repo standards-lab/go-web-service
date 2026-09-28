@@ -231,6 +231,141 @@ func TestWrite_AFailedCompletionAbandonsTheWrite(t *testing.T) {
 	sameOps(t, rec, begin, q, commit, q, begin, q, commit, x)
 }
 
+// ensure is a seed's first step as its begin runs it: blobfs's
+// insert-or-find of the file under the seed's fixed id.
+func ensure(ctx context.Context, st *data.Storage) func(*sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
+	return func(tx *sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
+		return st.FS.Files.Ensure(ctx, tx, st.Objects, dirID, "report.txt", "text/plain", bfdata.WithID(fileID))
+	}
+}
+
+// The retry-safe write: a name no row holds is created under the fixed id,
+// then written as Write writes it. An object a reset left at the key is
+// replaced whole by the put, so the write completes over it.
+func TestEnsure_CreatesAndStoresOverALeftoverObject(t *testing.T) {
+	ctx := context.Background()
+	st, db, rec, fake := protocols(t,
+		fileRows(), // the lookup finds no row by the name
+		fileRows(file(blobfs.StatusPending, 1)), fileRows(file(blobfs.StatusAvailable, 2)),
+	)
+	if _, err := fake.Put(ctx, key, strings.NewReader("stale bytes"), storage.PutOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	got, stored, err := st.Ensure(ctx, db, strings.NewReader("report"), 6, ensure(ctx, st))
+	if err != nil || !stored || got.Status != blobfs.StatusAvailable {
+		t.Fatalf("Ensure = %+v, %v, %v; want the file stored", got, stored, err)
+	}
+	if insert := rec.Calls()[2]; !strings.HasPrefix(insert.SQL, "INSERT INTO blobfs_file") || insert.Args[0] != fileID || insert.Args[2] != key {
+		t.Errorf("insert = %q %v; want the fixed id and its key", insert.SQL, insert.Args)
+	}
+	blob, err := fake.Get(ctx, key, storage.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = blob.Body.Close() }()
+	if b, _ := io.ReadAll(blob.Body); string(b) != "report" {
+		t.Errorf("object = %q; want the leftover replaced by the write's bytes", b)
+	}
+	sameOps(t, rec, begin, q, q, commit, q)
+}
+
+// A pending row an earlier write left is resumed: its object put under its
+// key and the row completed at its version.
+func TestEnsure_ResumesAPendingRow(t *testing.T) {
+	ctx := context.Background()
+	st, db, rec, fake := protocols(t,
+		fileRows(file(blobfs.StatusPending, 1)), fileRows(file(blobfs.StatusAvailable, 2)),
+	)
+	if _, stored, err := st.Ensure(ctx, db, strings.NewReader("report"), 6, ensure(ctx, st)); err != nil || !stored {
+		t.Fatalf("Ensure = %v, %v; want the pending row completed", stored, err)
+	}
+	if fake.Puts() != 1 {
+		t.Errorf("puts = %d; want one", fake.Puts())
+	}
+	sameOps(t, rec, begin, q, commit, q)
+}
+
+// An available row is left as it stands, nothing put; a deleting one is
+// refused, its delete under way.
+func TestEnsure_APresentRowIsLeftAlone(t *testing.T) {
+	cases := map[string]struct {
+		status blobfs.Status
+		want   error
+	}{
+		"available": {blobfs.StatusAvailable, nil},
+		"deleting":  {blobfs.StatusDeleting, blobfs.ErrDeleting},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			st, db, rec, fake := protocols(t, fileRows(file(c.status, 2)))
+			got, stored, err := st.Ensure(ctx, db, strings.NewReader("report"), 6, ensure(ctx, st))
+			if !errors.Is(err, c.want) || stored || (c.want == nil && got.ID != fileID) {
+				t.Fatalf("Ensure = %+v, %v, %v; want the row as it stands, %v", got, stored, err, c.want)
+			}
+			if fake.Puts() != 0 {
+				t.Errorf("puts = %d; want none", fake.Puts())
+			}
+			sameOps(t, rec, begin, q, commit)
+		})
+	}
+}
+
+// Two writers share a row once its pending insert commits: a completion
+// the other writer won is no failure, abandons nothing, and returns the
+// row the other completed as found.
+func TestEnsure_ACompletionAnotherWriterWonIsFound(t *testing.T) {
+	ctx := context.Background()
+	st, db, rec, _ := protocols(t,
+		fileRows(), fileRows(file(blobfs.StatusPending, 1)), // created
+		fileRows(), fileRows(file(blobfs.StatusAvailable, 2)), // the completion matches no pending row at 1
+		fileRows(file(blobfs.StatusAvailable, 2)), // the row read back
+	)
+	got, stored, err := st.Ensure(ctx, db, strings.NewReader("report"), 6, ensure(ctx, st))
+	if err != nil || stored || got.Status != blobfs.StatusAvailable || got.Version != 2 {
+		t.Fatalf("Ensure = %+v, %v, %v; want the other writer's row, found", got, stored, err)
+	}
+	sameOps(t, rec, begin, q, q, commit, q, q, q)
+}
+
+// A concurrent writer that commits the row between the lookup and the
+// insert aborts this one's transaction; begin runs once more in a fresh
+// transaction, which finds the other's pending row and resumes it.
+func TestEnsure_ALostInsertRaceRetriesInAFreshTransaction(t *testing.T) {
+	ctx := context.Background()
+	taken := sqltest.Response{Err: &sqlate.ConstraintError{Constraint: blobfs.ConstraintPrimaryKeyFile, Class: sqlate.ErrUniqueViolation, Err: errors.New("duplicate key")}}
+	st, db, rec, _ := protocols(t,
+		fileRows(), taken, // the lookup finds nothing, the insert loses
+		fileRows(file(blobfs.StatusPending, 1)),   // the retry finds the other's pending row
+		fileRows(file(blobfs.StatusAvailable, 2)), // and completes it
+	)
+	if _, stored, err := st.Ensure(ctx, db, strings.NewReader("report"), 6, ensure(ctx, st)); err != nil || !stored {
+		t.Fatalf("Ensure = %v, %v; want the resumed row stored", stored, err)
+	}
+	sameOps(t, rec, begin, q, q, rollback, begin, q, commit, q)
+}
+
+// A put that fails abandons the created row as Write abandons it, so the
+// name and the id are free for the next run, but only at the pending
+// version it holds: a row another writer resumed and completed meanwhile
+// is not retired.
+func TestEnsure_AFailedPutAbandonsTheRow(t *testing.T) {
+	ctx := context.Background()
+	st, db, rec, fake := protocols(t,
+		fileRows(), fileRows(file(blobfs.StatusPending, 1)),
+		fileRows(file(blobfs.StatusDeleting, 2)), exec(1),
+	)
+	failed := errors.New("put failed")
+	fake.FailPut(failed)
+	if _, stored, err := st.Ensure(ctx, db, strings.NewReader("report"), 6, ensure(ctx, st)); !errors.Is(err, failed) || stored {
+		t.Fatalf("Ensure = %v, %v; want the put's error", stored, err)
+	}
+	sameOps(t, rec, begin, q, q, commit, begin, q, commit, x)
+	if del := rec.Calls()[5]; !strings.HasPrefix(del.SQL, "UPDATE blobfs_file") || fmt.Sprint(del.Args) != fmt.Sprint([]any{fileID, int64(1)}) {
+		t.Errorf("delete = %q %v; want the pending row's, at its version", del.SQL, del.Args)
+	}
+}
+
 // The delete: pick in the transaction that begins blobfs's delete, under
 // the version guard, then the object, then the purge on the pool.
 func TestRetire_DeletesTheObjectThenPurges(t *testing.T) {

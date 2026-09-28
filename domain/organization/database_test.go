@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"strings"
 	"testing"
@@ -62,8 +63,10 @@ func serviceOver(t *testing.T, dialect sqlate.Dialect, responses ...sqltest.Resp
 	return organization.New(db, data.NewStorage(fs, objects)), rec, fake
 }
 
-// seeder composes the data package's seeder over the layer's seed
-// contribution, as the composition root does.
+// seeder composes the data package's seeder over the layer's row
+// contribution, as the composition root does, beside stand-ins for the
+// contributions of stored files the default state also carries, which
+// write nothing: the logo seed's own tests are storage_test.go's.
 func seeder(t *testing.T, responses ...sqltest.Response) (*data.Seeder, *sqltest.Recorder) {
 	t.Helper()
 	pool, rec := sqltest.Open(t, responses...)
@@ -74,7 +77,17 @@ func seeder(t *testing.T, responses ...sqltest.Response) (*data.Seeder, *sqltest
 	}
 	db := data.New(sqlate.Wrap(pool, sqltest.Dialect{}), catalog)
 	svc := organization.New(db, data.NewStorage(fs, nil))
-	return data.NewSeeder(db, svc.Seed()), rec
+	return data.NewSeeder(db, svc.Seed(), noFiles("logos"), noFiles("documents")), rec
+}
+
+// noFiles stands in for a contribution of stored files under its key,
+// storing nothing.
+type noFiles string
+
+func (k noFiles) Key() string                { return string(k) }
+func (noFiles) Verify(context.Context) error { return nil }
+func (noFiles) Write(context.Context, json.RawMessage, fs.FS) (int, error) {
+	return 0, nil
 }
 
 func identity(id string, version int64) sqltest.Response {

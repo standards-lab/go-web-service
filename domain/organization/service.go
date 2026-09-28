@@ -38,6 +38,12 @@ func (s *Service) Verify(ctx context.Context) error { return s.store.Verify(ctx)
 // layer's own statements. The composition root hands it to the seeder.
 func (s *Service) Seed() data.Seed { return seed{store: s.store} }
 
+// LogoSeed is the layer's contribution of stored files to the named
+// states: the logos a state names, each written by the shared write
+// protocol once the seed's rows commit and activated for an organization
+// that has none. The composition root hands it to the seeder after Seed.
+func (s *Service) LogoSeed() data.FileSeed { return logoSeed{store: s.store} }
+
 // List returns one page of organizations and the read's paging, honoring
 // the parsed query's page or cursor, sort, and filters. A cursor that did
 // not come from this read is the request's error. An unknown sort or filter field,

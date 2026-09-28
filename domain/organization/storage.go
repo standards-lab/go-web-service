@@ -1,15 +1,21 @@
 package organization
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"net/http"
 
 	"github.com/standards-lab/blobfs"
 	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
+
+	"github.com/standards-lab/go-web-service/data"
 )
 
 // imagesDirectory is the structural directory under blobfs's root that
@@ -122,3 +128,142 @@ func (s *store) release(ctx context.Context, tx *sqlate.Tx, fileID string) (blob
 	}
 	return s.storage.FS.Files.Delete(ctx, tx, fileID)
 }
+
+// logoSeed is the layer's contribution of stored files to the data
+// package's named states: the logos a state carries under "logos". The
+// seeder runs it after the seed's transaction commits, the organizations
+// standing by then, since a logo's write puts its object outside any
+// transaction.
+type logoSeed struct{ store *store }
+
+var _ data.FileSeed = logoSeed{}
+
+// Key names the logos in a state file and in the seed's counts.
+func (logoSeed) Key() string { return "logos" }
+
+// Verify prepares the layer's statements and blobfs's, which the logo's
+// write and activation run.
+func (s logoSeed) Verify(ctx context.Context) error {
+	return errors.Join(s.store.Verify(ctx), s.store.storage.FS.Verify(ctx, s.store.db))
+}
+
+// Write seeds each logo in file order and returns how many it activated.
+func (s logoSeed) Write(ctx context.Context, raw json.RawMessage, fixtures fs.FS) (int, error) {
+	rows, err := data.SeedRows[logoSeedRow](raw)
+	if err != nil {
+		return 0, fmt.Errorf("seed logos: %w", err)
+	}
+	seeded := 0
+	for _, l := range rows {
+		ok, err := s.store.seedLogo(ctx, l, fixtures)
+		if err != nil {
+			return seeded, fmt.Errorf("seed logo of %s: %w", l.Organization, err)
+		}
+		if ok {
+			seeded++
+		}
+	}
+	return seeded, nil
+}
+
+// seedLogo makes the fixture the organization's active logo unless it has
+// one, and reports whether it did. The fixture passes the upload's rules,
+// the size bound and the allowlist by its sniffed type, before any I/O.
+// An organization with an active logo, the seed's own from an earlier run
+// or one a client uploaded, is left alone. Otherwise the file is written
+// under the row's id by the write protocol's retry-safe form, which finds
+// the file an interrupted run completed or resumes one it left pending,
+// and is activated as the organization's logo only if none became active
+// meanwhile.
+//
+// What the seed does not own it leaves as it stands: a file found under
+// the id that another organization's image binds, one whose organization
+// a client renamed or moved so the state's path now names a new row; a
+// row that holds the id under another name; a file whose delete is under
+// way, which the sweep finishes and the next seed writes again; and a
+// file a concurrent seed activated first. Only a file this run stored and
+// could not activate is retired, as a lost replacement is, and at the
+// version it completed at, so no delete begins on a file an image may
+// reference.
+func (s *store) seedLogo(ctx context.Context, l logoSeedRow, fixtures fs.FS) (bool, error) {
+	body, err := fs.ReadFile(fixtures, l.Fixture)
+	if err != nil {
+		return false, err
+	}
+	if len(body) > maxLogoBody {
+		return false, fmt.Errorf("fixture %s is %d bytes, over the logo's %d", l.Fixture, len(body), maxLogoBody)
+	}
+	contentType := http.DetectContentType(body)
+	ext, err := logoExtension(contentType)
+	if err != nil {
+		return false, fmt.Errorf("fixture %s: %w", l.Fixture, err)
+	}
+	org, err := s.view.One(ctx, s.db, "path", l.Organization)
+	if err != nil {
+		return false, fmt.Errorf("organization: %w", err)
+	}
+	switch _, err := s.activeLogo(ctx, s.db, org.ID); {
+	case err == nil:
+		return false, nil
+	case !errors.Is(err, sql.ErrNoRows):
+		return false, err
+	}
+	st := s.storage
+	dir, _, err := st.FS.Directories.Ensure(ctx, s.db, blobfs.RootID, imagesDirectory)
+	if err != nil {
+		return false, err
+	}
+	file, stored, err := st.Ensure(ctx, s.db.DB, bytes.NewReader(body), int64(len(body)), func(tx *sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
+		return st.FS.Files.Ensure(ctx, tx, st.Objects, dir.ID, l.ID+ext, contentType, bfdata.WithID(l.ID))
+	})
+	switch {
+	case errors.Is(err, blobfs.ErrDeleting), errors.Is(err, blobfs.ErrIDTaken):
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+	// active is the organization's active logo once the activation
+	// commits, the seeded file when this run attached it.
+	var attached bool
+	active, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (string, error) {
+		if err := st.FS.Files.Hold(ctx, tx, file.ID); err != nil {
+			return "", err
+		}
+		current, err := s.activeLogo(ctx, tx, org.ID)
+		switch {
+		case err == nil:
+			return current.ID, nil
+		case !errors.Is(err, sql.ErrNoRows):
+			return "", err
+		}
+		attached = true
+		return file.ID, s.attach(ctx, tx, org.ID, file.ID)
+	})
+	var ce *sqlate.ConstraintError
+	switch {
+	case err == nil && active == file.ID:
+		return attached, nil
+	case errors.Is(err, blobfs.ErrDeleting):
+		return false, nil
+	case errors.Is(err, sqlate.ErrUniqueViolation):
+		// A concurrent seed activated the same file first, or another
+		// organization's image binds the file found under the id.
+		if current, rerr := s.activeLogo(ctx, s.db, org.ID); rerr == nil && current.ID == file.ID {
+			return false, nil
+		}
+		if errors.As(err, &ce) && ce.Constraint == constraintImageFile {
+			return false, nil
+		}
+	}
+	if !stored {
+		return false, err
+	}
+	// The activation rolled back, or another logo became active since the
+	// check and is left alone: no image references the file this run
+	// stored, so it is retired, at the version it completed at.
+	return false, errors.Join(err, st.Retire(ctx, s.db.DB, func(*sqlate.Tx) (string, error) { return file.ID, nil }, bfdata.AtVersion(file.Version)))
+}
+
+// constraintImageFile is the unique constraint that admits one image per
+// file, which a seeded file another organization's image binds violates.
+const constraintImageFile = "uq_organization_image_file"

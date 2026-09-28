@@ -41,6 +41,13 @@ func New(db *data.Database, st *data.Storage, sweep Sweeper) *Service {
 // composition root runs it at startup, once the schema is corrected.
 func (s *Service) Verify(ctx context.Context) error { return s.store.Verify(ctx) }
 
+// Seed is the layer's contribution of stored files to the named states
+// the data package's seeder applies: the document hierarchies a state
+// carries, each file written by the shared write protocol once the seed's
+// rows commit. The composition root hands it to the seeder after the
+// organizations' contributions.
+func (s *Service) Seed() data.FileSeed { return seed{store: s.store} }
+
 // CreateDirectory creates a directory under the command's parent,
 // ensuring the organization's root when the parent is its alias, and
 // returns its identity. A nonexistent organization is sql.ErrNoRows, a

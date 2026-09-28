@@ -216,14 +216,14 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 	}
 }
 
-// Verify prepares the layer's three statements and nothing of blobfs's,
+// Verify prepares the layer's four statements and nothing of blobfs's,
 // which the composition root verifies on its own.
 func TestStore_VerifyPreparesEveryStatement(t *testing.T) {
 	s, rec, _ := serviceOver(t)
 	if err := s.Verify(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if prepared := rec.SQL(sqltest.OpPrepare); len(prepared) != 3 {
-		t.Errorf("prepared %d statements, want 3: %q", len(prepared), prepared)
+	if prepared := rec.SQL(sqltest.OpPrepare); len(prepared) != 4 {
+		t.Errorf("prepared %d statements, want 4: %q", len(prepared), prepared)
 	}
 }

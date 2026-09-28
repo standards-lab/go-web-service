@@ -104,10 +104,16 @@ a domain.
 The base layers (`data`, `domain/<layer>`, `admin/<service>`) are root-level packages because
 the domain packages import `data` and the topology-and-naming principle forbids a root-level
 package importing `internal/*`.
-A domain that seeds the named states declares its contribution as a `data.Seed` over its own
-tables and statements, returned by its service's `Seed`; `admin.go` hands each to
-`data.NewSeeder` in the tables' dependency order, so the domain is constructed before the admin
-layer and `data` names no domain's table.
+A domain that seeds the named states declares each contribution over its own tables and
+statements, returned by a method of its service (`Seed`, `LogoSeed`). A contribution of rows is
+a `data.Seed`, applied in the seed's one transaction. A contribution of stored files is a
+`data.FileSeed`: blobfs's two-phase write puts an object outside any transaction, so the seeder
+runs it after the row transaction commits. Each file goes through `data.Storage.Ensure`, the
+shared write protocol's retry-safe form, under a fixed id the state file carries. A rerun then
+finds the file, and a reset, which leaves the container's objects in place, writes it again
+under the same key. A file seed leaves alone what it does not own. `admin.go` hands every
+contribution to `data.NewSeeder` in the tables' dependency order, so the domain is constructed
+before the admin layer and `data` names no domain's table.
 `mountAPI` mounts each layer's group and hands policy at the construction site: the
 service-owned reads configuration yields the `web.Limits` each handler constructor receives.
 Per-layer policy variation is different values at different construction sites.

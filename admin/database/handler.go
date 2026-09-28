@@ -57,7 +57,8 @@ type handler struct {
 //   - down, steps, and force: each a POST naming the migration set it acts
 //     on, whose response is the resulting status
 //   - seed: applies the configured set or the one its body names, and
-//     answers with the rows it inserted by table
+//     answers with what it stored by contribution: the rows it inserted,
+//     and the files it wrote once they committed
 //   - state: resets the database to the state its body names, once the
 //     body confirms it, and answers with the transition
 //
@@ -66,7 +67,7 @@ type handler struct {
 // in flight first and starts no other until the change is done. verify
 // and force hold nothing: verify reads, and force sets a set's history
 // without running any file, so neither takes a lock the sweep contends
-// for; seed only inserts rows.
+// for; seed only inserts rows and writes files.
 //
 // The status reports each migration set, in declaration order. force sets
 // a set's history without running any file, the operator's override for

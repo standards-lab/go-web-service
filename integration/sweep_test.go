@@ -41,7 +41,7 @@ func TestDocumentSweep(t *testing.T) {
 	run := func(name string, fn func(t *testing.T, docs string)) {
 		t.Run(name, func(t *testing.T) {
 			integration.Reset(t, c, integration.Default)
-			fn(t, "/api/documents/"+tree(t, c)["acme"].ID)
+			fn(t, "/api/documents/"+tree(t, c)[docsOrg].ID)
 		})
 	}
 	mkdir := func(t *testing.T, docs, parent, name string) identity {
@@ -189,7 +189,7 @@ func TestSweepAtStartup(t *testing.T) {
 	first := integration.Start(t, opts)
 	c := first.Client()
 	integration.Reset(t, c, integration.Default)
-	docs := "/api/documents/" + tree(t, c)["acme"].ID
+	docs := "/api/documents/" + tree(t, c)[docsOrg].ID
 	reports := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)
 	file := webtest.Decode[identity](t, c.Put(t, docs+"/directories/"+reports.ID+"/files/q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("q3")}), http.StatusCreated)
 	key := file.ID + "/q3.txt"
@@ -243,7 +243,7 @@ func TestSweepUnderReset(t *testing.T) {
 	refusals := strings.Count(s.Output(), refusedRecord)
 	for round := range 15 {
 		integration.Reset(t, c, integration.Default)
-		docs := "/api/documents/" + tree(t, c)["acme"].ID
+		docs := "/api/documents/" + tree(t, c)[docsOrg].ID
 		branch := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "branch"}), http.StatusCreated)
 		for i := range 40 {
 			c.Post(t, docs+"/directories", map[string]string{"parent_id": branch.ID, "name": fmt.Sprint("d", i)}).Expect(t, http.StatusCreated)

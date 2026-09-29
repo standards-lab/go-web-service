@@ -328,6 +328,33 @@ func TestStore_AHoldRefusedByTheFilesOwnDeleteIs409(t *testing.T) {
 	}
 }
 
+// A refused hold whose file the stale reclaim already finished is still the
+// refusal's 409: the abandon finds nothing to remove, and that absence is
+// not the answer.
+func TestStore_AHoldRefusedAfterTheReclaimIs409(t *testing.T) {
+	s, rec, _ := serviceOver(t, sqltest.ReturningDialect{},
+		datatest.DirectoryRows(imagesDirectory()), row(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
+		datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)),
+		exec(0), datatest.FileRows(file(newFileID, blobfs.StatusDeleting, 3)), // the hold matches nothing; blobfs reads the row: deleting
+		datatest.DirectoryRows(imagesDirectory()), // and its directory: active
+		datatest.FileRows(), datatest.FileRows(),  // the abandon's delete matches nothing; its read finds the row purged
+	)
+	r := web.NewRouter()
+	r.Mount(web.NewModule(organization.Routes(s, web.Limits{DefaultSize: 20, MaxSize: 100}, slog.New(slog.DiscardHandler))))
+	body := problem(t, upload(t, r, "/organizations/"+validID+"/logo", "image/png", "png", 3), 409)
+	if body["detail"] != "the file is being deleted" {
+		t.Errorf("detail = %v; want the file's own delete", body["detail"])
+	}
+	sameOps(t, rec,
+		q,
+		begin, q, q, commit,
+		q,
+		begin, x, q, q, sqltest.OpRollback,
+		begin, q, q, sqltest.OpRollback,
+	)
+	noImage(t, rec)
+}
+
 // noImage fails the test if any statement touched organization_image.
 func noImage(t *testing.T, rec *sqltest.Recorder) {
 	t.Helper()

@@ -91,7 +91,7 @@ func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload
 	})
 	if err != nil {
 		// The activation rolled back, so no image references the new file.
-		return LogoIdentity{}, errors.Join(err, st.FS.Remove(cleanup, s.db.DB, st.Objects, func(*sqlate.Tx) (string, error) { return file.ID, nil }))
+		return LogoIdentity{}, abandoned(err, st.FS.Remove(cleanup, s.db.DB, st.Objects, func(*sqlate.Tx) (string, error) { return file.ID, nil }))
 	}
 	if replaced.ID != "" {
 		// The new logo is active and the replaced file unreferenced and
@@ -277,7 +277,19 @@ func (s *store) seedLogo(ctx context.Context, l logoSeedRow, fixtures fs.FS) (bo
 	// The activation rolled back, or another logo became active since the
 	// check and is left alone: no image references the file this run
 	// stored, so it is retired, at the version it completed at.
-	return false, errors.Join(err, st.FS.Remove(ctx, s.db.DB, st.Objects, func(*sqlate.Tx) (string, error) { return file.ID, nil }, bfdata.AtVersion(file.Version)))
+	return false, abandoned(err, st.FS.Remove(ctx, s.db.DB, st.Objects, func(*sqlate.Tx) (string, error) { return file.ID, nil }, bfdata.AtVersion(file.Version)))
+}
+
+// abandoned is the error of a write refused with err whose stored file was
+// then removed, with removeErr the removal's own. A file the removal no
+// longer finds is gone already, the stale reclaim having finished it, so
+// the refusal alone answers: joined, the removal's blobfs.ErrNotFound would
+// turn the refusal's 409 into a 404.
+func abandoned(err, removeErr error) error {
+	if errors.Is(removeErr, blobfs.ErrNotFound) {
+		return err
+	}
+	return errors.Join(err, removeErr)
 }
 
 // constraintImageFile is the unique constraint that admits one image per

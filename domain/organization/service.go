@@ -39,9 +39,9 @@ func (s *Service) Verify(ctx context.Context) error { return s.store.Verify(ctx)
 func (s *Service) Seed() data.Seed { return seed{store: s.store} }
 
 // LogoSeed is the layer's second seed contribution, a file seed, to the
-// named states: the logos a state names, each written by the shared write
-// protocol once the seed's rows commit and activated for an organization
-// that has none. The composition root hands it to the seeder after Seed.
+// named states: the logos a state names, each written by blobfs's
+// two-phase write once the seed's rows commit and activated for an
+// organization that has none. The composition root hands it to the seeder after Seed.
 func (s *Service) LogoSeed() data.FileSeed { return logoSeed{store: s.store} }
 
 // List returns one page of organizations and the read's paging, honoring

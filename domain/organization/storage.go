@@ -25,12 +25,12 @@ const imagesDirectory = "organization-images"
 
 // putLogo stores the upload as the organization's logo, named for its new
 // file id with ext, and makes it the active one, retiring the logo it
-// replaces. The file is written by the data package's write protocol, its
+// replaces. The file is written by blobfs's two-phase write, its
 // pending row created after the organization is read, so a nonexistent
 // organization is the missing row before any byte is stored. The pending
 // row stands alone: no image references it until the write completes, so
 // a write that stops partway, an aborted upload included, leaves a row the
-// protocol abandons or blobfs's stale reclaim removes, and never an image
+// write abandons or blobfs's stale reclaim removes, and never an image
 // that blocks the organization's delete.
 //
 // The completed file is then activated in one transaction, which holds the
@@ -59,7 +59,7 @@ func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload
 		return LogoIdentity{}, err
 	}
 	id := blobfs.NewID()
-	file, err := st.Write(ctx, s.db.DB, u.Body, u.Size, func(tx *sqlate.Tx) (blobfs.File, error) {
+	file, err := st.FS.Write(ctx, s.db.DB, st.Objects, u.Body, u.Size, func(tx *sqlate.Tx) (blobfs.File, error) {
 		// A nonexistent organization is the missing row, before the
 		// activation's foreign key would refuse it as a conflict.
 		if _, err := s.view.One(ctx, tx, "id", organizationID); err != nil {
@@ -72,12 +72,9 @@ func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload
 	}
 	cleanup := context.WithoutCancel(ctx)
 	replaced, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (blobfs.File, error) {
+		// A hold refused as deleting is blobfs's blobfs.DeletingError,
+		// which names the file's own delete apart from its directory's.
 		if err := st.FS.Files.Hold(ctx, tx, file.ID); err != nil {
-			// The hold reads the new file's row alone, so a deleting one
-			// is the file's own delete, never a directory's.
-			if errors.Is(err, blobfs.ErrDeleting) {
-				err = fmt.Errorf("%w: %w", data.ErrFileDeleting, err)
-			}
 			return blobfs.File{}, err
 		}
 		current, err := s.activeLogo(ctx, tx, organizationID)
@@ -94,14 +91,14 @@ func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload
 	})
 	if err != nil {
 		// The activation rolled back, so no image references the new file.
-		return LogoIdentity{}, errors.Join(err, st.Retire(cleanup, s.db.DB, func(*sqlate.Tx) (string, error) { return file.ID, nil }))
+		return LogoIdentity{}, errors.Join(err, st.FS.Remove(cleanup, s.db.DB, st.Objects, func(*sqlate.Tx) (string, error) { return file.ID, nil }))
 	}
 	if replaced.ID != "" {
 		// The new logo is active and the replaced file unreferenced and
 		// deleting, so a failed purge is the request's error though the
 		// replacement stands; the stale reclaim finishes the file if no
 		// retry does.
-		if err := st.Purge(cleanup, s.db.DB, replaced); err != nil {
+		if err := st.FS.Purge(cleanup, s.db.DB, st.Objects, replaced); err != nil {
 			return LogoIdentity{}, fmt.Errorf("retire the replaced logo %s: %w", replaced.ID, err)
 		}
 	}
@@ -122,11 +119,12 @@ func (s *store) logo(ctx context.Context, organizationID string) (Logo, error) {
 	return Logo{Object: obj, Open: open}, nil
 }
 
-// deleteLogo retires the organization's active logo by the delete
-// protocol, its image removed in the transaction that begins the delete;
+// deleteLogo retires the organization's active logo by blobfs's two-phase
+// delete, its image removed in the transaction that begins the delete;
 // none is sql.ErrNoRows.
 func (s *store) deleteLogo(ctx context.Context, organizationID string) error {
-	return s.storage.Retire(ctx, s.db.DB, func(tx *sqlate.Tx) (string, error) {
+	st := s.storage
+	return st.FS.Remove(ctx, s.db.DB, st.Objects, func(tx *sqlate.Tx) (string, error) {
 		logo, err := s.activeLogo(ctx, tx, organizationID)
 		if err != nil {
 			return "", err
@@ -187,7 +185,7 @@ func (s logoSeed) Write(ctx context.Context, raw json.RawMessage, fixtures fs.FS
 // the size bound and the allowlist by its sniffed type, before any I/O.
 // An organization with an active logo, the seed's own from an earlier run
 // or one a client uploaded, is left alone. Otherwise the file is written
-// under the row's id by the write protocol's retry-safe form, which finds
+// under the row's id by blobfs's retry-safe write, Store.Ensure, which finds
 // the file an interrupted run completed or resumes one it left pending,
 // and is activated as the organization's logo only if none became active
 // meanwhile.
@@ -196,10 +194,9 @@ func (s logoSeed) Write(ctx context.Context, raw json.RawMessage, fixtures fs.FS
 // the id that another organization's image binds, one whose organization
 // a client renamed or moved so the state's path now names a new row; a
 // row that holds the id under another name; a row that holds the name
-// under another id, which the write protocol reports as a taken name and
-// no client upload can make, since an uploaded logo is named for its own
-// minted id; a file whose delete is under
-// way, which the sweep finishes and the next seed writes again; and a
+// under another id, which Store.Ensure reports as a taken name and no
+// client upload can make, since an uploaded logo is named for its own
+// minted id; a file whose delete is under way, which the sweep finishes and the next seed writes again; and a
 // file a concurrent seed activated first. Only a file this run stored and
 // could not activate is retired, as a lost replacement is, and at the
 // version it completed at, so no delete begins on a file an image may
@@ -232,7 +229,7 @@ func (s *store) seedLogo(ctx context.Context, l logoSeedRow, fixtures fs.FS) (bo
 	if err != nil {
 		return false, err
 	}
-	file, stored, err := st.Ensure(ctx, s.db.DB, l.ID, bytes.NewReader(body), int64(len(body)), func(tx *sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
+	file, stored, err := st.FS.Ensure(ctx, s.db.DB, st.Objects, l.ID, bytes.NewReader(body), int64(len(body)), func(tx *sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
 		return st.FS.Files.Ensure(ctx, tx, st.Objects, dir.ID, l.ID+ext, contentType, bfdata.WithID(l.ID))
 	})
 	switch {
@@ -280,7 +277,7 @@ func (s *store) seedLogo(ctx context.Context, l logoSeedRow, fixtures fs.FS) (bo
 	// The activation rolled back, or another logo became active since the
 	// check and is left alone: no image references the file this run
 	// stored, so it is retired, at the version it completed at.
-	return false, errors.Join(err, st.Retire(ctx, s.db.DB, func(*sqlate.Tx) (string, error) { return file.ID, nil }, bfdata.AtVersion(file.Version)))
+	return false, errors.Join(err, st.FS.Remove(ctx, s.db.DB, st.Objects, func(*sqlate.Tx) (string, error) { return file.ID, nil }, bfdata.AtVersion(file.Version)))
 }
 
 // constraintImageFile is the unique constraint that admits one image per

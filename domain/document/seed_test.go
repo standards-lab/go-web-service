@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/standards-lab/blobfs"
+	"github.com/standards-lab/blobfs/data/datatest"
 	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/sqltest"
@@ -50,10 +51,10 @@ func TestSeed_WritesTheTreeUnderItsIDs(t *testing.T) {
 	s, rec, fake := serviceOver(t,
 		idRow(parentOrgID), organization(), // the path: acme, then engineering
 		root(), // no root yet
-		organization(), dirRows(), dirRows(directory(seedRootID, blobfs.RootID, orgID, 1)), exec(1),
-		dirRows(), dirRows(directory(seedDirID, seedRootID, "reports", 1)),
-		fileRows(), fileRows(seedFile(blobfs.StatusPending, 1)),
-		fileRows(seedFile(blobfs.StatusAvailable, 2)),
+		organization(), datatest.DirectoryRows(), datatest.DirectoryRows(directory(seedRootID, blobfs.RootID, orgID, 1)), exec(1),
+		datatest.DirectoryRows(), datatest.DirectoryRows(directory(seedDirID, seedRootID, "reports", 1)),
+		datatest.FileRows(), datatest.FileRows(seedFile(blobfs.StatusPending, 1)),
+		datatest.FileRows(seedFile(blobfs.StatusAvailable, 2)),
 	)
 	n, err := s.Seed().Write(ctx, treeRows, nil)
 	if err != nil || n != 2 {
@@ -90,8 +91,8 @@ func TestSeed_ASeededTreeIsLeftAsItIs(t *testing.T) {
 	s, rec, fake := serviceOver(t,
 		idRow(parentOrgID), organization(),
 		root(seedRootID),
-		dirRows(directory(seedDirID, seedRootID, "reports", 1)),
-		fileRows(seedFile(blobfs.StatusAvailable, 2)),
+		datatest.DirectoryRows(directory(seedDirID, seedRootID, "reports", 1)),
+		datatest.FileRows(seedFile(blobfs.StatusAvailable, 2)),
 	)
 	if n, err := s.Seed().Write(context.Background(), treeRows, nil); err != nil || n != 0 {
 		t.Fatalf("Write = %d, %v; want nothing created", n, err)
@@ -109,8 +110,8 @@ func TestSeed_ASeededTreeIsLeftAsItIs(t *testing.T) {
 func TestSeed_AnEntryItDoesNotOwnIsLeftAlone(t *testing.T) {
 	taken := sqltest.Response{Err: &sqlate.ConstraintError{Constraint: blobfs.ConstraintPrimaryKeyDirectory, Class: sqlate.ErrUniqueViolation, Err: errors.New("duplicate key")}}
 	cases := map[string][]sqltest.Response{
-		"moved":    {dirRows(), taken, dirRows(), taken}, // the retry is taken again
-		"deleting": {dirRows(deleting(directory(seedDirID, seedRootID, "reports", 1)))},
+		"moved":    {datatest.DirectoryRows(), taken, datatest.DirectoryRows(), taken}, // the retry is taken again
+		"deleting": {datatest.DirectoryRows(deleting(directory(seedDirID, seedRootID, "reports", 1)))},
 	}
 	for name, found := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -139,8 +140,8 @@ func TestSeed_AClientsFileUnderTheNameIsLeftAlone(t *testing.T) {
 			client.ID, client.Key = fileID, fileID+"/q1.csv"
 			s, rec, fake := serviceOver(t,
 				idRow(parentOrgID), organization(), root(seedRootID),
-				dirRows(directory(seedDirID, seedRootID, "reports", 1)),
-				fileRows(client), // the name, held by the client's row
+				datatest.DirectoryRows(directory(seedDirID, seedRootID, "reports", 1)),
+				datatest.FileRows(client), // the name, held by the client's row
 			)
 			if n, err := s.Seed().Write(context.Background(), treeRows, nil); err != nil || n != 0 {
 				t.Fatalf("Write = %d, %v; want the client's file left alone", n, err)
@@ -160,8 +161,8 @@ func TestSeed_ADirectoryAConcurrentSeedCreatedIsFound(t *testing.T) {
 	taken := sqltest.Response{Err: &sqlate.ConstraintError{Constraint: blobfs.ConstraintPrimaryKeyDirectory, Class: sqlate.ErrUniqueViolation, Err: errors.New("duplicate key")}}
 	s, rec, _ := serviceOver(t,
 		idRow(parentOrgID), organization(), root(seedRootID),
-		dirRows(), taken, dirRows(directory(seedDirID, seedRootID, "reports", 1)), // taken, then found
-		fileRows(seedFile(blobfs.StatusAvailable, 2)),
+		datatest.DirectoryRows(), taken, datatest.DirectoryRows(directory(seedDirID, seedRootID, "reports", 1)), // taken, then found
+		datatest.FileRows(seedFile(blobfs.StatusAvailable, 2)),
 	)
 	if n, err := s.Seed().Write(context.Background(), treeRows, nil); err != nil || n != 0 {
 		t.Fatalf("Write = %d, %v; want the other seed's tree found", n, err)

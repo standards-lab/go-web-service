@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/standards-lab/blobfs/data/datatest"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate/sqltest"
 
@@ -183,7 +184,7 @@ func TestPutLogo_RefusesBeforeAnyIO(t *testing.T) {
 }
 
 func TestLogo_WithoutALogoIs404(t *testing.T) {
-	h := module(t, fileRows()) // the active logo read finds no row
+	h := module(t, datatest.FileRows()) // the active logo read finds no row
 	problem(t, send(t, h, "GET", "/organizations/"+validID+"/logo", "", ""), 404)
 }
 
@@ -199,7 +200,7 @@ func TestLookup_ReadsThePathFromTheQuery(t *testing.T) {
 }
 
 func TestDeleteLogo_WithoutALogoIs404(t *testing.T) {
-	h := module(t, fileRows()) // the active logo read finds no row
+	h := module(t, datatest.FileRows()) // the active logo read finds no row
 	problem(t, send(t, h, "DELETE", "/organizations/"+validID+"/logo", "", ""), 404)
 }
 

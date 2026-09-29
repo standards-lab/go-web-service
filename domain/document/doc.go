@@ -9,9 +9,10 @@
 // service's pattern catalog, registers the inventory, and binds each
 // statement to a typed handle. storage.go is the storage translation file,
 // the one place the layer calls blobfs or the object store. It runs the
-// scope check; runs the write, delete, and download through the data
-// package's shared file protocols, with the scope check as their first
-// transaction's step; reads blobfs's listings through the data package's
+// scope check; runs the write and the delete as blobfs's two-phase
+// protocols over the data package's object store, with the scope check as
+// their first transaction's step, and the download through the data
+// package's Serve; reads blobfs's listings through the data package's
 // lowering of a request's query; and sequences the moves and the
 // directories over blobfs's steps and the owner row's statements. No
 // statement, session, or query type crosses out of the two. entities.go
@@ -57,13 +58,12 @@
 // directory is being deleted", "the file is being deleted", "the file is
 // referenced", or otherwise "the request conflicts with the current state"
 // (data.Status's Detail constants). blobfs refuses a change as deleting
-// both when the file's own delete has begun and when a directory it
-// reaches is deleting, so the layer reads the file back to tell them
-// apart: a move of a file whose own delete began, in a directory that is
-// not deleting, is "the file is being deleted", and one in a marked
-// branch or into a deleting directory is the directory's. An upload is
-// refused the same way when its row's delete began before it completed. A
-// file delete is never refused as deleting: a repeated delete converges.
+// with a blobfs.DeletingError that says whose delete refused it: a move of
+// a file whose own delete began, in a directory that is not deleting, is
+// "the file is being deleted", and one in a marked branch or into a
+// deleting directory is the directory's. An upload is refused the same
+// way when its row's delete began before it completed. A file delete is
+// never refused as deleting: a repeated delete converges.
 //
 // A directory reads with its status, active until blobfs marks its branch
 // deleting, and a file with its stage, pending, available, or deleting.
@@ -82,9 +82,9 @@
 // Location. It is a POST, not a PUT to the name, because it creates a new
 // file under an id the server mints and is not idempotent: a retry after a
 // lost response is a second create, refused with the name's conflict.
-// The shared write protocol stores it in three steps: the pending row, the
-// put, and the completion. A put or a completion that fails abandons the pending
-// row, and a taken name is a conflict. A completion refused because a mark
+// blobfs's two-phase write stores it in three steps: the pending row, the
+// put, and the completion. A put or a completion that fails abandons the
+// pending row, and a taken name is a conflict. A completion refused because a mark
 // or the sweep reached the row deletes the object just put, since a sweep
 // that ran before the put landed could not have deleted it. A download is
 // proxied as an attachment, never rendered inline, since stored HTML would
@@ -113,15 +113,15 @@
 // files' content inline. The seeder runs it once the organizations commit,
 // since a file's object is put outside any transaction. The root is
 // ensured as a first write ensures it, the directories by blobfs's
-// insert-or-find on the pool, and the files by the shared write protocol's
-// retry-safe form, so a rerun finds every entry and a reset writes each
-// file again under the same key. An entry already there by name keeps its
-// own id and content, and a client's file there under another id, pending
-// or complete, is never written over; one a client moved or renamed,
-// whose id a row holds under another name, and one being deleted are left
-// as they stand.
+// insert-or-find on the pool, and the files by the two-phase write's
+// retry-safe form, blobfs's Store.Ensure, so a rerun finds every entry and
+// a reset writes each file again under the same key. An entry already
+// there by name keeps its own id and content, and a client's file there
+// under another id, pending or complete, is never written over; one a
+// client moved or renamed, whose id a row holds under another name, and
+// one being deleted are left as they stand.
 //
-// A file delete is blobfs's delete protocol, 204. A directory delete
+// A file delete is blobfs's two-phase delete, 204. A directory delete
 // removes an empty directory, 204; removing the root removes its owner row
 // with it. With recursive=true it deletes the branch, the directory with
 // everything beneath it, in two stages: blobfs marks the branch deleting in

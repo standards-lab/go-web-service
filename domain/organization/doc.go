@@ -10,8 +10,9 @@
 // each statement to a typed handle, and exposes the operations as the
 // store's methods. storage.go is the storage translation file, the one
 // place the layer calls blobfs or the object store: it runs the logo's
-// write, delete, and read through the data package's shared file protocols
-// and sequences the activation over blobfs's steps and the store's image
+// write and delete as blobfs's two-phase protocols over the data package's
+// object store, and its read through the data package's Serve, and
+// sequences the activation over blobfs's steps and the store's image
 // statements. No statement, session, or query type crosses out of the two.
 // entities.go owns the shapes and their rules: each command validates
 // itself, and the entities' tags are the binding and scan contract.
@@ -47,8 +48,8 @@
 // seeder runs it once the organizations commit, since a logo's object is
 // put outside any transaction. A fixture passes the upload's rules before
 // any I/O, and an organization with an active logo is left alone.
-// Otherwise the file is written under its fixed id by the shared write
-// protocol's retry-safe form and activated, in storage.go beside the
+// Otherwise the file is written under its fixed id by blobfs's retry-safe
+// write, Store.Ensure, and activated, in storage.go beside the
 // logo's other protocols. The seed leaves alone what it does not own: a
 // file under the id that another organization's image binds, a row that
 // holds the fixed name under another id, a file being deleted, and a logo
@@ -60,24 +61,24 @@
 // active row per organization. The files sit in one structural directory
 // under blobfs's root, each named for its id. An upload is a raw body of
 // at most 1 MiB in a raster type (SVG is script-capable and refused, 415).
-// The data package's shared write protocol writes it: the protocol creates
-// the pending file alone in one transaction, once the organization is
-// read, stores the object outside any transaction, and completes the file
-// on the pool. The image
-// is written only after the file completes, so a write that stops partway
-// leaves a plain pending row that the protocol abandons or blobfs's stale
-// reclaim removes, and never an image that would refuse the reclaim's
+// blobfs's two-phase write writes it: the write creates the pending file
+// alone in one transaction, once the organization is read, stores the
+// object outside any transaction, and completes the file on the pool. The
+// image is written only after the file completes, so a write that stops
+// partway leaves a plain pending row that the write abandons or blobfs's
+// stale reclaim removes, and never an image that would refuse the reclaim's
 // purge and the organization's delete. The completed file is then held and
 // activated in one transaction that removes the replaced logo's image,
 // begins its file's delete, and inserts the new image as the active one;
 // the replaced file's object and row are purged after the commit. A
 // concurrent replacement that activates first is a unique violation, 409,
-// and the losing file is retired by the shared delete protocol, as a logo
+// and the losing file is retired by blobfs's two-phase delete, as a logo
 // delete retires the active one. The steps after the write, that retire
 // and the replaced file's purge, run whatever the client does: a client
 // that hangs up once its bytes are stored does not cancel them, since the
-// stale reclaim never removes an available file no image references. The read serves an available file's bytes
-// by proxy through the shared read, revalidated by its entity tag.
+// stale reclaim never removes an available file no image references. The
+// read serves an available file's bytes by proxy through the data
+// package's Serve, revalidated by its entity tag.
 //
 // The layer has two validators, the version and the object ETag, which
 // share HTTP's entity-tag syntax. An organization's version, the integer

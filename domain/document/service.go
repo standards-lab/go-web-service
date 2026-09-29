@@ -43,7 +43,7 @@ func (s *Service) Verify(ctx context.Context) error { return s.store.Verify(ctx)
 
 // Seed is the layer's seed contribution, a file seed, to the named states
 // the data package's seeder applies: the document hierarchies a state
-// carries, each file written by the shared write protocol once the seed's
+// carries, each file written by blobfs's two-phase write once the seed's
 // rows commit. The composition root hands it to the seeder after the
 // organizations' contributions.
 func (s *Service) Seed() data.FileSeed { return seed{store: s.store} }

@@ -238,7 +238,7 @@ func (h *handler) content(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	w.Header().Set("Content-Disposition", attachment(c.Name))
+	w.Header().Set("Content-Disposition", web.Attachment(c.Name))
 	w.Header().Set("Cache-Control", "private, no-cache")
 	return web.WriteObject(w, r, c.Object, c.Open)
 }
@@ -296,51 +296,6 @@ func filePath(r *http.Request) (org, id string, err error) {
 	}
 	id, err = sdk.PathID(r, "id")
 	return org, id, err
-}
-
-// attachment is the Content-Disposition of a download named name (RFC
-// 6266): the quoted filename, a quote or a backslash escaped as a quoted
-// pair, and for a name outside printable ASCII a fallback with each such
-// rune replaced by an underscore, followed by the exact name as filename*
-// in RFC 8187's encoding, which a recipient prefers.
-func attachment(name string) string {
-	var fallback strings.Builder
-	ascii := true
-	for _, c := range name {
-		switch {
-		case c == '"' || c == '\\':
-			fallback.WriteByte('\\')
-			fallback.WriteRune(c)
-		case c < 0x20 || c > 0x7e:
-			ascii = false
-			fallback.WriteByte('_')
-		default:
-			fallback.WriteRune(c)
-		}
-	}
-	header := `attachment; filename="` + fallback.String() + `"`
-	if ascii {
-		return header
-	}
-	var encoded strings.Builder
-	for i := 0; i < len(name); i++ {
-		if b := name[i]; attrChar(b) {
-			encoded.WriteByte(b)
-		} else {
-			fmt.Fprintf(&encoded, "%%%02X", b)
-		}
-	}
-	return header + "; filename*=UTF-8''" + encoded.String()
-}
-
-// attrChar reports whether b is an RFC 8187 attr-char, the bytes an
-// extended value carries unencoded.
-func attrChar(b byte) bool {
-	switch {
-	case 'a' <= b && b <= 'z', 'A' <= b && b <= 'Z', '0' <= b && b <= '9':
-		return true
-	}
-	return strings.IndexByte("!#$&+-.^_`|~", b) >= 0
 }
 
 // status is the layer's own error vocabulary as one web.ProblemMatcher: a

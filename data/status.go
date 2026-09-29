@@ -30,14 +30,6 @@ const (
 	DetailConflict = "the request conflicts with the current state"
 )
 
-// ErrFileDeleting is a change refused because the file itself is
-// deleting, its own delete begun, rather than a directory it reaches.
-// blobfs reports both as blobfs.ErrDeleting, so a domain that must tell
-// them apart reads the file's row and wraps the refusal in this error,
-// which keeps blobfs.ErrDeleting in its chain. blobfs will type the two
-// apart itself; this error then gives way to its own.
-var ErrFileDeleting = errors.New("data: the file is being deleted")
-
 // Status is the web.ProblemMatcher over the vocabulary every domain's store
 // returns:
 //
@@ -61,31 +53,32 @@ var ErrFileDeleting = errors.New("data: the file is being deleted")
 //     transition the file's status does not allow is a conflict (a
 //     domain's listing reports a deleting directory as not found before
 //     its error reaches this matcher)
-//   - a file the domain found deleting itself, ErrFileDeleting, is a
-//     conflict too, told apart from the directory's
 //   - an object over the store's size bound is too large
-//   - a store that is not ready, unreachable, or missing its container is a
-//     temporary outage
+//   - a store that is not ready, unreachable, or missing its container
+//     (storage.ErrContainerNotFound, on every object operation, a
+//     download's open included) is a temporary outage, never not found
 //
 // Every conflict carries a curated detail, the Detail constant for its
 // kind, so a writer that opts 409 into error text still sends none of it:
 // a taken name or id is DetailNameTaken, a non-empty directory
-// DetailNotEmpty, a file deleting itself (ErrFileDeleting)
-// DetailFileDeleting, any other blobfs.ErrDeleting, a deleting directory,
-// DetailDeleting, a referenced file DetailReferenced, and every other
-// conflict DetailConflict.
+// DetailNotEmpty, a file refused by its own delete (a
+// blobfs.DeletingError whose Directory is false) DetailFileDeleting, any
+// other blobfs.ErrDeleting, a deleting directory's, DetailDeleting, a
+// referenced file DetailReferenced, and every other conflict
+// DetailConflict.
 //
 // A handler composes it after its own matcher so the domain's errors take
 // precedence. Check and not-null violations stay unmatched on purpose: a
 // command's validation owns those rules, so a breach is an invariant
 // failure, reported as a server fault.
 func Status(err error) (web.Problem, bool) {
+	var deleting *blobfs.DeletingError
 	switch {
 	case errors.Is(err, blobfs.ErrInvalidName), errors.Is(err, blobfs.ErrInvalidPath),
 		errors.Is(err, blobfs.ErrInvalidKey), errors.Is(err, blobfs.ErrInvalidID),
 		errors.Is(err, blobfs.ErrRootDirectory):
 		return web.Problem{Status: http.StatusBadRequest}, true
-	case errors.Is(err, blobfs.ErrNotFound), errors.Is(err, storage.ErrNotFound) && !errors.Is(err, ErrContainerGone):
+	case errors.Is(err, blobfs.ErrNotFound), errors.Is(err, storage.ErrNotFound):
 		return web.Problem{Status: http.StatusNotFound}, true
 	case errors.Is(err, blobfs.ErrNameTaken), errors.Is(err, blobfs.ErrIDTaken):
 		return Conflict(DetailNameTaken), true
@@ -93,7 +86,7 @@ func Status(err error) (web.Problem, bool) {
 		return Conflict(DetailNotEmpty), true
 	case errors.Is(err, blobfs.ErrReferenced):
 		return Conflict(DetailReferenced), true
-	case errors.Is(err, ErrFileDeleting):
+	case errors.As(err, &deleting) && !deleting.Directory:
 		return Conflict(DetailFileDeleting), true
 	case errors.Is(err, blobfs.ErrDeleting):
 		return Conflict(DetailDeleting), true
@@ -102,7 +95,7 @@ func Status(err error) (web.Problem, bool) {
 		return Conflict(DetailConflict), true
 	case errors.Is(err, storage.ErrTooLarge):
 		return web.Problem{Status: http.StatusRequestEntityTooLarge}, true
-	case errors.Is(err, ErrContainerGone), errors.Is(err, storage.ErrNotReady), errors.Is(err, storage.ErrUnavailable):
+	case errors.Is(err, storage.ErrContainerNotFound), errors.Is(err, storage.ErrNotReady), errors.Is(err, storage.ErrUnavailable):
 		return web.Problem{Status: http.StatusServiceUnavailable}, true
 	case errors.Is(err, query.ErrDirectives):
 		return web.Problem{Status: http.StatusBadRequest}, true

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -32,7 +33,7 @@ func objects(t *testing.T, fake *storagetest.Fake) *data.Objects {
 func TestObjects_PutEchoesTheDeclaredType(t *testing.T) {
 	o := objects(t, storagetest.NewFake())
 
-	obj, err := o.Put(context.Background(), "1/logo.png", strings.NewReader("png"), "image/png", 3)
+	obj, err := o.PutObject(context.Background(), "1/logo.png", strings.NewReader("png"), "image/png", 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,21 +50,13 @@ func TestObjects_PutEchoesTheDeclaredType(t *testing.T) {
 	}
 }
 
-func TestObjects_DeleteOfAMissingObjectIsSuccess(t *testing.T) {
-	o := objects(t, storagetest.NewFake())
-
-	if err := o.Delete(context.Background(), "1/never-stored"); err != nil {
-		t.Errorf("Delete = %v, want success", err)
-	}
-}
-
-// The sweep's delete is idempotent: an object deleted twice, or never
-// stored, is success, as blobfs's ObjectDeleter requires.
+// The delete is idempotent: an object deleted twice, or never stored, is
+// success, as blobfs's ObjectDeleter requires.
 func TestObjects_DeleteObjectIsIdempotent(t *testing.T) {
 	o := objects(t, storagetest.NewFake())
 	ctx := context.Background()
 
-	if _, err := o.Put(ctx, "1/q3.txt", strings.NewReader("q3"), "text/plain", 2); err != nil {
+	if _, err := o.PutObject(ctx, "1/q3.txt", strings.NewReader("q3"), "text/plain", 2); err != nil {
 		t.Fatal(err)
 	}
 	for i := range 2 {
@@ -79,19 +72,34 @@ func TestObjects_DeleteObjectIsIdempotent(t *testing.T) {
 	}
 }
 
+// A missing container refuses every operation as the store's fault:
+// storage.ErrContainerNotFound, never an absent object, so a delete is not
+// read as done, and Status answers each 503.
 func TestObjects_AMissingContainerIsRefused(t *testing.T) {
 	fake := storagetest.NewFake()
 	o := objects(t, fake)
+	ctx := context.Background()
+	if _, err := o.PutObject(ctx, "1/logo.png", strings.NewReader("png"), "image/png", 3); err != nil {
+		t.Fatal(err)
+	}
 	fake.DropContainer()
 
-	if err := o.Delete(context.Background(), "1/logo.png"); !errors.Is(err, data.ErrContainerGone) {
-		t.Errorf("Delete = %v, want ErrContainerGone", err)
+	_, putErr := o.PutObject(ctx, "1/logo.png", strings.NewReader("png"), "image/png", 3)
+	body, openErr := o.Open(ctx, "1/logo.png")
+	if body != nil {
+		_ = body.Close()
 	}
-	if err := o.DeleteObject(context.Background(), "1/logo.png"); !errors.Is(err, data.ErrContainerGone) {
-		t.Errorf("DeleteObject = %v, want ErrContainerGone", err)
-	}
-	if _, err := o.Put(context.Background(), "1/logo.png", strings.NewReader("png"), "image/png", 3); !errors.Is(err, data.ErrContainerGone) {
-		t.Errorf("Put = %v, want ErrContainerGone", err)
+	for op, err := range map[string]error{
+		"PutObject":    putErr,
+		"Open":         openErr,
+		"DeleteObject": o.DeleteObject(ctx, "1/logo.png"),
+	} {
+		if !errors.Is(err, storage.ErrContainerNotFound) || errors.Is(err, storage.ErrNotFound) {
+			t.Errorf("%s = %v, want storage.ErrContainerNotFound alone", op, err)
+		}
+		if p, ok := data.Status(err); !ok || p.Status != http.StatusServiceUnavailable {
+			t.Errorf("Status(%s) = %+v, %t; want 503", op, p, ok)
+		}
 	}
 }
 

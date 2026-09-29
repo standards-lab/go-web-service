@@ -19,10 +19,9 @@ import (
 // never a domain service, so it is not one. It is infrastructure work that
 // needs a process-lifetime runner, and the composition root stages it on
 // the sdk reactor with a Wake source, since the reactor is the one runner
-// the process has. The worker is written in two halves so each can move on
-// its own: sweepUntilDone, the loop over blobfs's bounded passes, staged
-// for promotion to blobfs beside Sweep; and the logging policy, which is
-// this service's.
+// the process has. The worker composes two halves: blobfs's
+// bfdata.SweepUntilDone, the loop over its bounded passes, and the logging
+// policy and the gate each pass holds, which are this service's.
 //
 // It is the standalone sweeper of blobfs's deletes, the one reclamation
 // the service runs. The moment any other layer needs sweeper-like
@@ -32,7 +31,7 @@ import (
 // a second standalone worker.
 
 // sweepPass is one bounded pass of blobfs's sweep with the service's
-// options, the unit the worker repeats.
+// options, the unit bfdata.SweepUntilDone repeats.
 type sweepPass func(ctx context.Context) (bfdata.SweepResult, error)
 
 // SweepGate is what the worker asks of the process before each pass: its
@@ -81,9 +80,13 @@ type SweepGate interface {
 // reactor's Grace while a pass is in flight or waits on the gate, which
 // Shutdown reports as handlers cancelled.
 func (s *Storage) SweepWorker(db *sqlate.DB, gate SweepGate, logger *slog.Logger, opts ...bfdata.SweepOption) sdk.Func[time.Time] {
-	return sweepWorker(gated(gate, func(ctx context.Context) (bfdata.SweepResult, error) {
+	pass := gated(gate, func(ctx context.Context) (bfdata.SweepResult, error) {
 		return s.FS.Sweep(ctx, db, s.Objects, opts...)
-	}), logger)
+	})
+	report := logPass(logger)
+	return func(ctx context.Context, _ time.Time) error {
+		return bfdata.SweepUntilDone(ctx, sdk.Draining(ctx), pass, report)
+	}
 }
 
 // gated runs pass holding gate shared, so a pass waits out a schema change
@@ -98,44 +101,6 @@ func gated(gate SweepGate, pass sweepPass) sweepPass {
 		}
 		defer release()
 		return pass(ctx)
-	}
-}
-
-// sweepWorker joins the loop to the logging policy over any pass, and
-// hands the loop the reactor's drain signal as its stop.
-func sweepWorker(pass sweepPass, logger *slog.Logger) sdk.Func[time.Time] {
-	report := logPass(logger)
-	return func(ctx context.Context, _ time.Time) error {
-		return sweepUntilDone(ctx, sdk.Draining(ctx), pass, report)
-	}
-}
-
-// sweepUntilDone runs pass while it reports More, checking ctx and stop
-// before each, and hands every pass's result and error to report. It
-// returns nil once a pass reports no More or once stop is closed, which
-// ends the loop between passes and never interrupts one, and ctx's error
-// once ctx ends, before a pass or during one; a pass's own error is
-// report's to judge and never ends the loop. A nil stop never closes. It
-// knows nothing of this service or the reactor, and is the half staged
-// for blobfs.
-func sweepUntilDone(ctx context.Context, stop <-chan struct{}, pass sweepPass, report func(bfdata.SweepResult, error)) error {
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		select {
-		case <-stop:
-			return nil
-		default:
-		}
-		res, err := pass(ctx)
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		report(res, err)
-		if !res.More {
-			return nil
-		}
 	}
 }
 

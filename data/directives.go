@@ -72,22 +72,13 @@ func Read[T any](ctx context.Context, s sqlate.Session, p query.Projection[T], q
 	return p.List(ctx, s, d, query.Page{Number: q.Page, Size: q.Size}, base...)
 }
 
-// Listing is a collection read anchored on one row's id, the shape of
-// blobfs's directory listings (bfdata.Directories and bfdata.Files, which
-// satisfy it as they are): List reads a page by number and Continue the
-// page past a cursor a previous page returned, both of the rows under the
-// directory with id.
-type Listing[T any] interface {
-	List(ctx context.Context, s sqlate.Session, id string, d query.Directives, page query.Page, opts ...bfdata.ListOption) (query.Collection[T], error)
-	Continue(ctx context.Context, s sqlate.Session, id string, d query.Directives, after query.Cursor, size int, opts ...bfdata.ListOption) (query.Collection[T], error)
-}
-
-// ReadListing is [Read] over a listing in place of a projection: the rows
-// under the directory with id, continued past a cursor when the query
+// ReadListing is [Read] over one of blobfs's directory listings
+// (bfdata.Directories and bfdata.Files, each a bfdata.Listing) in place of
+// a projection: the rows under the directory with id, continued past a cursor when the query
 // names one and by page number otherwise. Every refusal of the directives
 // or the cursor is the request's error, as Read's is; what a refusal of
 // the anchor means is the caller's policy.
-func ReadListing[T any](ctx context.Context, s sqlate.Session, l Listing[T], id string, q web.Query) (query.Collection[T], error) {
+func ReadListing[T any](ctx context.Context, s sqlate.Session, l bfdata.Listing[T], id string, q web.Query) (query.Collection[T], error) {
 	d := Directives(q)
 	if q.Cursor != "" {
 		return l.Continue(ctx, s, id, d, query.Cursor(q.Cursor), q.Size)

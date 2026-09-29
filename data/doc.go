@@ -24,7 +24,7 @@
 // write puts a file's object outside any transaction, after the pending
 // row commits. The Seeder therefore runs every FileSeed once the seed's
 // transaction commits, when the rows the files name already stand, and
-// writes each file through Storage.Ensure, the shared write protocol's
+// writes each file through blobfs's Store.Ensure, the two-phase write's
 // retry-safe form. A seeded file carries a fixed id, so a rerun finds it
 // and a reset writes it again under the same key, its put replacing
 // whatever object the reset left in the container.
@@ -40,29 +40,27 @@
 // blobfs's store over the same session, and Objects, the adapter over the
 // started object store, so no domain names the object-store library. Only
 // the composition root, the storage admin domain, and the status matcher,
-// which reads the library's errors, name it. Storage also runs the file
-// protocols every domain shares, staged for promotion to blobfs: Write,
-// blobfs's two-phase write with its abandon and its writer rule; Ensure,
-// its retry-safe form over blobfs's insert-or-find, which two writers of
-// one fixed id may share and which leaves a row holding the name under
-// another id alone; Retire and Purge, its two-phase delete; and
-// Serve, the read of an available file. A domain enters a protocol through
-// a callback run in the protocol's first transaction, so no domain concept
-// reaches here.
+// which reads the library's errors, name it. Objects is the object store
+// blobfs's protocols take, so a domain runs blobfs's two-phase write and
+// its retry-safe form (Store.Write, Store.Ensure) and its two-phase delete
+// (Store.Remove, Store.Purge) directly on Storage.FS with Storage.Objects,
+// entering each through a callback run in the protocol's first
+// transaction, so no domain concept reaches here. Storage keeps one
+// protocol of its own, Serve, the read of an available file in the web
+// SDK's terms.
 //
 // Storage.SweepWorker is the sweep worker. It runs blobfs's sweep in
 // passes while a pass reports more, which finishes the branch deletes the
 // domains mark and reclaims stale rows, stops between passes once the
-// reactor's drain begins, and it applies the service's
-// policy for a pass's refusals: logged at warn, never returned. The
-// architecture defines a Reactor as an entry point that calls a Domain
-// Service; the sweep worker calls none, so it is not one. The composition
-// root stages it as a reactor anyway, since the reactor is the process's
-// one runner for work that lasts the process lifetime. The pass loop is
-// kept apart from the logging policy and is staged for promotion to
-// blobfs beside Sweep. Each pass holds the process's quiesce gate,
-// declared here as SweepGate, shared; an admin verb that changes the
-// schema holds it exclusively, so no pass runs under one.
+// reactor's drain begins, and applies the service's policy for a pass's
+// refusals: logged at warn, never returned. The architecture defines a
+// Reactor as an entry point that calls a Domain Service; the sweep worker
+// calls none, so it is not one. The composition root stages it as a
+// reactor anyway, since the reactor is the process's one runner for work
+// that lasts the process lifetime. The pass loop is blobfs's
+// SweepUntilDone; the logging policy is the service's. Each pass holds the
+// process's quiesce gate, declared here as SweepGate, shared; an admin verb
+// that changes the schema holds it exclusively, so no pass runs under one.
 //
 // Domains and the admin service are peers over this package; nothing here
 // imports either.

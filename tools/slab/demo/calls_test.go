@@ -74,7 +74,7 @@ func listServer(t *testing.T, status int) (*httptest.Server, *[]string) {
 		lines = append(lines, r.Method+" "+r.URL.RequestURI())
 		w.Header().Set("Content-Type", web.JSONMediaType)
 		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(organization.Page{Items: []organization.Organization{{ID: "x", Code: "acme", Path: "/acme"}}, Page: 1, Size: 20, Total: 1})
+		_ = json.NewEncoder(w).Encode(web.NewPage([]organization.Organization{{ID: "x", Code: "acme", Path: "/acme"}}, web.Query{Page: 1, Size: 20}, web.Paging{Total: 1}))
 	}))
 	t.Cleanup(srv.Close)
 	return srv, &lines

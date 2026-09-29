@@ -55,18 +55,55 @@ func (o *Output) Style() style.Style {
 // something. A non-empty body that is not JSON is written as is, since a
 // passthrough command shows what the service sent rather than hiding it.
 func (o *Output) Response(status int, body []byte) {
-	st := o.Style()
 	body = bytes.TrimSpace(body)
 	if len(body) == 0 {
-		_, _ = fmt.Fprintf(o.stdout, "%s\n", st.Status(fmt.Sprintf("%d %s", status, http.StatusText(status))))
+		o.Status(status)
 		return
 	}
+	st := o.Style()
 	var pretty bytes.Buffer
 	if err := json.Indent(&pretty, body, "", "  "); err != nil {
 		_, _ = fmt.Fprintf(o.stdout, "%s\n", body)
 		return
 	}
 	_, _ = fmt.Fprintf(o.stdout, "%s\n", st.JSON(pretty.String()))
+}
+
+// Status writes a bodiless response to stdout: the status line, styled as
+// Response styles it, then each of lines as written. A command whose reply
+// is a status and a header or two, such as a 202 and its Location, says
+// what happened through it rather than printing the status line alone.
+func (o *Output) Status(status int, lines ...string) {
+	st := o.Style()
+	_, _ = fmt.Fprintf(o.stdout, "%s\n", st.Status(fmt.Sprintf("%d %s", status, http.StatusText(status))))
+	for _, line := range lines {
+		_, _ = fmt.Fprintln(o.stdout, line)
+	}
+}
+
+// objectHeaders are the headers an object response carries that Object
+// shows, in the order it shows them. Content-Disposition is the name a
+// document download is served under.
+var objectHeaders = []string{"Content-Type", "Content-Length", "Content-Disposition", "ETag", "Last-Modified", "Cache-Control", "X-Content-Type-Options"}
+
+// Object writes a proxied object's response to stdout: the status line, the
+// object headers it carries, and what became of the bytes, since a binary
+// body is never written to a terminal. saved is the file the bytes went to,
+// or empty when they were only counted.
+func (o *Output) Object(status int, header http.Header, n int, saved string) {
+	st := o.Style()
+	_, _ = fmt.Fprintf(o.stdout, "%s\n", st.Status(fmt.Sprintf("%d %s", status, http.StatusText(status))))
+	for _, name := range objectHeaders {
+		if v := header.Get(name); v != "" {
+			_, _ = fmt.Fprintf(o.stdout, "%s: %s\n", name, v)
+		}
+	}
+	switch {
+	case saved != "":
+		_, _ = fmt.Fprintf(o.stdout, "%d bytes written to %s\n", n, saved)
+	case n > 0:
+		_, _ = fmt.Fprintf(o.stdout, "%d bytes (--out saves them)\n", n)
+	}
 }
 
 // Expect returns nil when res carries status, and otherwise the error that

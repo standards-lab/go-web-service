@@ -197,9 +197,9 @@ func (f *fakeService) route(w http.ResponseWriter, r *http.Request) error {
 		writeJSON(w, http.StatusOK, map[string]string{"state": SeedState})
 	case r.Method == http.MethodGet && r.URL.Path == organization.Organizations:
 		return f.list(w, r)
-	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, organization.Organizations+"/path/"):
+	case r.Method == http.MethodGet && r.URL.Path == organization.Organizations+"/lookup":
 		for _, o := range f.rows {
-			if "/"+strings.TrimPrefix(r.URL.Path, organization.Organizations+"/path/") == f.pathOf(o) {
+			if r.URL.Query().Get("path") == f.pathOf(o) {
 				writeJSON(w, http.StatusOK, f.view(o))
 				return nil
 			}
@@ -286,7 +286,7 @@ func (f *fakeService) list(w http.ResponseWriter, r *http.Request) error {
 	}
 	start := min((q.Page-1)*q.Size, len(items))
 	end := min(start+q.Size, len(items))
-	writeJSON(w, http.StatusOK, organization.Page{Items: items[start:end], Page: q.Page, Size: q.Size, Total: len(f.rows)})
+	writeJSON(w, http.StatusOK, web.NewPage(items[start:end], q, web.Paging{Total: len(f.rows), More: end < len(items)}))
 	return nil
 }
 
@@ -555,7 +555,7 @@ func TestScenario_TargetsThreeDifferentRowsEachAtItsOwnVersion(t *testing.T) {
 		"POST /admin/database/state",
 		"GET /api/organizations",
 		"GET /api/organizations/" + fakeID(1),
-		"GET /api/organizations/path/acme/engineering/platform",
+		"GET /api/organizations/lookup?path=/acme/engineering/platform",
 		"POST /api/organizations",
 		"PUT /api/organizations/" + finance + ` If-Match: "1"`,
 		"POST /api/organizations/" + logistics + `/transfer If-Match: "1"`,

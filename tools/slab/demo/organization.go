@@ -140,7 +140,7 @@ func (s *orgState) find(ctx context.Context, r *scenario.Reporter) error {
 }
 
 func (s *orgState) findByPath(ctx context.Context, r *scenario.Reporter) error {
-	path := organization.Organizations + "/path/acme/engineering/platform"
+	path := organization.Organizations + "/lookup?path=/acme/engineering/platform"
 	r.Request(http.MethodGet, path, nil, nil)
 	res, err := s.client.Get(ctx, path)
 	if err != nil {

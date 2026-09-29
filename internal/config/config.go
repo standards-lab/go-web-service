@@ -9,6 +9,7 @@ import (
 	"github.com/standards-lab/go-core/logging"
 	"github.com/standards-lab/go-database"
 	"github.com/standards-lab/go-observability"
+	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/go-web-sdk/middleware/rate-limit"
 )
@@ -20,16 +21,18 @@ const envPrefix = "app"
 const defaultShutdownTimeout = 10 * time.Second
 
 // Config is the service's root configuration: the library capability blocks
-// plus the service-owned reads policy, the admin switches, and the shutdown
-// timeout.
+// (the object store among them) plus the service-owned reads policy, the
+// admin switches, the sweep's schedule, and the shutdown timeout.
 type Config struct {
 	Log             logging.Config       `json:"log"`
 	Server          web.Config           `json:"server"`
 	Database        database.Config      `json:"database"`
+	Storage         storage.Config       `json:"storage"`
 	Observability   observability.Config `json:"observability"`
 	RateLimit       ratelimit.Config     `json:"rate_limit"`
 	Reads           ReadsConfig          `json:"reads"`
 	Admin           AdminConfig          `json:"admin"`
+	Sweep           SweepConfig          `json:"sweep"`
 	ShutdownTimeout libconfig.Duration   `json:"shutdown_timeout"`
 }
 
@@ -45,10 +48,12 @@ func (c *Config) Merge(src *Config) {
 	c.Log.Merge(&src.Log)
 	c.Server.Merge(&src.Server)
 	c.Database.Merge(&src.Database)
+	c.Storage.Merge(&src.Storage)
 	c.Observability.Merge(&src.Observability)
 	c.RateLimit.Merge(&src.RateLimit)
 	c.Reads.Merge(&src.Reads)
 	c.Admin.Merge(&src.Admin)
+	c.Sweep.Merge(&src.Sweep)
 }
 
 // Finalize applies the root default, reads the root's own environment
@@ -82,6 +87,9 @@ func (c *Config) Finalize(envPrefix string) error {
 	if err := c.Database.Finalize(envPrefix); err != nil {
 		return fmt.Errorf("database: %w", err)
 	}
+	if err := c.Storage.Finalize(envPrefix); err != nil {
+		return fmt.Errorf("storage: %w", err)
+	}
 	if err := c.Observability.Finalize(envPrefix); err != nil {
 		return fmt.Errorf("observability: %w", err)
 	}
@@ -93,6 +101,9 @@ func (c *Config) Finalize(envPrefix string) error {
 	}
 	if err := c.Admin.Finalize(envPrefix); err != nil {
 		return fmt.Errorf("admin: %w", err)
+	}
+	if err := c.Sweep.Finalize(envPrefix); err != nil {
+		return fmt.Errorf("sweep: %w", err)
 	}
 	return nil
 }

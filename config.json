@@ -18,6 +18,10 @@
       "sslmode": "disable"
     }
   },
+  "storage": {
+    "container": "go-web-service",
+    "max_object_size": 10485760
+  },
   "observability": {
     "endpoint": "127.0.0.1:4317"
   },
@@ -27,6 +31,11 @@
   },
   "admin": {
     "seed": ""
+  },
+  "sweep": {
+    "interval": "30s",
+    "batch": 100,
+    "stale_age": "1h"
   },
   "shutdown_timeout": "10s"
 }

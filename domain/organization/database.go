@@ -2,9 +2,14 @@ package organization
 
 import (
 	"context"
+	"database/sql"
 	"embed"
+	"encoding/json"
+	"errors"
 	"fmt"
 
+	"github.com/standards-lab/blobfs"
+	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/query"
 
@@ -20,34 +25,48 @@ var files embed.FS
 // the route share one name. The tree lock is the data package's, taken by
 // its registered name. The entities' tags are the scan and binding
 // contract, so no scan function or Args literal is written for an entity
-// here. It is the package's sole importer of the query library.
+// here. It is the package's sole importer of the query library. The image
+// statements are steps the logo's protocols in storage.go sequence around
+// blobfs's, so their methods take the session the protocol hands them.
 type store struct {
-	db            *data.Database
-	stmts         *query.Statements
-	view          query.Projection[Organization]
-	createRows    query.Rows[Identity]
-	inSubtree     query.Rows[int64]
-	editGuard     query.Guard
-	transferGuard query.Guard
-	deleteGuard   query.Guard
+	db             *data.Database
+	storage        *data.Storage
+	stmts          *query.Statements
+	view           query.Projection[Organization]
+	createRows     query.Rows[Identity]
+	inSubtree      query.Rows[int64]
+	editGuard      query.Guard
+	transferGuard  query.Guard
+	deleteGuard    query.Guard
+	activeLogoRows query.Rows[blobfs.File]
+	attachImage    query.Statement
+	detachImage    query.Statement
+	seedRows       query.Rows[string]
+	findSeededRows query.Rows[string]
 }
 
 // newStore compiles the statements against the service's catalog, registers
 // the inventory under the domain's name, and binds the handles. A compile
 // failure is a wiring defect and panics; no I/O happens here.
-func newStore(db *data.Database) *store {
+func newStore(db *data.Database, st *data.Storage) *store {
 	stmts := db.Catalog.MustCompile(files, "statements", db.Dialect())
 	db.Register("organization", stmts)
 	check := stmts.Statement("version")
 	return &store{
-		db:            db,
-		stmts:         stmts,
-		view:          stmts.Statement("organization_view").Project(query.Scanner[Organization]()),
-		createRows:    stmts.Statement("create").Scan(query.Scanner[Identity]()),
-		inSubtree:     stmts.Statement("in_subtree").Scan(query.Scalar[int64]),
-		editGuard:     stmts.Statement("edit").Guarded(check, "version"),
-		transferGuard: stmts.Statement("transfer").Guarded(check, "version"),
-		deleteGuard:   stmts.Statement("delete").Guarded(check, "version"),
+		db:             db,
+		storage:        st,
+		stmts:          stmts,
+		view:           stmts.Statement("organization_view").Project(query.Scanner[Organization]()),
+		createRows:     stmts.Statement("create").Scan(query.Scanner[Identity]()),
+		inSubtree:      stmts.Statement("in_subtree").Scan(query.Scalar[int64]),
+		editGuard:      stmts.Statement("edit").Guarded(check, "version"),
+		transferGuard:  stmts.Statement("transfer").Guarded(check, "version"),
+		deleteGuard:    stmts.Statement("delete").Guarded(check, "version"),
+		activeLogoRows: stmts.Statement("active_logo").Scan(query.Scanner[blobfs.File]()),
+		attachImage:    stmts.Statement("attach_image"),
+		detachImage:    stmts.Statement("detach_image"),
+		seedRows:       stmts.Statement("seed").Scan(query.Scalar[string]),
+		findSeededRows: stmts.Statement("find_seeded").Scan(query.Scalar[string]),
 	}
 }
 
@@ -57,8 +76,9 @@ func (s *store) Verify(ctx context.Context) error {
 	return query.Verify(ctx, s.db, s.stmts, s.view)
 }
 
-func (s *store) list(ctx context.Context, d query.Directives) ([]Organization, int, error) {
-	return s.view.List(ctx, s.db, d)
+func (s *store) list(ctx context.Context, q web.Query) ([]Organization, web.Paging, error) {
+	c, err := data.Read(ctx, s.db, s.view, q)
+	return c.Items, data.Paging(c), err
 }
 
 func (s *store) find(ctx context.Context, field, value string) (Organization, error) {
@@ -100,4 +120,88 @@ func (s *store) transfer(ctx context.Context, id string, version int64, t Transf
 func (s *store) delete(ctx context.Context, id string, version int64) error {
 	_, err := s.deleteGuard.Run(ctx, s.db, version, query.Args{"id": id})
 	return err
+}
+
+// activeLogo reads the file the organization's active image binds,
+// whatever its status, or sql.ErrNoRows.
+func (s *store) activeLogo(ctx context.Context, sess sqlate.Session, organizationID string) (blobfs.File, error) {
+	return s.activeLogoRows.One(ctx, sess, query.Args{"organization_id": organizationID})
+}
+
+// attach binds the file to the organization as its active image; the
+// image it replaces must be removed first in the same transaction.
+func (s *store) attach(ctx context.Context, tx *sqlate.Tx, organizationID, fileID string) error {
+	_, err := s.attachImage.Exec(ctx, tx, query.Args{"organization_id": organizationID, "file_id": fileID})
+	return err
+}
+
+// detach removes the image binding the file.
+func (s *store) detach(ctx context.Context, tx *sqlate.Tx, fileID string) error {
+	_, err := s.detachImage.Exec(ctx, tx, query.Args{"file_id": fileID})
+	return err
+}
+
+// seed is the domain's seed contribution to the data package's named states:
+// the organizations a state carries under "organizations", seeded by the
+// store's own statements in the seed's transaction.
+type seed struct{ store *store }
+
+var _ data.Seed = seed{}
+
+// Key names the organizations in a state file and in the seed's counts.
+func (seed) Key() string { return "organizations" }
+
+// Verify prepares the domain's statements, the seed's among them.
+func (s seed) Verify(ctx context.Context) error { return s.store.Verify(ctx) }
+
+// Apply inserts the tree in file order, each parent before its children,
+// resolving the file's parent codes to ids as it goes, and returns how
+// many rows it inserted.
+func (s seed) Apply(ctx context.Context, tx *sqlate.Tx, raw json.RawMessage) (int, error) {
+	rows, err := data.SeedRows[seedRow](raw)
+	if err != nil {
+		return 0, fmt.Errorf("seed organizations: %w", err)
+	}
+	ids := make(map[string]string, len(rows))
+	inserted := 0
+	for _, o := range rows {
+		var parent any
+		if o.Parent != "" {
+			id, ok := ids[o.Parent]
+			if !ok {
+				return inserted, fmt.Errorf("seed organization %s: parent %q not seeded before it", o.Code, o.Parent)
+			}
+			parent = id
+		}
+		if _, dup := ids[o.Code]; dup {
+			return inserted, fmt.Errorf("seed organization %s: code reused within the file", o.Code)
+		}
+		id, ok, err := s.store.seedOne(ctx, tx, parent, o)
+		if err != nil {
+			return inserted, fmt.Errorf("seed organization %s: %w", o.Code, err)
+		}
+		ids[o.Code] = id
+		if ok {
+			inserted++
+		}
+	}
+	return inserted, nil
+}
+
+// seedOne seeds one organization or finds the one already there, returning
+// its id and whether this call inserted it. The seed statement returns no
+// row on conflict; sql.ErrNoRows is that signal.
+func (s *store) seedOne(ctx context.Context, tx *sqlate.Tx, parent any, o seedRow) (id string, inserted bool, err error) {
+	id, err = s.seedRows.One(ctx, tx, query.Args{"parent": parent, "code": o.Code, "name": o.Name})
+	if err == nil {
+		return id, true, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", false, err
+	}
+	id, err = s.findSeededRows.One(ctx, tx, query.Args{"parent": parent, "code": o.Code})
+	if errors.Is(err, sql.ErrNoRows) {
+		err = errors.New("neither inserted nor found")
+	}
+	return id, false, err
 }

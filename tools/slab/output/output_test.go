@@ -57,6 +57,35 @@ func TestResponse_WritesTheStatusLineForAnEmptyBody(t *testing.T) {
 	}
 }
 
+func TestStatus_WritesTheStatusLineThenEachLine(t *testing.T) {
+	o, out := plain()
+	o.Status(http.StatusAccepted, "Location: /x/1", "being deleted")
+	if want := "202 Accepted\nLocation: /x/1\nbeing deleted\n"; out.String() != want {
+		t.Errorf("Status wrote %q, want %q", out.String(), want)
+	}
+}
+
+// Object shows the headers it knows in its own order, whatever order the
+// response carried them in, and skips the ones the response lacks and any
+// it does not know.
+func TestObject_WritesTheStatusTheKnownHeadersAndTheSavedFile(t *testing.T) {
+	o, out := plain()
+	header := http.Header{}
+	header.Set("ETag", `"e1"`)
+	header.Set("Content-Disposition", `attachment; filename="a.txt"`)
+	header.Set("Content-Type", "text/plain")
+	header.Set("X-Other", "unshown")
+	o.Object(http.StatusOK, header, 3, "/tmp/a.txt")
+	want := "200 OK\n" +
+		"Content-Type: text/plain\n" +
+		"Content-Disposition: attachment; filename=\"a.txt\"\n" +
+		"ETag: \"e1\"\n" +
+		"3 bytes written to /tmp/a.txt\n"
+	if out.String() != want {
+		t.Errorf("Object wrote:\n%s\nwant:\n%s", out.String(), want)
+	}
+}
+
 func TestResponse_WritesANonJSONBodyAsIs(t *testing.T) {
 	o, out := plain()
 	o.Response(http.StatusOK, []byte("plain text"))

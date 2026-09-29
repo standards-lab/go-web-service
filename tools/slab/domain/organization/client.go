@@ -42,11 +42,31 @@ func (c *Client) Find(ctx context.Context, id string) (*httpx.Response, error) {
 	return c.http.Get(ctx, Organizations+"/"+url.PathEscape(id))
 }
 
-// FindByPath sends GET Organizations/path/{path}. The service reads the
-// remainder after /path/ and prefixes a slash to make the hierarchy path, so
-// a leading slash on path is dropped here rather than doubled.
+// FindByPath sends GET Organizations/lookup?path={path}, the hierarchy path
+// with its leading slash, which is added here when path omits it.
 func (c *Client) FindByPath(ctx context.Context, path string) (*httpx.Response, error) {
-	return c.http.Get(ctx, Organizations+"/path/"+strings.TrimLeft(path, "/"))
+	return c.http.Get(ctx, Organizations+"/lookup?"+httpx.RawQuery([2]string{"path", "/" + strings.TrimLeft(path, "/")}))
+}
+
+// PutLogo sends PUT Organizations/{id}/logo with body as the raw request
+// body under contentType.
+func (c *Client) PutLogo(ctx context.Context, id, contentType string, body []byte) (*httpx.Response, error) {
+	return c.http.Put(ctx, Organizations+"/"+url.PathEscape(id)+"/logo", body, httpx.Header{Name: "Content-Type", Value: contentType})
+}
+
+// Logo sends GET Organizations/{id}/logo, with If-None-Match when etag is
+// set.
+func (c *Client) Logo(ctx context.Context, id, etag string) (*httpx.Response, error) {
+	var headers []httpx.Header
+	if etag != "" {
+		headers = append(headers, httpx.Header{Name: "If-None-Match", Value: etag})
+	}
+	return c.http.Get(ctx, Organizations+"/"+url.PathEscape(id)+"/logo", headers...)
+}
+
+// DeleteLogo sends DELETE Organizations/{id}/logo.
+func (c *Client) DeleteLogo(ctx context.Context, id string) (*httpx.Response, error) {
+	return c.http.Delete(ctx, Organizations+"/"+url.PathEscape(id)+"/logo")
 }
 
 // Create sends POST Organizations with body as the request body, verbatim.

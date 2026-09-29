@@ -11,6 +11,7 @@ import (
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate/sqltest"
 
+	"github.com/standards-lab/go-web-service/data"
 	"github.com/standards-lab/go-web-service/domain/organization"
 )
 
@@ -65,6 +66,8 @@ func TestRoutes_RejectBeforeAnyOperation(t *testing.T) {
 		"list: malformed page":       {"GET", "/organizations?page=x", "", "", 400, "query page"},
 		"list: oversized page":       {"GET", "/organizations?size=1000", "", "", 400, "query size"},
 		"find: malformed id":         {"GET", "/organizations/not-a-uuid", "", "", 400, "must be a UUID"},
+		"lookup: no path":            {"GET", "/organizations/lookup", "", "", 400, "requires a path"},
+		"logo: malformed id":         {"GET", "/organizations/not-a-uuid/logo", "", "", 400, "must be a UUID"},
 		"create: malformed body":     {"POST", "/organizations", "", "{", 400, "body:"},
 		"create: unknown field":      {"POST", "/organizations", "", `{"codex":"a"}`, 400, "codex"},
 		"create: empty body":         {"POST", "/organizations", "", " ", 400, "empty body"},
@@ -133,5 +136,90 @@ func TestCreate_AnswersCreatedWithLocation(t *testing.T) {
 	rec := send(t, module(t, identity(validID, 1)), "POST", "/organizations", "", `{"code":"acme","name":"Acme"}`)
 	if rec.Code != 201 || rec.Header().Get("Location") != "/organizations/"+validID {
 		t.Fatalf("status %d, Location %q, body %s", rec.Code, rec.Header().Get("Location"), rec.Body)
+	}
+}
+
+// upload sends a raw logo body with the given Content-Type, none when
+// empty, and declared length; a length of -1 is a chunked body.
+func upload(t *testing.T, h http.Handler, path, contentType, body string, length int64) *httptest.ResponseRecorder {
+	t.Helper()
+	r := httptest.NewRequest("PUT", path, strings.NewReader(body))
+	if contentType != "" {
+		r.Header.Set("Content-Type", contentType)
+	}
+	r.ContentLength = length
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	return rec
+}
+
+// A logo the layer would refuse is refused on its headers, before any
+// statement runs or byte is stored: the module has nothing scripted.
+func TestPutLogo_RefusesBeforeAnyIO(t *testing.T) {
+	path := "/organizations/" + validID + "/logo"
+	cases := map[string]struct {
+		path, contentType string
+		length            int64
+		status            int
+		detail            string
+	}{
+		"malformed id":        {"/organizations/not-a-uuid/logo", "image/png", 3, 400, "must be a UUID"},
+		"missing type":        {path, "", 3, 415, "Content-Type"},
+		"unparsable type":     {path, "image/", 3, 415, "Content-Type"},
+		"svg is not accepted": {path, "image/svg+xml", 3, 415, "image/svg+xml"},
+		"text is not a logo":  {path, "text/plain", 3, 415, "text/plain"},
+		"chunked body":        {path, "image/png", -1, 411, "Content-Length"},
+		"over 1 MiB":          {path, "image/png", 1<<20 + 1, 413, "exceed"},
+	}
+	h := module(t)
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			body := problem(t, upload(t, h, c.path, c.contentType, "png", c.length), c.status)
+			if detail, _ := body["detail"].(string); !strings.Contains(detail, c.detail) {
+				t.Errorf("detail = %q, want it to contain %q", detail, c.detail)
+			}
+		})
+	}
+}
+
+func TestLogo_WithoutALogoIs404(t *testing.T) {
+	h := module(t, fileRows()) // the active logo read finds no row
+	problem(t, send(t, h, "GET", "/organizations/"+validID+"/logo", "", ""), 404)
+}
+
+// The lookup reads the path from its query, with or without the leading
+// slash, as the path field of the read model.
+func TestLookup_ReadsThePathFromTheQuery(t *testing.T) {
+	for _, path := range []string{"/acme", "acme", "%2Facme"} {
+		h := module(t, row())
+		if rec := send(t, h, "GET", "/organizations/lookup?path="+path, "", ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"path":"/acme"`) {
+			t.Errorf("lookup ?path=%s = %d %s", path, rec.Code, rec.Body)
+		}
+	}
+}
+
+func TestDeleteLogo_WithoutALogoIs404(t *testing.T) {
+	h := module(t, fileRows()) // the active logo read finds no row
+	problem(t, send(t, h, "DELETE", "/organizations/"+validID+"/logo", "", ""), 404)
+}
+
+// The layer's own matcher reports the cycle as a conflict with
+// data.DetailConflict, the detail data.Status gives every conflict without
+// a text of its own: one conflict, a transfer under the organization's own
+// subtree, proves the wiring, with none of the error's own text. The
+// library's conflicts reach the same writer through data.Status, whose own
+// test holds every detail; the integration suite proves each end to end.
+// The instance names the request path by design, so the leak checks look
+// for what only the error names.
+func TestRoutes_AConflictCarriesItsCuratedDetail(t *testing.T) {
+	cycle := []sqltest.Response{{Affected: 0}, {Columns: []string{"count"}, Rows: [][]driver.Value{{int64(1)}}}}
+	rec := send(t, module(t, cycle...), "POST", "/organizations/"+validID+"/transfer", `"1"`, `{"parent_id":"`+parentID+`"}`)
+	if body := problem(t, rec, 409); body["detail"] != data.DetailConflict {
+		t.Errorf("detail = %v, want %q", body["detail"], data.DetailConflict)
+	}
+	for _, leak := range []string{"cycle", parentID} {
+		if strings.Contains(rec.Body.String(), leak) {
+			t.Errorf("body %s carries %q", rec.Body, leak)
+		}
 	}
 }

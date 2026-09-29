@@ -92,6 +92,28 @@ func TestReporter_ResponsePrintsStatusBodyThenChosenHeaders(t *testing.T) {
 	}
 }
 
+func TestReporter_ResponsePrintsAnObjectsValidators(t *testing.T) {
+	var out bytes.Buffer
+	r := NewReporter(&out, false)
+	r.Response(&httpx.Response{
+		Status: http.StatusNotModified,
+		Header: http.Header{
+			"Etag":          {`"0x1"`},
+			"Last-Modified": {"Mon, 28 Sep 2026 16:00:00 GMT"},
+			"Cache-Control": {"no-cache"},
+		},
+	})
+	want := "\n" +
+		"  HTTP 304 Not Modified\n" +
+		"\n" +
+		"    ETag: \"0x1\"\n" +
+		"    Last-Modified: Mon, 28 Sep 2026 16:00:00 GMT\n" +
+		"\n"
+	if out.String() != want {
+		t.Errorf("Response printed:\n%s\nwant:\n%s", out.String(), want)
+	}
+}
+
 func TestReporter_ResponseWithNoBodyOrHeadersPrintsTheStatusAlone(t *testing.T) {
 	var out bytes.Buffer
 	r := NewReporter(&out, false)

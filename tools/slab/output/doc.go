@@ -1,8 +1,8 @@
 // Package output renders the result of a direct command, one that sends a
-// single request and prints what came back with no narration: the org and
-// admin database command families. Both families render identically, so the
-// rendering belongs to neither; it lives here, beside httpx, for both to
-// import.
+// single request and prints what came back with no narration: the org,
+// docs, and admin command families. The families render identically, so the
+// rendering belongs to none of them; it lives here, beside httpx, for each
+// to import.
 //
 // Output is the one value every output concern is configured on: the stream
 // a success goes to, the stream a failure goes to, and whether either is
@@ -19,7 +19,9 @@
 // when there is one, or the status line (204 No Content) when there is not,
 // so a command is never silent — through the same style package the demo
 // scenarios color their own output with, so a direct command and a narrated
-// one render alike. Error writes a failure to stderr: the members of a
+// one render alike. Status writes that status line followed by lines the
+// command supplies, for a bodiless reply with more to say, such as a 202 and
+// its Location. Error writes a failure to stderr: the members of a
 // problem document when the error is or wraps a web.Problem, or the error's
 // message otherwise. Expect turns a response with the wrong status into that
 // error, decoding the RFC 9457 problem document the service answers with.

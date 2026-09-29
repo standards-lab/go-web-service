@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"maps"
 	"net/http"
 	"strings"
 	"testing"
@@ -19,16 +20,6 @@ type diagnostics struct {
 	ServerVersion string             `json:"server_version"`
 	Pool          struct{ Open int } `json:"pool"`
 	Namespaces    []string           `json:"namespaces"`
-}
-
-type schemaStatus struct {
-	integration.SchemaStatus
-	Migrations []struct {
-		Version       int    `json:"version"`
-		Name          string `json:"name"`
-		Transactional bool   `json:"transactional"`
-		Applied       bool   `json:"applied"`
-	} `json:"migrations"`
 }
 
 type catalog struct {
@@ -60,21 +51,29 @@ func TestAdmin(t *testing.T) {
 	c := s.Client()
 	integration.Reset(t, c, integration.Default)
 
-	schema := func(t *testing.T, res *webtest.Response) schemaStatus {
+	schema := func(t *testing.T, res *webtest.Response) integration.SchemaStatus {
 		t.Helper()
-		return webtest.Decode[schemaStatus](t, res, http.StatusOK)
+		return webtest.Decode[integration.SchemaStatus](t, res, http.StatusOK)
 	}
-	assertCurrentSchema := func(t *testing.T, st schemaStatus) {
+	// head is the app set's latest version, the one a current schema is at.
+	head := integration.Schema(t, c).Set(integration.AppSet).Latest
+	assertCurrentSchema := func(t *testing.T, st integration.SchemaStatus) {
 		t.Helper()
-		if st.Version != 1 || st.Dirty || len(st.Pending) != 0 || !st.Ready {
-			t.Errorf("schema = %+v, want version 1, clean, nothing pending, ready", st.SchemaStatus)
+		app := st.Set(integration.AppSet)
+		if app.Version != head || app.Dirty || len(app.Pending) != 0 || !st.Ready {
+			t.Errorf("schema = %+v, want the app set at version %d, clean, nothing pending, ready", st, head)
 		}
 	}
-	assertEmptySchema := func(t *testing.T, st schemaStatus) {
+	assertEmptySchema := func(t *testing.T, st integration.SchemaStatus) {
 		t.Helper()
-		if st.Version != 0 || st.Dirty || len(st.Pending) != 1 || st.Pending[0] != 1 || st.Ready {
-			t.Errorf("schema = %+v, want version 0 with 1 pending, not ready", st.SchemaStatus)
+		app := st.Set(integration.AppSet)
+		if app.Version != 0 || app.Dirty || len(app.Pending) != head || app.Pending[0] != 1 || st.Ready {
+			t.Errorf("schema = %+v, want the app set at version 0 with all %d pending, not ready", st, head)
 		}
+	}
+	appSet := func(body map[string]any) map[string]any {
+		body["set"] = integration.AppSet
+		return body
 	}
 
 	t.Run("diagnostics", func(t *testing.T) {
@@ -82,7 +81,7 @@ func TestAdmin(t *testing.T) {
 		if d.Dialect != "postgres" || d.Ping <= 0 || !strings.HasPrefix(d.ServerVersion, "PostgreSQL 18") || d.Pool.Open < 1 {
 			t.Errorf("diagnostics = %+v", d)
 		}
-		if !equal(d.Namespaces, []string{"app", "sql"}) {
+		if !equal(d.Namespaces, []string{"app", "blobfs", "sql"}) {
 			t.Errorf("namespaces = %v", d.Namespaces)
 		}
 	})
@@ -90,14 +89,23 @@ func TestAdmin(t *testing.T) {
 	t.Run("schema", func(t *testing.T) {
 		st := schema(t, c.Get(t, admin+"/schema"))
 		assertCurrentSchema(t, st)
-		if len(st.Migrations) != 1 || st.Migrations[0].Version != 1 || st.Migrations[0].Name != "organization" || !st.Migrations[0].Applied || !st.Migrations[0].Transactional {
-			t.Errorf("migrations = %+v", st.Migrations)
+		// blobfs's set is declared beneath the service's own, and current
+		// through its 0003, the directory status the document layer reads.
+		if len(st.Sets) != 2 || st.Sets[0].Name != "blobfs" || st.Sets[1].Name != integration.AppSet {
+			t.Errorf("sets = %+v, want blobfs then app", st.Sets)
+		}
+		if bf := st.Set("blobfs"); bf.Version != bf.Latest || bf.Latest < 3 || bf.Dirty {
+			t.Errorf("blobfs set = %+v, want current at its head", bf)
+		}
+		ms := st.Set(integration.AppSet).Migrations
+		if len(ms) != head || ms[0].Version != 1 || ms[0].Name != "organization" || !ms[0].Applied || !ms[0].Transactional {
+			t.Errorf("migrations = %+v", ms)
 		}
 	})
 
 	t.Run("patterns", func(t *testing.T) {
 		cat := webtest.Decode[catalog](t, c.Get(t, admin+"/patterns"), http.StatusOK)
-		if !equal(cat.Namespaces, []string{"app", "sql"}) {
+		if !equal(cat.Namespaces, []string{"app", "blobfs", "sql"}) {
 			t.Errorf("namespaces = %v", cat.Namespaces)
 		}
 		found := false
@@ -120,7 +128,7 @@ func TestAdmin(t *testing.T) {
 		for i, d := range inv.Domains {
 			names[i] = d.Name
 		}
-		if !equal(names, []string{"data", "organization"}) {
+		if !equal(names, []string{"data", "document", "organization"}) {
 			t.Fatalf("domains = %v", names)
 		}
 		byName := map[string]map[string]struct {
@@ -158,39 +166,51 @@ func TestAdmin(t *testing.T) {
 	})
 
 	t.Run("down, verify pending, up", func(t *testing.T) {
-		assertEmptySchema(t, schema(t, c.Post(t, admin+"/schema/down", nil)))
+		// Down without steps reverts one; the rest reverts the set.
+		if st := schema(t, c.Post(t, admin+"/schema/down", appSet(map[string]any{}))); st.Set(integration.AppSet).Version != head-1 {
+			t.Errorf("down one = %+v, want version %d", st, head-1)
+		}
+		if head > 1 {
+			assertEmptySchema(t, schema(t, c.Post(t, admin+"/schema/down", appSet(map[string]any{"steps": head - 1}))))
+		}
 		if p := c.Post(t, admin+"/schema/verify", nil).Problem(t, http.StatusConflict); !strings.Contains(p.Detail, "pending") {
 			t.Errorf("verify on a pending schema: detail = %q", p.Detail)
 		}
-		assertEmptySchema(t, schema(t, c.Post(t, admin+"/schema/down", nil))) // nothing applied: a no-op
+		assertEmptySchema(t, schema(t, c.Post(t, admin+"/schema/down", appSet(map[string]any{})))) // nothing applied: a no-op
 		assertCurrentSchema(t, schema(t, c.Post(t, admin+"/schema/up", nil)))
 	})
 
 	t.Run("steps", func(t *testing.T) {
-		_ = c.Post(t, admin+"/schema/steps", map[string]int{"steps": 0}).Problem(t, http.StatusBadRequest)
-		_ = c.Post(t, admin+"/schema/down", map[string]int{"steps": 0}).Problem(t, http.StatusBadRequest)
-		_ = c.Post(t, admin+"/schema/steps", map[string]int{"step": 1}).Problem(t, http.StatusBadRequest) // unknown field
-		assertEmptySchema(t, schema(t, c.Post(t, admin+"/schema/steps", map[string]int{"steps": -1})))
-		assertCurrentSchema(t, schema(t, c.Post(t, admin+"/schema/steps", map[string]int{"steps": 1})))
+		_ = c.Post(t, admin+"/schema/steps", appSet(map[string]any{"steps": 0})).Problem(t, http.StatusBadRequest)
+		_ = c.Post(t, admin+"/schema/down", appSet(map[string]any{"steps": -1})).Problem(t, http.StatusBadRequest)
+		_ = c.Post(t, admin+"/schema/down", nil).Problem(t, http.StatusBadRequest)                                // the set is required
+		_ = c.Post(t, admin+"/schema/steps", appSet(map[string]any{"step": 1})).Problem(t, http.StatusBadRequest) // unknown field
+		if p := c.Post(t, admin+"/schema/steps", map[string]any{"set": "nope", "steps": 1}).Problem(t, http.StatusBadRequest); !strings.Contains(p.Detail, "nope") {
+			t.Errorf("an undeclared set: detail = %q, want it named", p.Detail)
+		}
+		assertEmptySchema(t, schema(t, c.Post(t, admin+"/schema/steps", appSet(map[string]any{"steps": -head}))))
+		assertCurrentSchema(t, schema(t, c.Post(t, admin+"/schema/steps", appSet(map[string]any{"steps": head}))))
 	})
 
 	t.Run("force", func(t *testing.T) {
-		_ = c.Post(t, admin+"/schema/force", map[string]int{"version": -1}).Problem(t, http.StatusBadRequest)
-		_ = c.Post(t, admin+"/schema/force", map[string]int{"version": 7}).Problem(t, http.StatusBadRequest) // outside the set
+		_ = c.Post(t, admin+"/schema/force", appSet(map[string]any{"version": -1})).Problem(t, http.StatusBadRequest)
+		_ = c.Post(t, admin+"/schema/force", appSet(map[string]any{"version": head + 1})).Problem(t, http.StatusBadRequest) // outside the set
+		_ = c.Post(t, admin+"/schema/force", map[string]any{"version": 1}).Problem(t, http.StatusBadRequest)                // the set is required
 		// Force sets the history without touching the schema: to 0 the set
 		// reads as pending though the table stands; back to 1 it is current.
-		assertEmptySchema(t, schema(t, c.Post(t, admin+"/schema/force", map[string]int{"version": 0})))
-		assertCurrentSchema(t, schema(t, c.Post(t, admin+"/schema/force", map[string]int{"version": 1})))
+		assertEmptySchema(t, schema(t, c.Post(t, admin+"/schema/force", appSet(map[string]any{"version": 0}))))
+		assertCurrentSchema(t, schema(t, c.Post(t, admin+"/schema/force", appSet(map[string]any{"version": head}))))
 	})
 
 	t.Run("seed", func(t *testing.T) {
 		// The schema cases above recreated the table, so it is empty here.
 		integration.Revert(t, c)
 		schema(t, c.Post(t, admin+"/schema/up", nil))
-		if n := integration.Seed(t, c, ""); n["organizations"] != seededTotal {
-			t.Errorf("seed on an empty table inserted %v, want %d", n, seededTotal)
+		// The organizations' rows, then the stored files that name them.
+		if n := integration.Seed(t, c, ""); !maps.Equal(n, seededCounts) {
+			t.Errorf("seed on an empty table inserted %v, want %v", n, seededCounts)
 		}
-		if n := integration.Seed(t, c, ""); n["organizations"] != 0 {
+		if n := integration.Seed(t, c, ""); n["organizations"] != 0 || n["logos"] != 0 || n["documents"] != 0 {
 			t.Errorf("seed on a seeded table inserted %v, want zero", n)
 		}
 	})
@@ -204,7 +224,15 @@ func TestAdmin(t *testing.T) {
 	t.Run("state", func(t *testing.T) {
 		total := func(t *testing.T) int {
 			t.Helper()
-			return webtest.Decode[page](t, c.Get(t, organizations), http.StatusOK).Total
+			return webtest.Decode[page](t, c.Get(t, organizations), http.StatusOK).total()
+		}
+		// A reset without its confirmation is refused before it touches the
+		// schema.
+		if p := c.Post(t, admin+"/state", map[string]string{"state": "empty"}).Problem(t, http.StatusBadRequest); !strings.Contains(p.Detail, `"confirm": true`) {
+			t.Errorf("unconfirmed reset: detail = %q", p.Detail)
+		}
+		if total(t) != seededTotal {
+			t.Errorf("an unconfirmed reset changed the data: total %d", total(t))
 		}
 		// From the seeded tree to empty: the schema is rebuilt and current,
 		// the set inserted nothing, and the table is empty.
@@ -219,12 +247,16 @@ func TestAdmin(t *testing.T) {
 		}
 		// Back to default from the seeded tree: rebuilt and seeded again.
 		tr = integration.Reset(t, c, integration.Default)
-		if tr.State != "default" || tr.Seeded["organizations"] != seededTotal || total(t) != seededTotal {
+		if tr.State != "default" || !maps.Equal(tr.Seeded, seededCounts) || total(t) != seededTotal {
 			t.Errorf("reset to default = %+v, total %d", tr, total(t))
 		}
 		// An undeclared name is a 400 that names it, on both routes.
 		for _, path := range []string{admin + "/state", admin + "/seed"} {
-			if p := c.Post(t, path, map[string]string{"state": "nope"}).Problem(t, http.StatusBadRequest); !strings.Contains(p.Detail, `unknown state: "nope"`) {
+			body := map[string]any{"state": "nope"}
+			if path == admin+"/state" {
+				body["confirm"] = true
+			}
+			if p := c.Post(t, path, body).Problem(t, http.StatusBadRequest); !strings.Contains(p.Detail, `unknown state: "nope"`) {
 				t.Errorf("%s nope: detail = %q", path, p.Detail)
 			}
 		}

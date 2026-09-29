@@ -11,42 +11,67 @@ import (
 	"github.com/standards-lab/go-web-service/integration"
 )
 
-// The schema helpers walk the admin mount's verbs: Revert steps down until
-// the version is zero.
-func TestState_RevertWalksTheSchemaDown(t *testing.T) {
-	version := 2
+// The schema helpers walk the admin mount's verbs: Revert reverts each set
+// by name, the last declared first, down to version zero.
+func TestState_RevertWalksTheSetsDownLastFirst(t *testing.T) {
+	versions := map[string]int{"lib": 2, "app": 1}
+	var order []string
+	status := func() map[string]any {
+		return map[string]any{
+			"ready": versions["lib"] == 2 && versions["app"] == 1,
+			"sets": []map[string]any{
+				{"name": "lib", "version": versions["lib"]},
+				{"name": "app", "version": versions["app"]},
+			},
+		}
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /admin/database/schema", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"version": version, "ready": version == 2})
+		_ = json.NewEncoder(w).Encode(status())
 	})
 	mux.HandleFunc("POST /admin/database/schema/down", func(w http.ResponseWriter, r *http.Request) {
-		version--
-		_ = json.NewEncoder(w).Encode(map[string]any{"version": version})
+		var body struct {
+			Set   string `json:"set"`
+			Steps int    `json:"steps"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		order = append(order, body.Set)
+		versions[body.Set] -= body.Steps
+		_ = json.NewEncoder(w).Encode(status())
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 	c := webtest.NewClient(srv.URL)
 
-	if st := integration.Schema(t, c); st.Version != 2 || !st.Ready {
+	if st := integration.Schema(t, c); st.Set("lib").Version != 2 || st.Set(integration.AppSet).Version != 1 || !st.Ready {
 		t.Errorf("schema = %+v", st)
 	}
 	integration.Revert(t, c)
-	if version != 0 {
-		t.Errorf("Revert left version %d", version)
+	if versions["lib"] != 0 || versions["app"] != 0 || len(order) != 2 || order[0] != "app" || order[1] != "lib" {
+		t.Errorf("Revert left %v after reverting %v, want both at zero, app first", versions, order)
 	}
 }
 
-// Reset is one call to the state operation, carrying the name; Seed
+// Reset is one confirmed call to the state operation, carrying the name; Seed
 // carries a name only when given one.
 func TestState_ResetIsOneCall(t *testing.T) {
 	var states, seeds []string
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /admin/database/state", func(w http.ResponseWriter, r *http.Request) {
-		var body struct{ State string }
+		var body struct {
+			State   string
+			Confirm bool
+		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
+		if !body.Confirm {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		states = append(states, body.State)
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"state": body.State, "schema": map[string]any{"version": 1, "ready": true}, "seeded": map[string]int{"organizations": 7},
+			"state":  body.State,
+			"schema": map[string]any{"ready": true, "sets": []map[string]any{{"name": "app", "version": 1}}},
+			"seeded": map[string]int{"organizations": 7},
 		})
 	})
 	mux.HandleFunc("POST /admin/database/seed", func(w http.ResponseWriter, r *http.Request) {
@@ -62,7 +87,7 @@ func TestState_ResetIsOneCall(t *testing.T) {
 	c := webtest.NewClient(srv.URL)
 
 	tr := integration.Reset(t, c, integration.Default)
-	if tr.State != "default" || tr.Schema.Version != 1 || !tr.Schema.Ready || tr.Seeded["organizations"] != 7 {
+	if tr.State != "default" || tr.Schema.Set(integration.AppSet).Version != 1 || !tr.Schema.Ready || tr.Seeded["organizations"] != 7 {
 		t.Errorf("transition = %+v", tr)
 	}
 	integration.Seed(t, c, "")

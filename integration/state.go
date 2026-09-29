@@ -16,13 +16,45 @@ const (
 	pathState      = "/admin/database/state"
 )
 
-// SchemaStatus is the schema's state as the admin mount reports it, the
-// fields the harness and the suite read.
+// AppSet is the service's own migration set, the last the migrator
+// declares.
+const AppSet = "app"
+
+// SchemaStatus is the schema's state as the admin mount reports it: ready
+// once every migration set is current, and each set in declaration order.
 type SchemaStatus struct {
-	Version int   `json:"version"`
-	Dirty   bool  `json:"dirty"`
-	Pending []int `json:"pending"`
-	Ready   bool  `json:"ready"`
+	Ready bool        `json:"ready"`
+	Sets  []SetStatus `json:"sets"`
+}
+
+// SetStatus is one migration set's state, the fields the harness and the
+// suite read.
+type SetStatus struct {
+	Name       string      `json:"name"`
+	Version    int         `json:"version"`
+	Latest     int         `json:"latest"`
+	Dirty      bool        `json:"dirty"`
+	Pending    []int       `json:"pending"`
+	Migrations []Migration `json:"migrations"`
+}
+
+// Migration is one migration of a set, as the status lists it.
+type Migration struct {
+	Version       int    `json:"version"`
+	Name          string `json:"name"`
+	Transactional bool   `json:"transactional"`
+	Applied       bool   `json:"applied"`
+}
+
+// Set returns the named set's state, or the zero SetStatus when the
+// migrator declares no such set.
+func (s SchemaStatus) Set(name string) SetStatus {
+	for _, set := range s.Sets {
+		if set.Name == name {
+			return set
+		}
+	}
+	return SetStatus{}
 }
 
 // Seeded is the seed operation's result: the rows each table gained.
@@ -37,11 +69,11 @@ type Transition struct {
 }
 
 // Reset puts the database in the named state through the one operation an
-// operator runs on the admin mount: every migration reverted, the set
-// applied, the state's set seeded.
+// operator runs on the admin mount, confirmed as it requires: every
+// migration set reverted, the sets applied, the state's rows seeded.
 func Reset(t testing.TB, c *webtest.Client, state string) Transition {
 	t.Helper()
-	return webtest.Decode[Transition](t, c.Post(t, pathState, map[string]string{"state": state}), http.StatusOK)
+	return webtest.Decode[Transition](t, c.Post(t, pathState, map[string]any{"state": state, "confirm": true}), http.StatusOK)
 }
 
 // States reads the names the service declares.
@@ -50,13 +82,18 @@ func States(t testing.TB, c *webtest.Client) []string {
 	return webtest.Decode[[]string](t, c.Get(t, pathStates), http.StatusOK)
 }
 
-// Revert reverts every applied migration, leaving the schema empty and the
-// set pending, the state a startup applies from.
+// Revert reverts every applied migration, the last declared set first as
+// the migrator requires, leaving the schema empty and every set pending,
+// the state a startup applies from.
 func Revert(t testing.TB, c *webtest.Client) {
 	t.Helper()
-	st := Schema(t, c)
-	for st.Version > 0 {
-		st = webtest.Decode[SchemaStatus](t, c.Post(t, pathSchemaDown, nil), http.StatusOK)
+	sets := Schema(t, c).Sets
+	for i := len(sets) - 1; i >= 0; i-- {
+		if sets[i].Version == 0 {
+			continue
+		}
+		body := map[string]any{"set": sets[i].Name, "steps": sets[i].Version}
+		webtest.Decode[SchemaStatus](t, c.Post(t, pathSchemaDown, body), http.StatusOK)
 	}
 }
 

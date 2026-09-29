@@ -9,6 +9,7 @@ import (
 	"github.com/standards-lab/go-web-sdk"
 
 	"github.com/standards-lab/go-web-service/internal/config"
+	"github.com/standards-lab/go-web-service/sdk"
 )
 
 // App is the application layer: it assembles infrastructure, the admin
@@ -35,14 +36,24 @@ func New(cfg *config.Config, w io.Writer) (*App, error) {
 		return nil, err
 	}
 
-	adm, err := newAdmin(infra, cfg, lc)
+	// The sweep's wake precedes the domain: the document layer nudges it,
+	// and the sweep receives from it.
+	wake := newSweepWake(cfg)
+	dom := newDomain(infra, wake, lc)
+
+	// The quiesce gate precedes the admin layer and the reactors, the two
+	// halves that meet in it: a verb that changes the schema holds it
+	// exclusively, and the sweep holds it shared for each pass. The admin
+	// layer follows the domain, whose seed contributions its seeder
+	// composes.
+	gate := new(sdk.Gate)
+
+	adm, err := newAdmin(infra, dom, cfg, gate, lc)
 	if err != nil {
 		return nil, err
 	}
 
-	dom := newDomain(infra, lc)
-
-	if _, err := newReactors(infra, dom, lc); err != nil {
+	if _, err := newReactors(infra, cfg, wake, gate, lc); err != nil {
 		return nil, err
 	}
 
@@ -55,7 +66,7 @@ func New(cfg *config.Config, w io.Writer) (*App, error) {
 	server := web.NewServer(cfg.Server, router)
 	lc.Add(lifecycle.Service{
 		Name:     "server",
-		Stage:    lifecycle.StageRoot,
+		Stage:    stageRoot,
 		Start:    server.Start,
 		Shutdown: server.Shutdown,
 	})

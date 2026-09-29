@@ -12,7 +12,7 @@ import (
 // Scenarios returns the demo scenarios in the order the command tree and the
 // listing present them.
 func Scenarios() []scenario.Scenario {
-	return []scenario.Scenario{Compile(), Organization(), Problems()}
+	return []scenario.Scenario{Compile(), Organization(), Problems(), Storage()}
 }
 
 // Commands builds the demo command with one subcommand per scenario, named

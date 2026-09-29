@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-web-sdk"
 
 	"github.com/standards-lab/go-web-service/data"
@@ -14,10 +13,6 @@ import (
 // organization's own subtree, the organization itself included.
 var ErrCycle = errors.New("transfer would create a cycle")
 
-// Stage is the lifecycle stage the domains verify their statements in:
-// after the schema (1), before the root.
-const Stage = 2
-
 // Service is the organization domain service: the layer's public API, one
 // method per endpoint, every operation delegated whole to the store.
 // Queries return data; commands validate their input, each command type
@@ -26,27 +21,36 @@ type Service struct {
 	store *store
 }
 
-// New constructs the service over the database the domains share.
-// Construction compiles and binds the statements and performs no I/O.
-func New(db *data.Database) *Service {
-	return &Service{store: newStore(db)}
-}
-
-// Register declares the domain's startup verification on lc.
-func (s *Service) Register(lc *lifecycle.Coordinator) {
-	lc.Add(lifecycle.Service{Name: "organization", Stage: Stage, Start: s.Verify})
+// New constructs the service over the database and the object storage the
+// domains share. Construction compiles and binds the statements and
+// performs no I/O.
+func New(db *data.Database, st *data.Storage) *Service {
+	return &Service{store: newStore(db, st)}
 }
 
 // Verify prepares every statement and the read contract against the
-// migrated schema; startup runs it at the domains' stage.
+// migrated schema; the composition root runs it at startup, once the
+// schema is corrected.
 func (s *Service) Verify(ctx context.Context) error { return s.store.Verify(ctx) }
 
-// List returns one page of organizations and the total count, honoring the
-// parsed query's page, sort, and filters. An unknown sort or filter field,
-// an operator the read model does not support, or a value the engine
-// cannot read unwraps to query.ErrDirectives.
-func (s *Service) List(ctx context.Context, q web.Query) ([]Organization, int, error) {
-	return s.store.list(ctx, data.Directives(q))
+// Seed is the layer's seed contribution to the named states the data
+// package's seeder applies: the organization tree a state carries, seeded
+// by the layer's own statements. The composition root hands it to the seeder.
+func (s *Service) Seed() data.Seed { return seed{store: s.store} }
+
+// LogoSeed is the layer's second seed contribution, a file seed, to the
+// named states: the logos a state names, each written by the shared write
+// protocol once the seed's rows commit and activated for an organization
+// that has none. The composition root hands it to the seeder after Seed.
+func (s *Service) LogoSeed() data.FileSeed { return logoSeed{store: s.store} }
+
+// List returns one page of organizations and the read's paging, honoring
+// the parsed query's page or cursor, sort, and filters. A cursor that did
+// not come from this read is the request's error. An unknown sort or
+// filter field, an operator the read model does not support, or a value
+// the engine cannot read unwraps to query.ErrDirectives.
+func (s *Service) List(ctx context.Context, q web.Query) ([]Organization, web.Paging, error) {
+	return s.store.list(ctx, q)
 }
 
 // Find returns the organization with the given id, or sql.ErrNoRows.
@@ -93,4 +97,29 @@ func (s *Service) Transfer(ctx context.Context, id string, version int64, t Tran
 // deletion through the foreign key.
 func (s *Service) Delete(ctx context.Context, id string, version int64) error {
 	return s.store.delete(ctx, id, version)
+}
+
+// PutLogo stores the upload as the organization's logo and makes it the
+// active one, retiring the logo it replaces, and returns the new file's
+// id. A media type outside the logo's allowlist is refused before any
+// I/O; a nonexistent organization is sql.ErrNoRows, and a concurrent
+// replacement that activated first is a unique violation.
+func (s *Service) PutLogo(ctx context.Context, id string, u web.Upload) (LogoIdentity, error) {
+	ext, err := logoExtension(u.MediaType)
+	if err != nil {
+		return LogoIdentity{}, err
+	}
+	return s.store.putLogo(ctx, id, u, ext)
+}
+
+// Logo returns the organization's active logo, or the missing row when it
+// has none.
+func (s *Service) Logo(ctx context.Context, id string) (Logo, error) {
+	return s.store.logo(ctx, id)
+}
+
+// DeleteLogo retires the organization's active logo, its row and its
+// object, or returns sql.ErrNoRows when it has none.
+func (s *Service) DeleteLogo(ctx context.Context, id string) error {
+	return s.store.deleteLogo(ctx, id)
 }

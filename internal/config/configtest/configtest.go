@@ -19,6 +19,7 @@ import (
 func Minimal() *config.Config {
 	cfg := &config.Config{}
 	cfg.Database.Name = "app"
+	cfg.Storage.Container = "go-web-service"
 	cfg.Observability.Endpoint = "127.0.0.1:4317"
 	return cfg
 }
@@ -26,8 +27,8 @@ func Minimal() *config.Config {
 // Config returns a finalized Config whose composition performs no I/O: the
 // server on a loopback ephemeral port, debug logging so requests leave
 // records, and every connectable subsystem aimed at a closed loopback port
-// so a dial is refused immediately instead of timing out. The empty prefix
-// disables environment overrides.
+// so a dial is refused immediately instead of timing out, the object store
+// with its retries off. The empty prefix disables environment overrides.
 func Config(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := Minimal()
@@ -38,6 +39,12 @@ func Config(t *testing.T) *config.Config {
 	cfg.Database.Host = "127.0.0.1"
 	port := ClosedPort(t)
 	cfg.Database.Port = &port
+	cfg.Storage.Account = "devstoreaccount1"
+	cfg.Storage.Key = "a2V5"
+	cfg.Storage.Endpoint = fmt.Sprintf("http://127.0.0.1:%d/devstoreaccount1", ClosedPort(t))
+	// One try: the provider's default retries would hold startup open
+	// against the closed port its dial is refused on.
+	cfg.Storage.Options = map[string]string{"max_retries": "0"}
 	cfg.Observability.Endpoint = fmt.Sprintf("127.0.0.1:%d", ClosedPort(t))
 	if err := cfg.Finalize(""); err != nil {
 		t.Fatalf("finalize hermetic config: %v", err)

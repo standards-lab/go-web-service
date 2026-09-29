@@ -195,15 +195,15 @@ func TestFixedCommands_RefuseArguments(t *testing.T) {
 	}
 }
 
-func TestSchemaDown_SendsNoBodyWhenStepsIsUnset(t *testing.T) {
+func TestSchemaDown_OmitsStepsWhenUnset(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args        []string
 		body        string
 		contentType string
 	}{
-		"unset":    {nil, "", ""},
-		"steps":    {[]string{"--steps", "2"}, `{"steps":2}`, "application/json"},
-		"verbatim": {[]string{"--body", `{ "steps": 3 }`}, `{ "steps": 3 }`, "application/json"},
+		"set alone": {[]string{"--set", "app"}, `{"set":"app"}`, "application/json"},
+		"steps":     {[]string{"--set", "app", "--steps", "2"}, `{"set":"app","steps":2}`, "application/json"},
+		"verbatim":  {[]string{"--body", `{ "set": "app", "steps": 3 }`}, `{ "set": "app", "steps": 3 }`, "application/json"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, srv := newService(t, http.StatusOK, `{"version":1}`)
@@ -218,9 +218,6 @@ func TestSchemaDown_SendsNoBodyWhenStepsIsUnset(t *testing.T) {
 			if got.body != tc.body || got.contentType != tc.contentType {
 				t.Errorf("body = %q, Content-Type = %q; want %q, %q", got.body, got.contentType, tc.body, tc.contentType)
 			}
-			if tc.body == "" && got.contentLength != 0 {
-				t.Errorf("Content-Length = %d, want 0 so the service applies its default", got.contentLength)
-			}
 			if want := "{\n  \"version\": 1\n}\n"; out != want {
 				t.Errorf("stdout = %q, want %q", out, want)
 			}
@@ -233,10 +230,10 @@ func TestSchemaSteps_SendsTheBodyTheFlagsBuild(t *testing.T) {
 		args []string
 		body string
 	}{
-		"positive":                        {[]string{"--steps", "2"}, `{"steps":2}`},
-		"negative":                        {[]string{"--steps", "-1"}, `{"steps":-1}`},
-		"zero is the service's to refuse": {[]string{"--steps", "0"}, `{"steps":0}`},
-		"verbatim":                        {[]string{"--body", `{"steps":1}`}, `{"steps":1}`},
+		"positive":                        {[]string{"--set", "app", "--steps", "2"}, `{"set":"app","steps":2}`},
+		"negative":                        {[]string{"--set", "app", "--steps", "-1"}, `{"set":"app","steps":-1}`},
+		"zero is the service's to refuse": {[]string{"--set", "app", "--steps", "0"}, `{"set":"app","steps":0}`},
+		"verbatim":                        {[]string{"--body", `{"set":"app","steps":1}`}, `{"set":"app","steps":1}`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, srv := newService(t, http.StatusOK, `{"version":3}`)
@@ -259,10 +256,10 @@ func TestSchemaForce_SendsTheBodyTheFlagsBuild(t *testing.T) {
 		args []string
 		body string
 	}{
-		"version":                             {[]string{"--version", "7"}, `{"version":7}`},
-		"zero empties":                        {[]string{"--version", "0"}, `{"version":0}`},
-		"verbatim":                            {[]string{"--body", `{"version":2}`}, `{"version":2}`},
-		"negative is the service's to refuse": {[]string{"--version", "-1"}, `{"version":-1}`},
+		"version":                             {[]string{"--set", "app", "--version", "7"}, `{"set":"app","version":7}`},
+		"zero empties":                        {[]string{"--set", "app", "--version", "0"}, `{"set":"app","version":0}`},
+		"verbatim":                            {[]string{"--body", `{"set":"app","version":2}`}, `{"set":"app","version":2}`},
+		"negative is the service's to refuse": {[]string{"--set", "app", "--version", "-1"}, `{"set":"app","version":-1}`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, srv := newService(t, http.StatusOK, `{"version":7}`)
@@ -319,8 +316,9 @@ func TestState_SendsTheBodyTheFlagsBuild(t *testing.T) {
 		args []string
 		body string
 	}{
-		"state":    {[]string{"--state", "default"}, `{"state":"default"}`},
-		"verbatim": {[]string{"--body", `{"state":"empty"}`}, `{"state":"empty"}`},
+		"confirmed":                              {[]string{"--state", "default", "--confirm"}, `{"state":"default","confirm":true}`},
+		"unconfirmed is the service's to refuse": {[]string{"--state", "default"}, `{"state":"default","confirm":false}`},
+		"verbatim":                               {[]string{"--body", `{"state":"empty","confirm":true}`}, `{"state":"empty","confirm":true}`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, srv := newService(t, http.StatusOK, `{"state":"default","seeded":{"organizations":7}}`)
@@ -342,16 +340,19 @@ func TestState_SendsTheBodyTheFlagsBuild(t *testing.T) {
 	}
 }
 
-// The three commands whose body is required refuse the flags path when the
-// field flag is unset, before the request fires.
+// The commands whose body is required refuse the flags path when a
+// required field flag is unset, before the request fires.
 func TestRequiredFieldFlags_AreRefusedWhenUnset(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args []string
 		want string
 	}{
-		"schema steps": {[]string{"schema", "steps"}, "--steps is required unless --body is given"},
-		"schema force": {[]string{"schema", "force"}, "--version is required unless --body is given"},
-		"state":        {[]string{"state"}, "--state is required unless --body is given"},
+		"schema down: set":      {[]string{"schema", "down", "--steps", "1"}, "--set is required unless --body is given"},
+		"schema steps: set":     {[]string{"schema", "steps", "--steps", "1"}, "--set is required unless --body is given"},
+		"schema steps: steps":   {[]string{"schema", "steps", "--set", "app"}, "--steps is required unless --body is given"},
+		"schema force: set":     {[]string{"schema", "force", "--version", "1"}, "--set is required unless --body is given"},
+		"schema force: version": {[]string{"schema", "force", "--set", "app"}, "--version is required unless --body is given"},
+		"state":                 {[]string{"state"}, "--state is required unless --body is given"},
 	} {
 		s, srv := newService(t, http.StatusOK, `{}`)
 		_, err := run(t, srv, tc.args...)
@@ -369,11 +370,13 @@ func TestBody_IsExclusiveWithTheFieldFlag(t *testing.T) {
 		args []string
 		flag string
 	}{
-		"schema down":  {[]string{"schema", "down", "--body", `{}`, "--steps", "1"}, "steps"},
-		"schema steps": {[]string{"schema", "steps", "--body", `{}`, "--steps", "1"}, "steps"},
-		"schema force": {[]string{"schema", "force", "--body", `{}`, "--version", "1"}, "version"},
-		"seed":         {[]string{"seed", "--body", `{}`, "--state", "x"}, "state"},
-		"state":        {[]string{"state", "--body", `{}`, "--state", "x"}, "state"},
+		"schema down":   {[]string{"schema", "down", "--body", `{}`, "--steps", "1"}, "steps"},
+		"schema set":    {[]string{"schema", "force", "--body", `{}`, "--set", "app"}, "set"},
+		"state confirm": {[]string{"state", "--body", `{}`, "--confirm"}, "confirm"},
+		"schema steps":  {[]string{"schema", "steps", "--body", `{}`, "--steps", "1"}, "steps"},
+		"schema force":  {[]string{"schema", "force", "--body", `{}`, "--version", "1"}, "version"},
+		"seed":          {[]string{"seed", "--body", `{}`, "--state", "x"}, "state"},
+		"state":         {[]string{"state", "--body", `{}`, "--state", "x"}, "state"},
 	} {
 		s, srv := newService(t, http.StatusOK, `{}`)
 		_, err := run(t, srv, tc.args...)

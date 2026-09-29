@@ -3,6 +3,7 @@ package demo
 import (
 	"context"
 	"fmt"
+	bfdata "github.com/standards-lab/blobfs/data"
 	"io/fs"
 	"path"
 	"strings"
@@ -82,9 +83,9 @@ func (s *state) writeStatement(_ context.Context, r *scenario.Reporter) error {
 func (s *state) registerCatalog(_ context.Context, r *scenario.Reporter) error {
 	r.SQL("fsys, the filesystem both calls below read from", "fsys, err := repo.FS(ctx)")
 	r.Note("repo.FS(ctx) resolves the repository root — the --repo flag when it is set, or the nearest ancestor directory whose go.mod declares this module — and returns an os.DirFS rooted there. Every path this scenario reads, the pattern and statement above included, is relative to that root.")
-	r.SQL(fmt.Sprintf("The pattern registered under the %q namespace", appNamespace),
-		fmt.Sprintf("query.NewCatalog(query.Patterns(), query.Publish(%q, fsys, %q))", appNamespace, patternsDir))
-	catalog, err := query.NewCatalog(query.Patterns(), query.Publish(appNamespace, s.fsys, patternsDir))
+	r.SQL(fmt.Sprintf("The pattern registered under the %q namespace, beside blobfs's published namespace", appNamespace),
+		fmt.Sprintf("query.NewCatalog(query.Patterns(), bfdata.Patterns(), query.Publish(%q, fsys, %q))", appNamespace, patternsDir))
+	catalog, err := query.NewCatalog(query.Patterns(), bfdata.Patterns(), query.Publish(appNamespace, s.fsys, patternsDir))
 	if err != nil {
 		return err
 	}
@@ -95,7 +96,7 @@ func (s *state) registerCatalog(_ context.Context, r *scenario.Reporter) error {
 		return err
 	}
 	s.stmts = stmts
-	r.Note("fsys and the directory path indicate where the .sql files are sourced from. You can register multiple pattern and statement sources. Patterns are encapsulated under their specified namespace.")
+	r.Note("fsys and the directory path indicate where the .sql files are sourced from. You can register multiple pattern and statement sources. Patterns are encapsulated under their specified namespace: a library that ships statements publishes its own, as blobfs does, and the organization's logo statements include its file columns.")
 	return nil
 }
 

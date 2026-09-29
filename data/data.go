@@ -20,9 +20,10 @@ var files embed.FS
 // DB; it defines no patterns of its own. It also keeps the statements
 // registry: every domain registers its compiled inventory at wiring, so
 // the admin service can walk the whole service's SQL the way the catalog
-// lists its patterns. Verification stays each domain's own lifecycle
-// stage. The package's own statements, under statements/, are the lock
-// and the seed's; they compile once here and register under "data".
+// lists its patterns. Verification stays each domain's own, which the
+// composition root runs at startup. The package's own statement, under
+// statements/, is the lock; it compiles once here and registers under
+// "data". The seed's statements are the domains' own (Seed).
 type Database struct {
 	*sqlate.DB
 	Catalog *query.Catalog

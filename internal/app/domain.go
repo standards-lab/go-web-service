@@ -4,6 +4,7 @@ import (
 	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-web-sdk"
 
+	"github.com/standards-lab/go-web-service/domain/document"
 	"github.com/standards-lab/go-web-service/domain/organization"
 	"github.com/standards-lab/go-web-service/internal/config"
 )
@@ -14,16 +15,22 @@ import (
 // the infrastructure fields they depend on.
 type Domain struct {
 	Organization *organization.Service
+	Document     *document.Service
 }
 
 // newDomain wires the domain layer over infra: each domain package's
 // service is constructed here from the infrastructure fields it uses, never
-// the Infrastructure struct itself, and registers its startup verification
-// on lc at the domains' stage, after the schema's.
-func newDomain(infra *Infrastructure, lc *lifecycle.Coordinator) *Domain {
-	org := organization.New(infra.SQL)
-	org.Register(lc)
-	return &Domain{Organization: org}
+// the Infrastructure struct itself. A domain service holds no resource and
+// runs nothing, so it knows no lifecycle; what it has for startup is its
+// Verify, which the root declares on lc at stageVerify, once the schema is
+// corrected. sweep is the sweep's wake source, the document layer's
+// Sweeper, which it nudges after each branch it marks.
+func newDomain(infra *Infrastructure, sweep document.Sweeper, lc *lifecycle.Coordinator) *Domain {
+	org := organization.New(infra.SQL, infra.Storage)
+	lc.Add(lifecycle.Service{Name: "organization", Stage: stageVerify, Start: org.Verify})
+	doc := document.New(infra.SQL, infra.Storage, sweep)
+	lc.Add(lifecycle.Service{Name: "document", Stage: stageVerify, Start: doc.Verify})
+	return &Domain{Organization: org, Document: doc}
 }
 
 // mountAPI builds the API mount, /api, with each domain layer's route group
@@ -31,6 +38,15 @@ func newDomain(infra *Infrastructure, lc *lifecycle.Coordinator) *Domain {
 // construction site (cfg.Reads.Limits() for a collection read).
 func mountAPI(dom *Domain, cfg *config.Config) *web.Group {
 	api := web.NewGroup("/api")
-	api.Mount(organization.Routes(dom.Organization, cfg.Reads.Limits()))
+	// The organization list continues by cursor: its read model's keyset
+	// continuation holds on every sort it accepts.
+	orgReads := cfg.Reads.Limits()
+	orgReads.Cursor = true
+	api.Mount(organization.Routes(dom.Organization, orgReads))
+	// The document listings continue by cursor: blobfs's listings issue a
+	// cursor on every sort that can continue and page by number otherwise.
+	docReads := cfg.Reads.Limits()
+	docReads.Cursor = true
+	api.Mount(document.Routes(dom.Document, docReads))
 	return api
 }

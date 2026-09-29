@@ -3,6 +3,7 @@ package app
 import (
 	"github.com/spf13/cobra"
 
+	"github.com/standards-lab/go-web-service/tools/slab/domain/document"
 	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
 	"github.com/standards-lab/go-web-service/tools/slab/output"
 )
@@ -13,6 +14,7 @@ import (
 // parsed after the tree is built.
 type Domain struct {
 	Organization func() *organization.Client
+	Document     func() *document.Client
 }
 
 // newDomain wires the domain layer over infra: each domain package's client
@@ -22,6 +24,9 @@ func newDomain(infra *Infrastructure) *Domain {
 	return &Domain{
 		Organization: func() *organization.Client {
 			return organization.NewClient(infra.Client())
+		},
+		Document: func() *document.Client {
+			return document.NewClient(infra.Client())
 		},
 	}
 }
@@ -33,5 +38,6 @@ func newDomain(infra *Infrastructure) *Domain {
 func mountDomain(dom *Domain, out *output.Output) []*cobra.Command {
 	return []*cobra.Command{
 		organization.Commands(dom.Organization, out),
+		document.Commands(dom.Document, out),
 	}
 }

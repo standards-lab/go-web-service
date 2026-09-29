@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -66,7 +67,7 @@ func gatedModule(t *testing.T, gate database.SchemaGate, seed string, responses 
 	}
 	svc := admin.New(pdb, sdb, m, catalog, admin.Options{Seed: seed, Seeder: data.NewSeeder(d, organizations{}, files{"logos"}, files{"documents"}), Registry: d})
 	r := web.NewRouter()
-	r.Mount(web.NewModule(database.Routes(svc, gate)))
+	r.Mount(web.NewModule(database.Routes(svc, gate, slog.New(slog.DiscardHandler))))
 	return r, rec
 }
 

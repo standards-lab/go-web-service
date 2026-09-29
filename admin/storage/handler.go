@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/standards-lab/go-storage"
@@ -40,10 +41,13 @@ type handler struct {
 //     exists, and answers with the diagnostics after it
 //
 // A store that cannot be reached is a 503 carrying the provider's reason,
-// since an operator needs to know why the container could not be made.
-func Routes(store Store) *web.Group {
+// since an operator needs to know why the container could not be made. The
+// composition root hands the group the service's logger, which records the
+// cause of every 5xx the error writer sends.
+func Routes(store Store, logger *slog.Logger) *web.Group {
 	h := &handler{store: store}
 	ew := web.NewErrorWriter(status)
+	ew.Log(logger)
 	ew.Detail(http.StatusServiceUnavailable)
 	g := web.NewGroup("/storage")
 	g.SetErrorWriter(ew)

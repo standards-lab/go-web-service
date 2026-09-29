@@ -3,6 +3,7 @@ package document
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -45,12 +46,15 @@ type handler struct {
 // is an RFC 9457 problem through the group's error writer: the SDK maps
 // its own request errors, the layer's matcher its own vocabulary, and the
 // data package's matcher the library's. The composition root mounts the
-// group into the API module and supplies limits from the service's reads
-// configuration.
-func Routes(service *Service, limits web.Limits) *web.Group {
+// group into the API module, supplies limits from the service's reads
+// configuration, and hands it the service's logger, which records the
+// cause of every 5xx the error writer sends.
+func Routes(service *Service, limits web.Limits, logger *slog.Logger) *web.Group {
 	h := &handler{service: service, limits: limits}
+	ew := web.NewErrorWriter(status, data.Status)
+	ew.Log(logger)
 	g := web.NewGroup("/documents")
-	g.SetErrorWriter(web.NewErrorWriter(status, data.Status))
+	g.SetErrorWriter(ew)
 	g.HandleErr("POST", "/{org}/directories", h.createDirectory)
 	g.HandleErr("GET", "/{org}/directories/{id}", h.directory)
 	g.HandleErr("GET", "/{org}/directories/{id}/directories", h.listDirectories)

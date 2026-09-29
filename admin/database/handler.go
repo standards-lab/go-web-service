@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/standards-lab/go-database/admin"
@@ -76,12 +77,14 @@ type handler struct {
 // refused before any I/O. A schema-state conflict and a disabled seed carry
 // their reason as the detail, since an operator needs to know which set
 // and version is dirty or pending, or that this environment names no seed.
-// The composition root mounts the group into the admin mount. The
-// confirmation token the strategy requires for down and force arrives with
-// the management listener.
-func Routes(service *admin.Service, gate SchemaGate) *web.Group {
+// The composition root mounts the group into the admin mount and hands it
+// the service's logger, which records the cause of every 5xx the error
+// writer sends. The confirmation token the strategy requires for down and
+// force arrives with the management listener.
+func Routes(service *admin.Service, gate SchemaGate, logger *slog.Logger) *web.Group {
 	h := &handler{service: service, gate: gate}
 	ew := web.NewErrorWriter(status)
+	ew.Log(logger)
 	ew.Detail(http.StatusForbidden, http.StatusConflict)
 	g := web.NewGroup("/database")
 	g.SetErrorWriter(ew)

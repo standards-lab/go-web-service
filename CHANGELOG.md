@@ -45,9 +45,10 @@ accumulate under [Unreleased] until the first cut.
 - The quiesce gate: the schema-changing admin verbs (`up`, `down`, `steps`, and the state reset)
   hold it exclusively and each sweep pass holds it shared, so the two never run at once and a
   state reset never deadlocks with a pass (SQLSTATE 40P01). The gate is per process.
-- The shared file protocols in `data`, staged for blobfs: the two-phase write with its
-  retry-safe form for fixed ids, the two-phase delete, and the read of an available file; both
-  domains run on them.
+- The file protocols both domains run: blobfs's two-phase write with its retry-safe form for
+  fixed ids and its two-phase delete (`Store.Write`, `Ensure`, `Remove`, `Purge`), promoted to
+  blobfs v0.3.0 from the copies this service staged in `data`, and `data.Storage.Serve`, the
+  read of an available file, which stays the service's.
 - The storage seeds: the `default` state stores a logo per organization and acme's document
   tree under fixed `5eed…` ids, so a rerun finds each file and a reset, which leaves the objects
   in the container, writes it again under the same key.
@@ -117,6 +118,19 @@ accumulate under [Unreleased] until the first cut.
   `json`, which the collector's log pipeline needed all along.
 
 ### Changed
+
+- The storage libraries this service validated: blobfs v0.3.0 and postgres/v0.3.0, go-storage
+  v0.2.0 and azureblob/v0.2.0, go-web-sdk v0.12.0, and go-database v0.6.2, the promotions of
+  `v1.storage.suite`:
+  - A lost container is a 503 on every storage operation, a download's read included, which
+    answered 404 before; go-storage's `ErrContainerNotFound` replaces the service's workaround.
+  - A file's own delete and a branch's are told apart by blobfs's `DeletingError`, with no
+    re-read, the same details on the wire.
+  - The sweep worker runs blobfs's `SweepUntilDone` over its gated pass.
+  - A download's `Content-Disposition` is go-web-sdk's `Attachment`, which carries a name
+    holding a `%` in `filename*`.
+  - Every error writer logs the cause of a 5xx through the service's logger, a 503 at warn and
+    a client that hung up at debug.
 
 - `admin.seed` (`APP_ADMIN_SEED`) names the state whose set applies at startup and on a
   bodyless seed, the way a deployment initializes its data; empty names none. The `local`

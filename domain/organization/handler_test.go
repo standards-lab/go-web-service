@@ -3,6 +3,7 @@ package organization_test
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,7 +24,7 @@ func module(t *testing.T, responses ...sqltest.Response) http.Handler {
 	t.Helper()
 	svc, _ := service(t, responses...)
 	r := web.NewRouter()
-	r.Mount(web.NewModule(organization.Routes(svc, web.Limits{DefaultSize: 20, MaxSize: 100})))
+	r.Mount(web.NewModule(organization.Routes(svc, web.Limits{DefaultSize: 20, MaxSize: 100}, slog.New(slog.DiscardHandler))))
 	return r
 }
 

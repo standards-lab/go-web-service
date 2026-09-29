@@ -3,6 +3,7 @@ package organization
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -40,12 +41,15 @@ type handler struct {
 // 9457 problem through the group's error writer: the SDK maps its own
 // request errors, the layer's matcher its own vocabulary, and the data
 // package's matcher the library's. The composition root mounts the group
-// into the API module and supplies limits from the service's reads
-// configuration.
-func Routes(service *Service, limits web.Limits) *web.Group {
+// into the API module, supplies limits from the service's reads
+// configuration, and hands it the service's logger, which records the
+// cause of every 5xx the error writer sends.
+func Routes(service *Service, limits web.Limits, logger *slog.Logger) *web.Group {
 	h := &handler{service: service, limits: limits}
+	ew := web.NewErrorWriter(status, data.Status)
+	ew.Log(logger)
 	g := web.NewGroup("/organizations")
-	g.SetErrorWriter(web.NewErrorWriter(status, data.Status))
+	g.SetErrorWriter(ew)
 	g.HandleErr("GET", "", h.list)
 	g.HandleErr("GET", "/{id}", h.find)
 	g.HandleErr("GET", "/lookup", h.lookup)

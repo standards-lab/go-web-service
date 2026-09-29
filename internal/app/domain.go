@@ -3,6 +3,7 @@ package app
 import (
 	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-web-sdk"
+	"log/slog"
 
 	"github.com/standards-lab/go-web-service/domain/document"
 	"github.com/standards-lab/go-web-service/domain/organization"
@@ -35,18 +36,19 @@ func newDomain(infra *Infrastructure, sweep document.Sweeper, lc *lifecycle.Coor
 
 // mountAPI builds the API mount, /api, with each domain layer's route group
 // mounted into it, each handler handed its policy from cfg at the
-// construction site (cfg.Reads.Limits() for a collection read).
-func mountAPI(dom *Domain, cfg *config.Config) *web.Group {
+// construction site (cfg.Reads.Limits() for a collection read) and the
+// service's logger for its error writer.
+func mountAPI(dom *Domain, cfg *config.Config, logger *slog.Logger) *web.Group {
 	api := web.NewGroup("/api")
 	// The organization list continues by cursor: its read model's keyset
 	// continuation holds on every sort it accepts.
 	orgReads := cfg.Reads.Limits()
 	orgReads.Cursor = true
-	api.Mount(organization.Routes(dom.Organization, orgReads))
+	api.Mount(organization.Routes(dom.Organization, orgReads, logger))
 	// The document listings continue by cursor: blobfs's listings issue a
 	// cursor on every sort that can continue and page by number otherwise.
 	docReads := cfg.Reads.Limits()
 	docReads.Cursor = true
-	api.Mount(document.Routes(dom.Document, docReads))
+	api.Mount(document.Routes(dom.Document, docReads, logger))
 	return api
 }

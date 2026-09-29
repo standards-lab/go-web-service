@@ -17,7 +17,8 @@ the marathon workflow; start from `context/README.md`.
     the statements registry, the migration sets (blobfs's beneath the application's), the
     application's patterns, the seeder composed from the domains' contributions, the lock-name
     registry, the directives lowering, the shared status matcher, and `Storage`: blobfs's store
-    over the object-store adapter, with the shared file protocols and the sweep worker
+    over the object-store adapter, whose file protocols the domains run, with the read of an
+    available file and the sweep worker
   - `domain/<layer>` — one package per domain, its SQL under `statements/`
   - `admin/<service>` — the HTTP half of an admin service, mounted under `/admin`
   - `sdk` — promotion candidates staged for the libraries

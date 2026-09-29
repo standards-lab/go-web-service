@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,7 +33,7 @@ func module(t *testing.T, responses ...sqltest.Response) http.Handler {
 // routes mounts the layer's route group over svc as its own module.
 func routes(svc *document.Service) http.Handler {
 	r := web.NewRouter()
-	r.Mount(web.NewModule(document.Routes(svc, web.Limits{DefaultSize: 20, MaxSize: 100, Cursor: true})))
+	r.Mount(web.NewModule(document.Routes(svc, web.Limits{DefaultSize: 20, MaxSize: 100, Cursor: true}, slog.New(slog.DiscardHandler))))
 	return r
 }
 

@@ -19,11 +19,12 @@ const (
 	stageInfrastructure = 0
 
 	// stageSchema verifies and corrects the schema: go-database's admin
-	// service verifies, applies, verifies, and seeds, over the pool. Its
-	// Register declares itself at admin.Stage, a library constant this
-	// service cannot move, so the table names that value rather than
-	// choosing one; TestStages_Ascend fails if a release moves it out of
-	// order.
+	// service verifies, applies, verifies, and seeds, over the pool. The
+	// root declares the service itself (admin.go), at admin.Stage, the
+	// stage the library's own Register uses; the library asks only that
+	// the pool it runs over start at stage 0, which stageInfrastructure
+	// is, and leaves every later stage to this table. TestStages_Ascend
+	// fails if a release moves it out of order.
 	stageSchema = admin.Stage
 
 	// stageVerify checks every statement against the migrated schema:

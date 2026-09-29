@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-database/admin"
@@ -76,10 +77,11 @@ func newAdmin(
 // group mounted into it. In production the mount belongs on its own
 // listener, authenticated and unreachable from the public API's network
 // path; that isolation is the v1.admin-listener goal, and until then the
-// mount serves on the API listener.
-func mountAdmin(adm *Admin) *web.Group {
+// mount serves on the API listener. Each group's error writer logs
+// through logger.
+func mountAdmin(adm *Admin, logger *slog.Logger) *web.Group {
 	g := web.NewGroup("/admin")
-	g.Mount(dbadmin.Routes(adm.Database, adm.Gate))
-	g.Mount(storageadmin.Routes(adm.Storage))
+	g.Mount(dbadmin.Routes(adm.Database, adm.Gate, logger))
+	g.Mount(storageadmin.Routes(adm.Storage, logger))
 	return g
 }

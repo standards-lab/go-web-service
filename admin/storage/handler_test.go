@@ -3,6 +3,7 @@ package storage_test
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,7 +30,7 @@ func module(t *testing.T, fake *storagetest.Fake) http.Handler {
 	}
 	t.Cleanup(func() { _ = store.Shutdown(context.Background()) })
 	r := web.NewRouter()
-	r.Mount(web.NewModule(storageadmin.Routes(store)))
+	r.Mount(web.NewModule(storageadmin.Routes(store, slog.New(slog.DiscardHandler))))
 	return r
 }
 

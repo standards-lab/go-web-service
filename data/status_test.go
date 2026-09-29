@@ -67,8 +67,8 @@ func TestStatus(t *testing.T) {
 			if got.Status != tc.want || ok != tc.ok {
 				t.Fatalf("Status(%v) = %d, %t; want %d, %t", tc.err, got.Status, ok, tc.want, tc.ok)
 			}
-			if tc.want != http.StatusConflict && got.Detail != "" {
-				t.Errorf("Status(%v) detail = %q; only a conflict carries one", tc.err, got.Detail)
+			if tc.want != http.StatusConflict && tc.want != http.StatusBadRequest && got.Detail != "" {
+				t.Errorf("Status(%v) detail = %q; only a conflict or a request's refusal carries one", tc.err, got.Detail)
 			}
 		})
 	}
@@ -132,5 +132,37 @@ func noRawText(t *testing.T, body string) {
 		if strings.Contains(body, leak) {
 			t.Errorf("body %s carries %q", body, leak)
 		}
+	}
+}
+
+// A 400's detail is the refusal alone: the input the request got wrong, in
+// the typed error's words without its library prefix, and none of the
+// operation chain that wrapped it, which names the service's own ids.
+func TestStatus_ARequestsRefusalCarriesOnlyItsInput(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"malformed cursor",
+			fmt.Errorf("data: continue files in 01a0ee49-0000-7000-8000-000000000001: %w", &query.CursorError{Reason: query.CursorMalformed}),
+			"cursor is malformed"},
+		{"foreign cursor",
+			fmt.Errorf("data: continue directories in 01a0ee49-0000-7000-8000-000000000001: %w", &query.CursorError{Reason: query.CursorMismatch}),
+			"cursor was issued for another base, ordering, or filters"},
+		{"unknown field", fmt.Errorf("data: list files in d: %w", &query.UnknownFieldError{Field: "nope", Use: query.FieldUseSort}),
+			`unknown sort field "nope"`},
+		{"invalid name", fmt.Errorf("data: create file in d: %w", &blobfs.NameError{Name: "a/b", Reason: "contains a slash"}),
+			`invalid name "a/b": contains a slash`},
+		{"root", fmt.Errorf("data: delete directory 00000000-0000-0000-0000-000000000000: %w", blobfs.ErrRootDirectory),
+			strings.TrimPrefix(blobfs.ErrRootDirectory.Error(), "blobfs: ")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := data.Status(tc.err)
+			if !ok || got.Status != http.StatusBadRequest || got.Detail != tc.want {
+				t.Errorf("Status = %d %q, %t; want 400 %q", got.Status, got.Detail, ok, tc.want)
+			}
+		})
 	}
 }

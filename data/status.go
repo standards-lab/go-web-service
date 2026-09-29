@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/standards-lab/blobfs"
 	"github.com/standards-lab/go-database"
@@ -67,6 +68,10 @@ const (
 // referenced file DetailReferenced, and every other conflict
 // DetailConflict.
 //
+// A 400's detail is the refusal alone, the input the request got wrong:
+// never the library's operation chain, which names the service's own ids,
+// such as a directory a root alias resolved to (requestDetail).
+//
 // A handler composes it after its own matcher so the domain's errors take
 // precedence. Check and not-null violations stay unmatched on purpose: a
 // command's validation owns those rules, so a breach is an invariant
@@ -77,7 +82,7 @@ func Status(err error) (web.Problem, bool) {
 	case errors.Is(err, blobfs.ErrInvalidName), errors.Is(err, blobfs.ErrInvalidPath),
 		errors.Is(err, blobfs.ErrInvalidKey), errors.Is(err, blobfs.ErrInvalidID),
 		errors.Is(err, blobfs.ErrRootDirectory):
-		return web.Problem{Status: http.StatusBadRequest}, true
+		return web.Problem{Status: http.StatusBadRequest, Detail: requestDetail(err)}, true
 	case errors.Is(err, blobfs.ErrNotFound), errors.Is(err, storage.ErrNotFound):
 		return web.Problem{Status: http.StatusNotFound}, true
 	case errors.Is(err, blobfs.ErrNameTaken), errors.Is(err, blobfs.ErrIDTaken):
@@ -98,7 +103,7 @@ func Status(err error) (web.Problem, bool) {
 	case errors.Is(err, storage.ErrContainerNotFound), errors.Is(err, storage.ErrNotReady), errors.Is(err, storage.ErrUnavailable):
 		return web.Problem{Status: http.StatusServiceUnavailable}, true
 	case errors.Is(err, query.ErrDirectives):
-		return web.Problem{Status: http.StatusBadRequest}, true
+		return web.Problem{Status: http.StatusBadRequest, Detail: requestDetail(err)}, true
 	case errors.Is(err, sql.ErrNoRows):
 		return web.Problem{Status: http.StatusNotFound}, true
 	case errors.Is(err, sqlate.ErrUniqueViolation), errors.Is(err, sqlate.ErrForeignKeyViolation):
@@ -112,6 +117,47 @@ func Status(err error) (web.Problem, bool) {
 		return web.Problem{Status: http.StatusServiceUnavailable}, true
 	}
 	return web.Problem{}, false
+}
+
+// requestDetail is the detail of a 400: the text of the typed refusal the
+// libraries report, the one that names the request's own input (a name,
+// an id, a sort or filter field, a filter value, a cursor), without its
+// library prefix or the operation chain that wrapped it. A refusal with no
+// typed error is its sentinel's text.
+func requestDetail(err error) string {
+	var (
+		name     *blobfs.NameError
+		id       *blobfs.IDError
+		cursor   *query.CursorError
+		field    *query.UnknownFieldError
+		operator *query.UnknownOperatorError
+		value    *query.InvalidValueError
+	)
+	var text string
+	switch {
+	case errors.As(err, &cursor):
+		text = cursor.Error()
+	case errors.As(err, &field):
+		text = field.Error()
+	case errors.As(err, &operator):
+		text = operator.Error()
+	case errors.As(err, &value):
+		text = value.Error()
+	case errors.As(err, &name):
+		text = name.Error()
+	case errors.As(err, &id):
+		text = id.Error()
+	default:
+		for _, sentinel := range []error{blobfs.ErrInvalidName, blobfs.ErrInvalidPath, blobfs.ErrInvalidKey,
+			blobfs.ErrInvalidID, blobfs.ErrRootDirectory, query.ErrDirectives} {
+			if errors.Is(err, sentinel) {
+				text = sentinel.Error()
+				break
+			}
+		}
+	}
+	text = strings.TrimPrefix(text, "blobfs: ")
+	return strings.TrimPrefix(text, "query: ")
 }
 
 // Conflict is the 409 problem carrying detail, one of the Detail

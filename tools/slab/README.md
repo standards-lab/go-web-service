@@ -70,7 +70,8 @@ scenario's narrated tour: a command sends one real request and returns its resul
   headers, `Content-Disposition` among them, with the bytes to `--out` and `--if-none-match` as
   on `logo get`),
   `move <org> <file-id>` (`--version`, `--directory-id`, `--name`), and `delete <org> <file-id>`
-  (`--version`). `files put` stores the file under its base name unless `--name` gives one; its
+  (`--version`). `files put` uploads with the service's `POST …/files?name=…` and stores the
+  file under its base name unless `--name` gives one; its
   media type is `--content-type`, else the extension's, else `application/octet-stream`, since
   the service accepts any. Both deletes need `--version` for the request's `If-Match`, as
   `org delete` does; the service answers 428 without it and 412 when it is stale. `dirs create`

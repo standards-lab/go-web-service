@@ -18,16 +18,25 @@ import (
 // 409's detail is always one of these and never the error's own text,
 // which names the library's operation, its ids, and its constraints.
 const (
-	DetailNameTaken  = "an entry with that name already exists"
-	DetailNotEmpty   = "the directory is not empty"
-	DetailDeleting   = "the directory is being deleted"
-	DetailReferenced = "the file is referenced"
+	DetailNameTaken    = "an entry with that name already exists"
+	DetailNotEmpty     = "the directory is not empty"
+	DetailDeleting     = "the directory is being deleted"
+	DetailFileDeleting = "the file is being deleted"
+	DetailReferenced   = "the file is referenced"
 	// DetailConflict is every other conflict's: a constraint violation, a
 	// move into its own subtree, a transition the file's status does not
 	// allow, and a domain's own conflicts, which its matcher reports with
 	// this text too.
 	DetailConflict = "the request conflicts with the current state"
 )
+
+// ErrFileDeleting is a change refused because the file itself is
+// deleting, its own delete begun, rather than a directory it reaches.
+// blobfs reports both as blobfs.ErrDeleting, so a domain that must tell
+// them apart reads the file's row and wraps the refusal in this error,
+// which keeps blobfs.ErrDeleting in its chain. blobfs will type the two
+// apart itself; this error then gives way to its own.
+var ErrFileDeleting = errors.New("data: the file is being deleted")
 
 // Status is the web.ProblemMatcher over the vocabulary every domain's store
 // returns:
@@ -52,6 +61,8 @@ const (
 //     transition the file's status does not allow is a conflict (a
 //     domain's listing reports a deleting directory as not found before
 //     its error reaches this matcher)
+//   - a file the domain found deleting itself, ErrFileDeleting, is a
+//     conflict too, told apart from the directory's
 //   - an object over the store's size bound is too large
 //   - a store that is not ready, unreachable, or missing its container is a
 //     temporary outage
@@ -59,8 +70,10 @@ const (
 // Every conflict carries a curated detail, the Detail constant for its
 // kind, so a writer that opts 409 into error text still sends none of it:
 // a taken name or id is DetailNameTaken, a non-empty directory
-// DetailNotEmpty, a deleting directory DetailDeleting, a referenced file
-// DetailReferenced, and every other conflict DetailConflict.
+// DetailNotEmpty, a file deleting itself (ErrFileDeleting)
+// DetailFileDeleting, any other blobfs.ErrDeleting, a deleting directory,
+// DetailDeleting, a referenced file DetailReferenced, and every other
+// conflict DetailConflict.
 //
 // A handler composes it after its own matcher so the domain's errors take
 // precedence. Check and not-null violations stay unmatched on purpose: a
@@ -80,6 +93,8 @@ func Status(err error) (web.Problem, bool) {
 		return Conflict(DetailNotEmpty), true
 	case errors.Is(err, blobfs.ErrReferenced):
 		return Conflict(DetailReferenced), true
+	case errors.Is(err, ErrFileDeleting):
+		return Conflict(DetailFileDeleting), true
 	case errors.Is(err, blobfs.ErrDeleting):
 		return Conflict(DetailDeleting), true
 	case errors.Is(err, blobfs.ErrNotDeleting),

@@ -379,8 +379,10 @@ func (d deps) filesListCommand() *cobra.Command {
 	return cmd
 }
 
-// filesPutCommand is PUT Documents/{org}/directories/{id}/files/{name}
-// with the file's bytes as the raw body. The stored name is --name, or the
+// filesPutCommand is POST Documents/{org}/directories/{id}/files?name={name}
+// with the file's bytes as the raw body; the command keeps the name put,
+// the verb a user reaches for, though the upload is a POST. The stored
+// name is --name, or the
 // file's base name; the Content-Type is --content-type, or the one the
 // extension names, or application/octet-stream, since the service accepts
 // any type.
@@ -404,7 +406,7 @@ func (d deps) filesPutCommand() *cobra.Command {
 					media = octetStream
 				}
 			}
-			res, err := d.newClient().PutFile(cmd.Context(), args[0], args[1], stored, media, body)
+			res, err := d.newClient().UploadFile(cmd.Context(), args[0], args[1], stored, media, body)
 			if err != nil {
 				return err
 			}

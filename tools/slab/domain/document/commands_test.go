@@ -393,7 +393,7 @@ func TestFilesPut_SendsTheFileUnderItsNameAndMediaType(t *testing.T) {
 		return path
 	}
 	pdf, unknown := write("q3.pdf"), write("notes.nope")
-	base := "/api/documents/" + org + "/directories/root/files/"
+	base := "/api/documents/" + org + "/directories/root/files?name="
 	for name, tc := range map[string]struct {
 		args        []string
 		uri         string
@@ -402,7 +402,7 @@ func TestFilesPut_SendsTheFileUnderItsNameAndMediaType(t *testing.T) {
 		"by extension":   {[]string{pdf}, base + "q3.pdf", "application/pdf"},
 		"unknown":        {[]string{unknown}, base + "notes.nope", "application/octet-stream"},
 		"named type":     {[]string{unknown, "--content-type", "text/markdown"}, base + "notes.nope", "text/markdown"},
-		"named, escaped": {[]string{pdf, "--name", "Q3 report/final.pdf"}, base + "Q3%20report%2Ffinal.pdf", "application/pdf"},
+		"named, escaped": {[]string{pdf, "--name", "Q3 report/final.pdf"}, base + "Q3+report%2Ffinal.pdf", "application/pdf"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, srv := newService(t, http.StatusCreated, `{"id":"f","version":1}`)
@@ -410,8 +410,8 @@ func TestFilesPut_SendsTheFileUnderItsNameAndMediaType(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := s.only(t)
-			if got.method != http.MethodPut || got.uri != tc.uri || got.contentType != tc.contentType || got.body != "bytes" {
-				t.Errorf("sent %s %s as %q: %q; want PUT %s as %q", got.method, got.uri, got.contentType, got.body, tc.uri, tc.contentType)
+			if got.method != http.MethodPost || got.uri != tc.uri || got.contentType != tc.contentType || got.body != "bytes" {
+				t.Errorf("sent %s %s as %q: %q; want POST %s as %q", got.method, got.uri, got.contentType, got.body, tc.uri, tc.contentType)
 			}
 		})
 	}

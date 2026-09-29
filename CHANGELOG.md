@@ -20,13 +20,16 @@ accumulate under [Unreleased] until the first cut.
 - The organization logo, `PUT`, `GET`, and `DELETE /api/organizations/{id}/logo`: a raw PNG,
   JPEG, WebP, or GIF body of at most 1 MiB (415 for any other type), stored through blobfs and
   bound by the `organization_image` table, one active per organization; the `GET` is served
-  `no-cache` and revalidates by the object's `ETag` and `Last-Modified`. The organization path
+  `no-cache` and revalidates by the object's `ETag` and `Last-Modified`. The image row is
+  inserted only once its file completes, in the activation's transaction, so a write that stops
+  partway leaves a plain pending row the sweep reclaims, never an image that would block the
+  organization's delete. The organization path
   read moved to `GET /api/organizations/lookup?path=…`.
 - The document domain under `/api/documents/{org}`: each organization's hierarchy of
   directories and files over blobfs, rooted at a document root its first write creates and
   bound by the `organization_directory` table. Directory create, read with its `status`
-  (`active` or `deleting`), cursor-paged listings, moves, and deletes; file uploads of at most
-  10 MiB, metadata, downloads as an attachment (`private, no-cache`, 304 on `If-None-Match` and
+  (`active` or `deleting`), cursor-paged listings, moves, and deletes; file uploads
+  (`POST /directories/{id}/files?name=…`) of at most 10 MiB, metadata, downloads as an attachment (`private, no-cache`, 304 on `If-None-Match` and
   `If-Modified-Since`), moves, and deletes. An id outside the organization's root is 404. The
   moves and the deletes take the row's version in `If-Match`; a recursive directory delete
   marks the branch deleting and answers 202 with the directory's read as its `Location`, its
@@ -35,12 +38,13 @@ accumulate under [Unreleased] until the first cut.
   passes, staged on the reactor the composition root runs at its `reactors` stage. It finishes
   the branches a recursive delete marks and reclaims uploads and deletes left unfinished past
   the stale age; it wakes on each recursive delete, on an interval, and once at startup, and
-  logs a refused pass at warn without failing the service. The `sweep` configuration block
+  logs a refused pass at warn without failing the service. Once the service drains, it finishes
+  the pass in flight and runs no further one. The `sweep` configuration block
   (`APP_SWEEP_INTERVAL`, `APP_SWEEP_BATCH`, `APP_SWEEP_STALE_AGE`; 30s, 100, 1h), and the
   `sweeper` check on `/readyz`.
 - The quiesce gate: the schema-changing admin verbs (`up`, `down`, `steps`, and the state reset)
-  hold it exclusively and each sweep pass holds it shared, so the two never run at once. The
-  gate is per process.
+  hold it exclusively and each sweep pass holds it shared, so the two never run at once and a
+  state reset never deadlocks with a pass (SQLSTATE 40P01). The gate is per process.
 - The shared file protocols in `data`, staged for blobfs: the two-phase write with its
   retry-safe form for fixed ids, the two-phase delete, and the read of an available file; both
   domains run on them.
@@ -137,7 +141,8 @@ accumulate under [Unreleased] until the first cut.
   stage; the root registers each domain's `Verify`.
 - Every 409 carries a curated detail naming its kind, never the error's text: "an entry with that
   name already exists", "the directory is not empty", "the directory is being deleted", "the
-  file is referenced", or "the request conflicts with the current state".
+  file is being deleted", "the file is referenced", or "the request conflicts with the current
+  state".
 - The seeder composes the domains' seed contributions: each domain seeds its own tables with
   its own statements, rows in the seed's transaction (`data.Seed`) and stored files after it
   commits (`data.FileSeed`).
@@ -155,15 +160,6 @@ accumulate under [Unreleased] until the first cut.
 - On the wire, an unmatched path and a wrong method answer as RFC 9457 problem documents
   instead of `net/http.ServeMux`'s plain text. go-web-sdk v0.8.0 changed the router's
   fallbacks; this service's code does not control it.
-
-### Fixed
-
-- The logo write: the image row is inserted only once its file completes, in the activation's
-  transaction. A failed put or completion leaves a plain pending row the sweep reclaims, never
-  an image that refused the reclaim and made the organization undeletable. A failed retire no
-  longer leaves an inactive image no endpoint could clear.
-- A state reset and a sweep pass no longer deadlock (SQLSTATE 40P01): the quiesce gate orders
-  them.
 
 ### Removed
 

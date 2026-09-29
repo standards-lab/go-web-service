@@ -46,13 +46,20 @@ func (s *Storage) Write(ctx context.Context, db *sqlate.DB, body io.Reader, size
 }
 
 // Ensure is the write protocol's retry-safe form, the one a seed runs for a
-// file it names by a fixed id: begin runs in one transaction on db, where
-// the domain calls Files.Ensure with that id, and reports what Ensure did.
-// A row it created, or a pending row an earlier write left, is written as
-// Write writes it, the object put under the row's key and the row
-// completed, and stored reports true. An available row is returned as it
-// stands, nothing put; a deleting one is blobfs.ErrDeleting, since its
-// delete is under way.
+// file it names by a fixed id, id: begin runs in one transaction on db,
+// where the domain calls Files.Ensure with that id, and reports what
+// Ensure did. A row it created, or a pending row an earlier write under id
+// left, is written as Write writes it, the object put under the row's key
+// and the row completed, and stored reports true. An available row under
+// id is returned as it stands, nothing put; a deleting one is
+// blobfs.ErrDeleting, since its delete is under way.
+//
+// Files.Ensure finds a row by its name and returns it with its own id, so
+// a row it found under another id is not the caller's: a client's upload
+// of the same name, pending or complete. Ensure leaves that row as it
+// stands, nothing put and nothing retired, and reports it as
+// blobfs.ErrNameTaken, so a seed that races a client's upload never
+// overwrites the client's object or retires the client's file.
 //
 // Two writers, two processes seeding at once, may race for one row. The
 // loser of the insert has its transaction aborted by the violation, so
@@ -71,7 +78,7 @@ func (s *Storage) Write(ctx context.Context, db *sqlate.DB, body io.Reader, size
 // container, puts its object under the key the earlier write used. The put
 // replaces the object there whole, so the write completes over whatever
 // the container still held.
-func (s *Storage) Ensure(ctx context.Context, db *sqlate.DB, body io.Reader, size int64, begin func(*sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error)) (file blobfs.File, stored bool, err error) {
+func (s *Storage) Ensure(ctx context.Context, db *sqlate.DB, id string, body io.Reader, size int64, begin func(*sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error)) (file blobfs.File, stored bool, err error) {
 	type ensured struct {
 		file    blobfs.File
 		outcome bfdata.WriteOutcome
@@ -90,6 +97,8 @@ func (s *Storage) Ensure(ctx context.Context, db *sqlate.DB, body io.Reader, siz
 	switch {
 	case err != nil:
 		return blobfs.File{}, false, err
+	case e.outcome != bfdata.WriteCreated && e.file.ID != id:
+		return blobfs.File{}, false, fmt.Errorf("file %s holds the name, not %s: %w", e.file.ID, id, blobfs.ErrNameTaken)
 	case e.outcome == bfdata.WritePresent && e.file.Status != blobfs.StatusAvailable:
 		return blobfs.File{}, false, fmt.Errorf("file %s is %s: %w", e.file.ID, e.file.Status, blobfs.ErrDeleting)
 	case e.outcome == bfdata.WritePresent:

@@ -40,6 +40,16 @@ const imagesDirectory = "organization-images"
 // and its row. A concurrent replacement that activated first fails the
 // insert with a unique violation; the new file is retired so it does not
 // linger.
+//
+// Once the write completes, the file is available and nothing references
+// it until the activation commits, so the steps after the write run to the
+// end whatever the client does: the retire of a file whose activation
+// failed and the purge of the replaced file run on a context the request's
+// cancellation does not reach. A client that hangs up after its body is
+// stored cancels the activation, and on the request's context the retire
+// would be cancelled with it, leaving an available file no image
+// references, which the stale reclaim, reaching only pending and deleting
+// rows, never removes.
 func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload, ext string) (LogoIdentity, error) {
 	st := s.storage
 	// On the pool, Ensure finds the directory a concurrent first upload
@@ -60,8 +70,14 @@ func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload
 	if err != nil {
 		return LogoIdentity{}, err
 	}
+	cleanup := context.WithoutCancel(ctx)
 	replaced, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (blobfs.File, error) {
 		if err := st.FS.Files.Hold(ctx, tx, file.ID); err != nil {
+			// The hold reads the new file's row alone, so a deleting one
+			// is the file's own delete, never a directory's.
+			if errors.Is(err, blobfs.ErrDeleting) {
+				err = fmt.Errorf("%w: %w", data.ErrFileDeleting, err)
+			}
 			return blobfs.File{}, err
 		}
 		current, err := s.activeLogo(ctx, tx, organizationID)
@@ -78,14 +94,14 @@ func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload
 	})
 	if err != nil {
 		// The activation rolled back, so no image references the new file.
-		return LogoIdentity{}, errors.Join(err, st.Retire(ctx, s.db.DB, func(*sqlate.Tx) (string, error) { return file.ID, nil }))
+		return LogoIdentity{}, errors.Join(err, st.Retire(cleanup, s.db.DB, func(*sqlate.Tx) (string, error) { return file.ID, nil }))
 	}
 	if replaced.ID != "" {
 		// The new logo is active and the replaced file unreferenced and
 		// deleting, so a failed purge is the request's error though the
 		// replacement stands; the stale reclaim finishes the file if no
 		// retry does.
-		if err := st.Purge(ctx, s.db.DB, replaced); err != nil {
+		if err := st.Purge(cleanup, s.db.DB, replaced); err != nil {
 			return LogoIdentity{}, fmt.Errorf("retire the replaced logo %s: %w", replaced.ID, err)
 		}
 	}
@@ -179,7 +195,10 @@ func (s logoSeed) Write(ctx context.Context, raw json.RawMessage, fixtures fs.FS
 // What the seed does not own it leaves as it stands: a file found under
 // the id that another organization's image binds, one whose organization
 // a client renamed or moved so the state's path now names a new row; a
-// row that holds the id under another name; a file whose delete is under
+// row that holds the id under another name; a row that holds the name
+// under another id, which the write protocol reports as a taken name and
+// no client upload can make, since an uploaded logo is named for its own
+// minted id; a file whose delete is under
 // way, which the sweep finishes and the next seed writes again; and a
 // file a concurrent seed activated first. Only a file this run stored and
 // could not activate is retired, as a lost replacement is, and at the
@@ -213,11 +232,11 @@ func (s *store) seedLogo(ctx context.Context, l logoSeedRow, fixtures fs.FS) (bo
 	if err != nil {
 		return false, err
 	}
-	file, stored, err := st.Ensure(ctx, s.db.DB, bytes.NewReader(body), int64(len(body)), func(tx *sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
+	file, stored, err := st.Ensure(ctx, s.db.DB, l.ID, bytes.NewReader(body), int64(len(body)), func(tx *sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
 		return st.FS.Files.Ensure(ctx, tx, st.Objects, dir.ID, l.ID+ext, contentType, bfdata.WithID(l.ID))
 	})
 	switch {
-	case errors.Is(err, blobfs.ErrDeleting), errors.Is(err, blobfs.ErrIDTaken):
+	case errors.Is(err, blobfs.ErrDeleting), errors.Is(err, blobfs.ErrIDTaken), errors.Is(err, blobfs.ErrNameTaken):
 		return false, nil
 	case err != nil:
 		return false, err

@@ -679,11 +679,11 @@ func (s *storageState) createBranch(ctx context.Context, r *scenario.Reporter) e
 	if err != nil {
 		return err
 	}
-	filePath := s.directory(s.acme.ID, sub.ID) + "/files/notes.txt"
+	filePath := s.directory(s.acme.ID, sub.ID) + "/files?name=notes.txt"
 	headers := []httpx.Header{{Name: "Content-Type", Value: "text/plain; charset=utf-8"}}
 	content := "Draft notes, removed with their branch.\n"
-	r.Request(http.MethodPut, filePath, headers, content)
-	res, err := s.client.Put(ctx, filePath, content, headers...)
+	r.Request(http.MethodPost, filePath, headers, content)
+	res, err := s.client.Post(ctx, filePath, content, headers...)
 	if err != nil {
 		return err
 	}

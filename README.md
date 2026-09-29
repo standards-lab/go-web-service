@@ -171,7 +171,8 @@ missing header answers 428 and a stale version 412. Every rejection is an RFC 94
 conflict, 409, carries a curated `detail` naming its kind and never the underlying error's
 text: "the request conflicts with the current state" for a taken code, a missing parent, a
 cycle, a concurrent logo replacement, and a delete of an organization that still has children,
-a logo, or a document root. A seeded organization holds a logo, so its delete answers 409 until
+a logo, or a document root, and "the file is being deleted" for a logo `PUT` whose new file's
+delete began before its activation. A seeded organization holds a logo, so its delete answers 409 until
 its logo is deleted.
 
 The logo is a raw body of at most 1 MiB in a raster type, PNG, JPEG, WebP, or GIF; any other
@@ -189,7 +190,8 @@ curl 'localhost:8080/api/organizations/lookup?path=/acme/engineering'  # lookup 
 
 The document domain is mounted under `/api/documents/{org}`, each organization's hierarchy of
 directories and files over blobfs and the object store. A directory id may be `root`, the
-organization's document root, which its first write creates:
+organization's document root, which its first write creates; until then, `root`'s listings
+answer an empty page, and for an organization that does not exist, 404:
 
 | Method | Path | What it does |
 |--------|------|--------------|
@@ -199,23 +201,28 @@ organization's document root, which its first write creates:
 | `GET` | `/directories/{id}/files` | List its files, pending and available (paged, filtered, sorted) |
 | `DELETE` | `/directories/{id}` | Delete an empty directory (204), or with `?recursive=true` its branch (202) |
 | `POST` | `/directories/{id}/move` | Move it under a new parent within the root |
-| `PUT` | `/directories/{id}/files/{name}` | Upload a file (raw body, at most 10 MiB) |
+| `POST` | `/directories/{id}/files?name={name}` | Upload a file (raw body, at most 10 MiB) |
 | `GET` | `/files/{id}` | Read a file's metadata |
 | `GET` | `/files/{id}/content` | Download an available file, as an attachment |
 | `DELETE` | `/files/{id}` | Delete a file |
 | `POST` | `/files/{id}/move` | Move it into a directory within the root |
 
-The moves and the deletes take the row's version in `If-Match`: 428 when it is missing, 412
-when it is stale. A recursive delete marks the branch deleting and answers 202 with the
+An upload creates a new file under an id the server mints, so it is a `POST` to its directory's
+files, the file's name in the required `name` parameter, and answers 201 with the file's
+metadata read as its `Location`. It is not idempotent: a retry after a lost response is a second
+create, which answers 409 on the name the first took. The moves and the deletes take the row's
+version in `If-Match`: 428 when it is missing, 412 when it is stale. A recursive delete marks the branch deleting and answers 202 with the
 directory's read as its `Location`; the [sweep](#sweep) then removes the rows and their
 objects. Until the sweep finishes, the directory reads `deleting`, its listings answer 404, and
 a write into it answers 409 "the directory is being deleted". A repeated recursive delete
 answers 202 and nudges the sweep again. An object the sweep cannot delete leaves its file, and
 the directories above it, for a later pass; the sweep logs the refusal and runs on. A recursive
 delete of `root` removes the organization's document root with it, and the next write creates a
-new one. Every conflict carries one of five curated details: "an entry with that name already
-exists", "the directory is not empty", "the directory is being deleted", "the file is
-referenced", or "the request conflicts with the current state".
+new one. Every conflict carries one of six curated details: "an entry with that name already
+exists", "the directory is not empty", "the directory is being deleted", "the file is being
+deleted", "the file is referenced", or "the request conflicts with the current state". A move of
+a file whose own delete began, in a directory that is not deleting, answers "the file is being
+deleted"; a file in a marked branch, or a move into one, answers the directory's detail.
 
 An id outside the organization's document root answers 404, as an absent one does, so no
 request reads, moves, or deletes across organizations. A download is served as
@@ -260,9 +267,12 @@ name the set they act on, refused with 400 when it is missing or undeclared.
 A named state is one file under `data/seeds/`, keyed by each domain's seed contribution:
 `organizations`, `logos`, and `documents`. `default` is the reference tree, a logo for each
 organization, and acme's document tree; `empty` is nothing. The files a state names sit under
-`data/seeds/fixtures/`. A seed applies idempotently, so `admin.seed` names the state a
-deployment initializes with at its first start and leaves alone at every later one. The seed's
-response, and the state's `seeded` member, count what the run stored under the same keys. The
+`data/seeds/fixtures/`. `admin.seed` names the state the service seeds at every start, not only
+the first; of the checked-in configurations, only the local overlay names one (`default`). A
+seed applies idempotently: it leaves a row or file that exists as it is and writes again any the
+state names that is missing, so a seeded organization, logo, or file deleted since the last
+start is restored at the next. The seed's response, and the state's `seeded` member, count what
+the run stored under the same keys. The
 rows commit in one transaction first, and the files are written after it commits, since a
 file's object is put outside any transaction.
 
@@ -295,7 +305,9 @@ The sweep finishes the rows that a recursive directory delete, a write that stop
 delete that stops partway leave for later: a branch marked deleting, a pending upload, a file
 whose delete began. It removes each file's object and then its row, and each directory once it
 is empty. The sweep is the `data` package's background worker (`data.Storage.SweepWorker`),
-which runs blobfs's sweep in bounded passes while a pass reports more.
+which runs blobfs's sweep in bounded passes while a pass reports more. Once the service begins to
+drain, the sweep finishes the pass in flight and runs no further one, whatever remains, so a
+large backlog never holds the drain; the next start's wake finds what is left.
 
 A Reactor, in the architecture's sense, calls a Domain Service. The sweep calls none, so it is
 not one; it is the exception the composition root stages as a reactor anyway, since the reactor
@@ -344,8 +356,9 @@ recursive delete waited out through the sweep.
 Two tiers. The unit tier, `mise run test`, runs on every pull request and touches no service,
 network, or disk: a package that runs SQL proves it over sqlate's scripted driver, and one that
 stores objects over go-storage's fake. The `data` package's tests prove the shared file
-protocols, the seeder's composition of the domains' seed contributions, and the sweep worker:
-its pass loop, its logging policy, and its wait on the quiesce gate. The integration tier,
+protocols, the seeder's composition of the domains' seed contributions, and the sweep worker
+through its public constructor over both: its pass loop, its stop at the drain, its logging
+policy, and its wait on the quiesce gate. The integration tier,
 `mise run integration`, runs the composed service black-box through its API against the compose
 stack, in CI on every merge to main and on demand from the Actions tab.
 
@@ -362,7 +375,8 @@ state control through the admin mount; nothing in the service exists for the tes
 The storage cases:
 
 - `TestDocument`: the document API's contract, the deleting state, the guarded deletes, the
-  conflicts' curated details, a download's round trip with its exact bytes and headers and its
+  conflicts' curated details (a file's own delete told apart from its directory's), the listings
+  of an organization that does not exist, a download's round trip with its exact bytes and headers and its
   304s, and cross-organization isolation, one organization reaching none of another's
   directories or files.
 - `TestDocumentSweep`: a marked branch swept of its rows and objects, a refused pass that

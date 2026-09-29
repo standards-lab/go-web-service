@@ -2,6 +2,7 @@ package document_test
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"github.com/standards-lab/sqlate/query"
 	"github.com/standards-lab/sqlate/sqltest"
 
+	"github.com/standards-lab/go-web-service/data"
 	"github.com/standards-lab/go-web-service/domain/document"
 )
 
@@ -56,7 +58,7 @@ const (
 func TestStore_FileProtocols(t *testing.T) {
 	ctx := context.Background()
 	s, rec, fake := serviceOver(t,
-		// PutFile: the pending row with its scope in one transaction, the
+		// UploadFile: the pending row with its scope in one transaction, the
 		// put, the completion on the pool.
 		root(rootID), within(true), fileRows(file(fileID, dirID, blobfs.StatusPending, 1)),
 		fileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)),
@@ -71,9 +73,9 @@ func TestStore_FileProtocols(t *testing.T) {
 		fileRows(file(fileID, rootID, blobfs.StatusDeleting, 4)),
 		exec(1),
 	)
-	id, err := s.PutFile(ctx, orgID, dirID, "report.txt", textUpload(t))
+	id, err := s.UploadFile(ctx, orgID, dirID, "report.txt", textUpload(t))
 	if err != nil || id != (document.Identity{ID: fileID, Version: 2}) {
-		t.Fatalf("PutFile = %+v, %v", id, err)
+		t.Fatalf("UploadFile = %+v, %v", id, err)
 	}
 	if fake.Puts() != 1 {
 		t.Errorf("puts = %d, want the upload stored once", fake.Puts())
@@ -116,14 +118,14 @@ func TestStore_FileProtocols(t *testing.T) {
 
 // An upload into the alias of an organization without a root ensures it
 // first, the directory and its owner row in one transaction.
-func TestStore_PutFileEnsuresTheRoot(t *testing.T) {
+func TestStore_UploadFileEnsuresTheRoot(t *testing.T) {
 	s, rec, _ := serviceOver(t,
 		root(), organization(), dirRows(), dirRows(directory(rootID, blobfs.RootID, orgID, 1)), exec(1),
 		root(rootID), fileRows(file(fileID, rootID, blobfs.StatusPending, 1)),
 		fileRows(file(fileID, rootID, blobfs.StatusAvailable, 2)),
 	)
-	if _, err := s.PutFile(context.Background(), orgID, document.RootAlias, "report.txt", textUpload(t)); err != nil {
-		t.Fatalf("PutFile = %v", err)
+	if _, err := s.UploadFile(context.Background(), orgID, document.RootAlias, "report.txt", textUpload(t)); err != nil {
+		t.Fatalf("UploadFile = %v", err)
 	}
 	sameOps(t, rec,
 		q, begin, q, q, q, x, commit,
@@ -150,8 +152,8 @@ func TestStore_AFailedPutRetiresThePendingRow(t *testing.T) {
 		fileRows(file(fileID, dirID, blobfs.StatusDeleting, 2)), exec(1),
 	)
 	fake.FailPut(errors.New("put failed"))
-	if _, err := s.PutFile(context.Background(), orgID, dirID, "report.txt", textUpload(t)); err == nil {
-		t.Fatal("PutFile succeeded over a failed put")
+	if _, err := s.UploadFile(context.Background(), orgID, dirID, "report.txt", textUpload(t)); err == nil {
+		t.Fatal("UploadFile succeeded over a failed put")
 	}
 	sameOps(t, rec, begin, q, q, q, commit, begin, q, commit, x)
 }
@@ -236,11 +238,11 @@ func TestStore_ADeletingDirectory(t *testing.T) {
 	}
 }
 
-// An organization without a root lists nothing under the alias, and a
-// specific id is not found.
+// An organization without a root lists nothing under the alias, once the
+// organization is read, and a specific id is not found.
 func TestStore_ReadsBeforeTheRoot(t *testing.T) {
 	ctx := context.Background()
-	s, _, _ := serviceOver(t, root(), root())
+	s, _, _ := serviceOver(t, root(), organization(), root())
 	q, _ := web.ParseQuery(url.Values{}, web.Limits{DefaultSize: 20, MaxSize: 100})
 	items, paging, err := s.ListFiles(ctx, orgID, document.RootAlias, q)
 	if err != nil || len(items) != 0 || paging.Total != 0 {
@@ -249,6 +251,24 @@ func TestStore_ReadsBeforeTheRoot(t *testing.T) {
 	if _, _, err := s.ListFiles(ctx, orgID, dirID, q); err == nil {
 		t.Fatal("ListFiles(id) before the root found a directory")
 	}
+}
+
+// The alias's listing of an organization that does not exist is the
+// missing row, as every other route answers it, not an empty page.
+func TestStore_ReadsOfAMissingOrganization(t *testing.T) {
+	ctx := context.Background()
+	s, rec, _ := serviceOver(t,
+		root(), sqltest.Response{Columns: []string{"id"}},
+		root(), sqltest.Response{Columns: []string{"id"}},
+	)
+	page, _ := web.ParseQuery(url.Values{}, web.Limits{DefaultSize: 20, MaxSize: 100})
+	if _, _, err := s.ListFiles(ctx, orgID, document.RootAlias, page); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("ListFiles(root) = %v; want the missing organization", err)
+	}
+	if _, _, err := s.ListDirectories(ctx, orgID, document.RootAlias, page); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("ListDirectories(root) = %v; want the missing organization", err)
+	}
+	sameOps(t, rec, q, q, q, q)
 }
 
 // A directory move: the scope of the directory and of its destination in
@@ -405,27 +425,33 @@ func TestStore_DeletesAtAStaleVersion(t *testing.T) {
 }
 
 // The writer rule: a completion refused because a mark reached the row,
-// or because the sweep removed it, deletes the object the put stored under
-// the key the write holds, and leaves the row to the sweep.
+// the stale reclaim began its delete, or the sweep removed it, deletes the
+// object the put stored under the key the write holds, and leaves the row
+// to the sweep. A deleting row is read back with its directory: in a
+// marked branch the refusal is the directory's, and in an active
+// directory the file's own.
 func TestStore_ACompletionTheSweepRefusedDeletesTheObject(t *testing.T) {
 	// The completion's update matches no pending row, and blobfs reads the
 	// row to tell why: deleting, or gone.
+	deletingRow := fileRows(file(fileID, dirID, blobfs.StatusDeleting, 2))
 	cases := map[string]struct {
-		read sqltest.Response
-		want error
+		reads      []sqltest.Response
+		want, not  error
+		readsAfter int
 	}{
-		"marked":  {fileRows(file(fileID, dirID, blobfs.StatusDeleting, 2)), blobfs.ErrDeleting},
-		"removed": {fileRows(), blobfs.ErrNotFound},
+		"marked":    {[]sqltest.Response{deletingRow, deletingRow, dirRows(deleting(directory(dirID, rootID, "reports", 1)))}, blobfs.ErrDeleting, data.ErrFileDeleting, 2},
+		"reclaimed": {[]sqltest.Response{deletingRow, deletingRow, dirRows(directory(dirID, rootID, "reports", 1))}, data.ErrFileDeleting, nil, 2},
+		"removed":   {[]sqltest.Response{fileRows()}, blobfs.ErrNotFound, data.ErrFileDeleting, 0},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			s, rec, fake := serviceOver(t,
+			s, rec, fake := serviceOver(t, append([]sqltest.Response{
 				root(rootID), within(true), fileRows(file(fileID, dirID, blobfs.StatusPending, 1)),
-				fileRows(), c.read,
-			)
-			_, err := s.PutFile(context.Background(), orgID, dirID, "report.txt", textUpload(t))
-			if !errors.Is(err, c.want) {
-				t.Fatalf("PutFile = %v; want %v", err, c.want)
+				fileRows(),
+			}, c.reads...)...)
+			_, err := s.UploadFile(context.Background(), orgID, dirID, "report.txt", textUpload(t))
+			if !errors.Is(err, c.want) || (c.not != nil && errors.Is(err, c.not)) {
+				t.Fatalf("UploadFile = %v; want %v, not %v", err, c.want, c.not)
 			}
 			if fake.Puts() != 1 {
 				t.Errorf("puts = %d; want the object put once", fake.Puts())
@@ -433,7 +459,53 @@ func TestStore_ACompletionTheSweepRefusedDeletesTheObject(t *testing.T) {
 			if _, err := fake.Get(context.Background(), fileID+"/report.txt", storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
 				t.Errorf("the object outlived the refused completion: %v", err)
 			}
-			sameOps(t, rec, begin, q, q, q, commit, q, q)
+			want := []sqltest.Op{begin, q, q, q, commit, q, q}
+			for range c.readsAfter {
+				want = append(want, q)
+			}
+			sameOps(t, rec, want...)
+		})
+	}
+}
+
+// A move refused as deleting is the file's own delete when the file is
+// deleting in an active directory, and the directory's when the file sits
+// in a marked branch or the destination is deleting.
+func TestStore_AMoveOfADeletingFile(t *testing.T) {
+	deletingFile := file(fileID, dirID, blobfs.StatusDeleting, 3)
+	scope := func(f blobfs.File) []sqltest.Response {
+		return []sqltest.Response{root(rootID), fileRows(f), within(true), within(true)}
+	}
+	cases := map[string]struct {
+		responses []sqltest.Response
+		want, not error
+	}{
+		"its own delete": {append(scope(deletingFile),
+			fileRows(), fileRows(deletingFile), // the move matches nothing; blobfs reads the row: deleting
+			fileRows(deletingFile),                          // the layer reads the file back
+			dirRows(directory(dirID, rootID, "reports", 1)), // in an active directory
+		), data.ErrFileDeleting, nil},
+		"a marked branch": {append(scope(deletingFile),
+			fileRows(), fileRows(deletingFile), fileRows(deletingFile),
+			dirRows(deleting(directory(dirID, rootID, "reports", 1))),
+		), blobfs.ErrDeleting, data.ErrFileDeleting},
+		"a deleting destination": {append(scope(file(fileID, dirID, blobfs.StatusAvailable, 2)),
+			fileRows(), fileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), // the move matches nothing; the row is active
+			dirRows(directory(dirID, rootID, "reports", 1)),           // blobfs reads its directory: active
+			dirRows(deleting(directory(subID, rootID, "archive", 1))), // and the destination: deleting
+			fileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)),  // the layer reads the file back: not deleting
+		), blobfs.ErrDeleting, data.ErrFileDeleting},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, rec, _ := serviceOver(t, c.responses...)
+			_, err := s.MoveFile(context.Background(), orgID, fileID, 2, document.MoveFile{DirectoryID: subID, Name: "report.txt"})
+			if !errors.Is(err, c.want) || (c.not != nil && errors.Is(err, c.not)) {
+				t.Fatalf("MoveFile = %v; want %v, not %v", err, c.want, c.not)
+			}
+			if rec.Pending() != 0 {
+				t.Errorf("pending = %d: %v", rec.Pending(), rec.Ops())
+			}
 		})
 	}
 }

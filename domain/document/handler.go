@@ -36,9 +36,10 @@ type handler struct {
 // directories and its files, the delete (DELETE /directories/{id}, 204 for
 // an empty directory, or with ?recursive=true 202 once the branch is
 // marked for the sweep), and the move, an action on its own path
-// (POST /directories/{id}/move). An upload is a PUT of the raw body to the
-// new file's name in its directory (PUT /directories/{id}/files/{name}).
-// The files: the metadata read (GET /files/{id}), the download
+// (POST /directories/{id}/move). An upload is a POST of the raw body to its
+// directory's files, the new file's name in the name query parameter
+// (POST /directories/{id}/files?name=…), a create of a file whose id the
+// server mints. The files: the metadata read (GET /files/{id}), the download
 // (GET /files/{id}/content), the delete, and the move. The moves and the
 // deletes take their version precondition from If-Match. Every rejection
 // is an RFC 9457 problem through the group's error writer: the SDK maps
@@ -56,7 +57,7 @@ func Routes(service *Service, limits web.Limits) *web.Group {
 	g.HandleErr("GET", "/{org}/directories/{id}/files", h.listFiles)
 	g.HandleErr("DELETE", "/{org}/directories/{id}", h.deleteDirectory)
 	g.HandleErr("POST", "/{org}/directories/{id}/move", h.moveDirectory)
-	g.HandleErr("PUT", "/{org}/directories/{id}/files/{name}", h.putFile)
+	g.HandleErr("POST", "/{org}/directories/{id}/files", h.uploadFile)
 	g.HandleErr("GET", "/{org}/files/{id}", h.file)
 	g.HandleErr("GET", "/{org}/files/{id}/content", h.content)
 	g.HandleErr("DELETE", "/{org}/files/{id}", h.deleteFile)
@@ -186,19 +187,24 @@ func (h *handler) moveDirectory(w http.ResponseWriter, r *http.Request) error {
 	return web.WriteJSON(w, http.StatusOK, ident)
 }
 
-// putFile accepts any media type: the download never renders the bytes,
-// so the type is only what the client declared. The Location is the new
-// file's metadata.
-func (h *handler) putFile(w http.ResponseWriter, r *http.Request) error {
+// uploadFile reads the path ids, then the required name query parameter,
+// then the body. It accepts any media type: the download never renders
+// the bytes, so the type is only what the client declared. The Location is
+// the new file's metadata.
+func (h *handler) uploadFile(w http.ResponseWriter, r *http.Request) error {
 	org, id, err := directoryPath(r)
 	if err != nil {
 		return err
+	}
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		return fmt.Errorf("%w: the name query parameter is required", ErrValidation)
 	}
 	upload, err := web.ReadUpload(w, r, maxFileBody)
 	if err != nil {
 		return err
 	}
-	ident, err := h.service.PutFile(r.Context(), org, id, r.PathValue("name"), upload)
+	ident, err := h.service.UploadFile(r.Context(), org, id, name, upload)
 	if err != nil {
 		return err
 	}

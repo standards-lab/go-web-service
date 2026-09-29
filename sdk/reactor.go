@@ -11,13 +11,14 @@ import (
 
 // The reactor tenant, bound for go-core as its own package beside
 // lifecycle: the spike-messaging reactor (Source, Func, New with Grace,
-// Start, Shutdown, Ready, Err, and Every), staged here with one addition,
-// the Wake source. A reactor joins one source of occurrences to one
-// function for the process lifetime. It is a lifecycle component with the
-// Start, Shutdown, and Ready methods other infrastructure exposes, plus
-// Err for a failure while running; it knows nothing of the coordinator,
-// and the composition root registers it with lifecycle.Coordinator.Add at
-// the stage it chooses and passes its Err to Coordinator.Monitor.
+// Start, Shutdown, Ready, Err, and Every), staged here with two additions,
+// the Wake source and the drain signal, Draining. A reactor joins one
+// source of occurrences to one function for the process lifetime. It is a
+// lifecycle component with the Start, Shutdown, and Ready methods other
+// infrastructure exposes, plus Err for a failure while running; it knows
+// nothing of the coordinator, and the composition root registers it with
+// lifecycle.Coordinator.Add at the stage it chooses and passes its Err to
+// Coordinator.Monitor.
 //
 // Start detaches the reactor from the context it is given, so cancelling
 // the run context at a signal does not interrupt handling before the
@@ -26,12 +27,30 @@ import (
 // then, once the Grace period passes, cancels the handlers' contexts and
 // waits for them to unwind. Without Grace, a handler's context is
 // cancelled only when Shutdown's own context ends, which is the drain
-// deadline.
+// deadline. A handler that runs in several steps, such as a loop over
+// bounded passes, reads Draining from its context to stop between steps
+// once the drain begins, rather than run until the grace cancels it.
 
-// Func handles one occurrence. Its context carries the source's values and
-// any deadline the source set for the occurrence, and is otherwise
-// cancelled only when the drain cancels the handlers.
+// Func handles one occurrence. Its context carries the source's values,
+// any deadline the source set for the occurrence, and the reactor's drain
+// signal, which [Draining] reads; it is otherwise cancelled only when the
+// drain cancels the handlers.
 type Func[T any] func(ctx context.Context, occ T) error
+
+// drainingKey is the context key under which a reactor puts its drain
+// signal on each handler's context.
+type drainingKey struct{}
+
+// Draining returns the drain signal of the reactor running the handler
+// whose context is ctx: a channel closed once the reactor's Shutdown
+// begins. The handling in flight is not interrupted by it; a handler that
+// works in steps checks it between them and returns once it is closed,
+// leaving what remains to the next start. A context no reactor gave has
+// no signal, and Draining returns nil, which never closes.
+func Draining(ctx context.Context) <-chan struct{} {
+	ch, _ := ctx.Value(drainingKey{}).(chan struct{})
+	return ch
+}
 
 // Source delivers occurrences to a Func.
 //
@@ -86,22 +105,24 @@ type Reactor[T any] struct {
 	fn   Func[T]
 	opts reactorOptions
 
-	mu    sync.Mutex
-	state reactorState
-	stop  context.CancelFunc // ends Receive's context
-	abort context.CancelFunc // cancels handler contexts
-	err   error              // Receive's result once stopping
-	done  chan struct{}
-	errs  chan error
+	mu       sync.Mutex
+	state    reactorState
+	stop     context.CancelFunc // ends Receive's context
+	abort    context.CancelFunc // cancels handler contexts
+	err      error              // Receive's result once stopping
+	draining chan struct{}      // closed once Shutdown begins
+	done     chan struct{}
+	errs     chan error
 }
 
 // New returns a reactor that runs src into fn.
 func New[T any](src Source[T], fn Func[T], opts ...Option) *Reactor[T] {
 	r := &Reactor[T]{
-		src:  src,
-		fn:   fn,
-		done: make(chan struct{}),
-		errs: make(chan error, 1),
+		src:      src,
+		fn:       fn,
+		draining: make(chan struct{}),
+		done:     make(chan struct{}),
+		errs:     make(chan error, 1),
 	}
 	for _, opt := range opts {
 		opt(&r.opts)
@@ -135,7 +156,7 @@ func (r *Reactor[T]) Start(ctx context.Context) error {
 		}
 		defer cancel()
 		defer context.AfterFunc(abortCtx, cancel)()
-		return r.fn(hctx, occ)
+		return r.fn(context.WithValue(hctx, drainingKey{}, r.draining), occ)
 	}
 
 	go func() {
@@ -154,24 +175,34 @@ func (r *Reactor[T]) Start(ctx context.Context) error {
 	return nil
 }
 
-// Shutdown drains the reactor in two phases. It stops the source and
-// waits for the handling in flight; once the [Grace] period passes, it
-// cancels the handlers' contexts and waits for them to unwind. It returns
-// once Receive returns, or when ctx ends, which cancels the handlers and
-// stops waiting. The error reports a failure sent on Err that nothing
-// read, a grace that ran out, or ctx's error, or else Receive's error.
-// Shutdown before Start retires the reactor, so it never starts.
+// Shutdown drains the reactor in two phases. It closes the drain signal
+// ([Draining]), stops the source, and waits for the handling in flight;
+// once the [Grace] period passes, it cancels the handlers' contexts and
+// waits for them to unwind. It returns once Receive returns, or when ctx
+// ends, which cancels the handlers and stops waiting. The error reports a
+// failure sent on Err that nothing read, a grace that ran out, or ctx's
+// error, or else Receive's error. Shutdown before Start retires the
+// reactor, so it never starts, and a later Shutdown of a retired reactor
+// returns nil.
 func (r *Reactor[T]) Shutdown(ctx context.Context) error {
 	r.mu.Lock()
 	switch r.state {
 	case reactorIdle:
 		r.state = reactorStopped
+		close(r.draining)
 		close(r.errs)
 		close(r.done)
 		r.mu.Unlock()
 		return nil
 	case reactorRunning:
 		r.state = reactorStopping
+		close(r.draining)
+	case reactorStopped:
+		if r.stop == nil {
+			// Retired before Start: there is no source to stop.
+			r.mu.Unlock()
+			return nil
+		}
 	}
 	r.mu.Unlock()
 

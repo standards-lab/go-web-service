@@ -105,6 +105,7 @@ func TestRoutes_RejectBeforeAnyOperation(t *testing.T) {
 		"move file: missing name":         {"POST", base + "/files/" + fileID + "/move", `"1"`, `{"directory_id":"root"}`, 400, "name"},
 		"move file: malformed body":       {"POST", base + "/files/" + fileID + "/move", `"1"`, `[`, 400, "body:"},
 		"move directory on PUT unrouted":  {"PUT", base + "/directories/" + dirID + "/move", `"1"`, `{}`, 405, ""},
+		"upload by PUT unrouted":          {"PUT", base + "/directories/root/files/report.txt", "", "report", 404, ""},
 	}
 	h := module(t)
 	for name, c := range cases {
@@ -124,11 +125,11 @@ func TestRoutes_RejectBeforeAnyOperation(t *testing.T) {
 	}
 }
 
-// upload sends a raw body with the given Content-Type, none when empty,
+// upload POSTs a raw body with the given Content-Type, none when empty,
 // and declared length; a length of -1 is a chunked body.
 func upload(t *testing.T, h http.Handler, path, contentType, body string, length int64) *httptest.ResponseRecorder {
 	t.Helper()
-	r := httptest.NewRequest("PUT", path, strings.NewReader(body))
+	r := httptest.NewRequest("POST", path, strings.NewReader(body))
 	if contentType != "" {
 		r.Header.Set("Content-Type", contentType)
 	}
@@ -138,21 +139,23 @@ func upload(t *testing.T, h http.Handler, path, contentType, body string, length
 	return rec
 }
 
-// An upload the layer would refuse is refused on its path and headers,
-// before any statement runs or byte is stored.
-func TestPutFile_RefusesBeforeAnyIO(t *testing.T) {
-	path := base + "/directories/root/files/report.txt"
+// An upload the layer would refuse is refused on its path, its name, and
+// its headers, before any statement runs or byte is stored.
+func TestUploadFile_RefusesBeforeAnyIO(t *testing.T) {
+	path := base + "/directories/root/files?name=report.txt"
 	cases := map[string]struct {
 		path, contentType string
 		length            int64
 		status            int
 		detail            string
 	}{
-		"malformed directory": {base + "/directories/nope/files/report.txt", "text/plain", 6, 400, "must be a UUID"},
+		"malformed directory": {base + "/directories/nope/files?name=report.txt", "text/plain", 6, 400, "must be a UUID"},
+		"missing name":        {base + "/directories/root/files", "text/plain", 6, 400, "name query parameter is required"},
+		"empty name":          {base + "/directories/root/files?name=", "text/plain", 6, 400, "name query parameter is required"},
 		"missing type":        {path, "", 6, 415, "Content-Type"},
 		"chunked body":        {path, "text/plain", -1, 411, "Content-Length"},
 		"over 10 MiB":         {path, "text/plain", 10<<20 + 1, 413, "exceed"},
-		"a slash in the name": {base + "/directories/root/files/a%2Fb", "text/plain", 6, 400, "name"},
+		"a slash in the name": {base + "/directories/root/files?name=a%2Fb", "text/plain", 6, 400, "name"},
 	}
 	h := module(t)
 	for name, c := range cases {
@@ -167,12 +170,12 @@ func TestPutFile_RefusesBeforeAnyIO(t *testing.T) {
 
 // Any media type is accepted, and the upload answers 201 with the new
 // file's identity and its metadata as the Location.
-func TestPutFile_AnswersCreatedWithLocation(t *testing.T) {
+func TestUploadFile_AnswersCreatedWithLocation(t *testing.T) {
 	h := module(t,
 		root(rootID), within(true), fileRows(file(fileID, dirID, blobfs.StatusPending, 1)),
 		fileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)),
 	)
-	rec := upload(t, h, base+"/directories/"+dirID+"/files/page.html", "text/html", "<p>hi</p>", 9)
+	rec := upload(t, h, base+"/directories/"+dirID+"/files?name=page.html", "text/html", "<p>hi</p>", 9)
 	if rec.Code != 201 || rec.Header().Get("Location") != base+"/files/"+fileID || !strings.Contains(rec.Body.String(), `"id":"`+fileID+`","version":2`) {
 		t.Fatalf("status %d, Location %q, body %s", rec.Code, rec.Header().Get("Location"), rec.Body)
 	}
@@ -207,7 +210,7 @@ func TestRoutes_OutsideTheRootIs404(t *testing.T) {
 		"file read":     {[]sqltest.Response{root(rootID), fileRows(file(fileID, otherID, blobfs.StatusAvailable, 2)), within(false)}, "GET", base + "/files/" + fileID, "", ""},
 		"file content":  {[]sqltest.Response{root(rootID), fileRows(file(fileID, otherID, blobfs.StatusAvailable, 2)), within(false)}, "GET", base + "/files/" + fileID + "/content", "", ""},
 		"file delete":   {[]sqltest.Response{root(rootID), fileRows(file(fileID, otherID, blobfs.StatusAvailable, 2)), within(false)}, "DELETE", base + "/files/" + fileID, `"2"`, ""},
-		"upload":        {[]sqltest.Response{root(rootID), within(false)}, "PUT", base + "/directories/" + otherID + "/files/a.txt", "", ""},
+		"upload":        {[]sqltest.Response{root(rootID), within(false)}, "POST", base + "/directories/" + otherID + "/files?name=a.txt", "", ""},
 		"absent file":   {[]sqltest.Response{root(rootID), fileRows()}, "GET", base + "/files/" + fileID, "", ""},
 		"no root":       {[]sqltest.Response{root()}, "GET", base + "/directories/" + dirID, "", ""},
 		"no root, list": {[]sqltest.Response{root()}, "GET", base + "/directories/" + dirID + "/directories", "", ""},
@@ -215,7 +218,7 @@ func TestRoutes_OutsideTheRootIs404(t *testing.T) {
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			h := module(t, c.responses...)
-			if c.method == "PUT" {
+			if strings.Contains(c.path, "/files?name=") {
 				problem(t, upload(t, h, c.path, "text/plain", "x", 1), 404)
 				return
 			}
@@ -226,9 +229,46 @@ func TestRoutes_OutsideTheRootIs404(t *testing.T) {
 
 // An organization without a root yet lists an empty page at its alias.
 func TestListFiles_BeforeTheRootIsAnEmptyPage(t *testing.T) {
-	rec := send(t, module(t, root()), "GET", base+"/directories/root/files", "", "")
+	rec := send(t, module(t, root(), organization()), "GET", base+"/directories/root/files", "", "")
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"items":[]`) {
 		t.Fatalf("status %d, body %s", rec.Code, rec.Body)
+	}
+}
+
+// The alias's listings of an organization that does not exist are 404, as
+// every other route answers it.
+func TestListings_OfAMissingOrganizationAre404(t *testing.T) {
+	for _, listing := range []string{"directories", "files"} {
+		t.Run(listing, func(t *testing.T) {
+			h := module(t, root(), sqltest.Response{Columns: []string{"id"}})
+			problem(t, send(t, h, "GET", base+"/directories/root/"+listing, "", ""), 404)
+		})
+	}
+}
+
+// A status blobfs adds that the layer does not name yet is a server
+// fault, 500, rather than the library's text on the wire.
+func TestReads_AnUnknownStatusIs500(t *testing.T) {
+	archived := file(fileID, dirID, blobfs.StatusAvailable, 2)
+	archived.Status = "archived"
+	dir := directory(dirID, rootID, "reports", 1)
+	dir.Status = "archived"
+	cases := map[string]struct {
+		responses []sqltest.Response
+		path      string
+	}{
+		"file read":   {[]sqltest.Response{root(rootID), fileRows(archived), within(true)}, base + "/files/" + fileID},
+		"file list":   {[]sqltest.Response{root(rootID), within(true), sqltest.WithTotal(fileRows(archived), 1), dirRows(directory(dirID, rootID, "reports", 1))}, base + "/directories/" + dirID + "/files"},
+		"directories": {[]sqltest.Response{root(rootID), sqltest.WithTotal(dirRows(dir), 1), dirRows(directory(rootID, blobfs.RootID, orgID, 1))}, base + "/directories/root/directories"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := send(t, module(t, c.responses...), "GET", c.path, "", "")
+			problem(t, rec, 500)
+			if strings.Contains(rec.Body.String(), "archived") {
+				t.Errorf("body %s carries the library's status", rec.Body)
+			}
+		})
 	}
 }
 
@@ -318,7 +358,7 @@ func TestListings_WithinADeletingBranchAre404(t *testing.T) {
 // integration suite each one's end to end.
 func TestRoutes_AConflictCarriesItsCuratedDetail(t *testing.T) {
 	h := module(t, root(rootID), within(true), sqltest.Response{Err: takenName()})
-	rec := upload(t, h, base+"/directories/"+dirID+"/files/report.txt", "text/plain", "report", 6)
+	rec := upload(t, h, base+"/directories/"+dirID+"/files?name=report.txt", "text/plain", "report", 6)
 	if body := problem(t, rec, 409); body["detail"] != data.DetailNameTaken {
 		t.Errorf("detail = %v, want %q", body["detail"], data.DetailNameTaken)
 	}

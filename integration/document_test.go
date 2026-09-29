@@ -84,7 +84,7 @@ func TestDocument(t *testing.T) {
 
 	run("the deletes guard on If-Match", func(t *testing.T, docs string) {
 		reports := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)
-		q3 := webtest.Decode[identity](t, c.Put(t, docs+"/directories/"+reports.ID+"/files/q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}), http.StatusCreated)
+		q3 := webtest.Decode[identity](t, c.Post(t, docs+"/directories/"+reports.ID+"/files?name=q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}), http.StatusCreated)
 
 		_ = c.Delete(t, docs+"/files/"+q3.ID).Problem(t, http.StatusPreconditionRequired)
 		_ = c.Delete(t, docs+"/files/"+q3.ID, webtest.IfMatch(q3.Version-1)).Problem(t, http.StatusPreconditionFailed)
@@ -126,7 +126,7 @@ func TestDocument(t *testing.T) {
 
 	run("a recursive delete is accepted and repeats", func(t *testing.T, docs string) {
 		reports := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)
-		_ = webtest.Decode[identity](t, c.Put(t, docs+"/directories/"+reports.ID+"/files/q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}), http.StatusCreated)
+		_ = webtest.Decode[identity](t, c.Post(t, docs+"/directories/"+reports.ID+"/files?name=q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}), http.StatusCreated)
 		hold(t)
 		deleteBranch(t, c, docs, reports.ID)
 		// The client's version is the one before the mark; the retry is
@@ -143,9 +143,9 @@ func TestDocument(t *testing.T) {
 	run("a deleting branch reads by id and lists as not found", func(t *testing.T, docs string) {
 		reports := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)
 		archive := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": reports.ID, "name": "archive"}), http.StatusCreated)
-		q3 := webtest.Decode[identity](t, c.Put(t, docs+"/directories/"+reports.ID+"/files/q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}), http.StatusCreated)
-		_ = webtest.Decode[identity](t, c.Put(t, docs+"/directories/"+archive.ID+"/files/q2.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}), http.StatusCreated)
-		_ = webtest.Decode[identity](t, c.Put(t, docs+"/directories/root/files/kept.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("kept")}), http.StatusCreated)
+		q3 := webtest.Decode[identity](t, c.Post(t, docs+"/directories/"+reports.ID+"/files?name=q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}), http.StatusCreated)
+		_ = webtest.Decode[identity](t, c.Post(t, docs+"/directories/"+archive.ID+"/files?name=q2.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}), http.StatusCreated)
+		_ = webtest.Decode[identity](t, c.Post(t, docs+"/directories/root/files?name=kept.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("kept")}), http.StatusCreated)
 		if f := webtest.Decode[filePage](t, c.Get(t, docs+"/directories/"+reports.ID+"/files"), http.StatusOK); len(f.Items) != 1 || f.Items[0].Status != "available" {
 			t.Fatalf("reports' files before the mark = %+v", f.Items)
 		}
@@ -178,22 +178,59 @@ func TestDocument(t *testing.T) {
 		reports := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)
 		archive := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": reports.ID, "name": "archive"}), http.StatusCreated)
 		q3 := webtest.Raw{ContentType: "text/plain", Body: []byte("report")}
-		_ = webtest.Decode[identity](t, c.Put(t, docs+"/directories/"+reports.ID+"/files/q3.txt", q3), http.StatusCreated)
+		_ = webtest.Decode[identity](t, c.Post(t, docs+"/directories/"+reports.ID+"/files?name=q3.txt", q3), http.StatusCreated)
 
-		conflict(t, c.Put(t, docs+"/directories/"+reports.ID+"/files/q3.txt", q3), "an entry with that name already exists")
+		conflict(t, c.Post(t, docs+"/directories/"+reports.ID+"/files?name=q3.txt", q3), "an entry with that name already exists")
 		conflict(t, c.Post(t, docs+"/directories", map[string]string{"parent_id": reports.ID, "name": "archive"}), "an entry with that name already exists")
 		conflict(t, c.Delete(t, docs+"/directories/"+reports.ID, webtest.IfMatch(reports.Version)), "the directory is not empty")
 
-		_ = webtest.Decode[identity](t, c.Put(t, docs+"/directories/"+archive.ID+"/files/q2.txt", q3), http.StatusCreated)
+		q2 := webtest.Decode[identity](t, c.Post(t, docs+"/directories/"+archive.ID+"/files?name=q2.txt", q3), http.StatusCreated)
+		q5 := webtest.Decode[identity](t, c.Post(t, docs+"/directories/"+reports.ID+"/files?name=q5.txt", q3), http.StatusCreated)
 		hold(t)
+
+		// A delete the severed store refuses has begun: the file is
+		// deleting in an active directory, its own delete, not the
+		// directory's.
+		_ = c.Delete(t, docs+"/files/"+q5.ID, webtest.IfMatch(q5.Version)).Problem(t, http.StatusServiceUnavailable)
+		if f := webtest.Decode[file](t, c.Get(t, docs+"/files/"+q5.ID), http.StatusOK); f.Status != "deleting" {
+			t.Fatalf("q5 after the refused delete = %+v; want it deleting", f)
+		}
+		conflict(t, c.Post(t, docs+"/files/"+q5.ID+"/move", map[string]string{"directory_id": "root", "name": "q5.txt"}, webtest.IfMatch(q5.Version+1)), "the file is being deleted")
+
 		deleteBranch(t, c, docs, archive.ID)
 		conflict(t, c.Post(t, docs+"/directories", map[string]string{"parent_id": archive.ID, "name": "q4"}), "the directory is being deleted")
-		conflict(t, c.Put(t, docs+"/directories/"+archive.ID+"/files/q4.txt", q3), "the directory is being deleted")
+		conflict(t, c.Post(t, docs+"/directories/"+archive.ID+"/files?name=q4.txt", q3), "the directory is being deleted")
+		// A file the branch's mark made deleting is the directory's.
+		conflict(t, c.Post(t, docs+"/files/"+q2.ID+"/move", map[string]string{"directory_id": "root", "name": "q2.txt"}, webtest.IfMatch(q2.Version+1)), "the directory is being deleted")
+	})
+
+	run("an upload is a POST, answered with its metadata's Location", func(t *testing.T, docs string) {
+		r := c.Post(t, docs+"/directories/root/files?name=q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}).Expect(t, http.StatusCreated)
+		created := webtest.Decode[identity](t, r, http.StatusCreated)
+		if loc := r.Header.Get("Location"); loc != docs+"/files/"+created.ID {
+			t.Errorf("Location = %q; want the file's metadata read", loc)
+		}
+		if f := webtest.Decode[file](t, c.Get(t, r.Header.Get("Location")), http.StatusOK); f.Name != "q3.txt" || f.Status != "available" {
+			t.Errorf("the Location's read = %+v; want q3.txt, available", f)
+		}
+		_ = c.Post(t, docs+"/directories/root/files", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}).Problem(t, http.StatusBadRequest)
+		// The PUT to a name is no route.
+		_ = c.Put(t, docs+"/directories/root/files/q4.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}).Problem(t, http.StatusNotFound)
+	})
+
+	run("an organization that does not exist lists as not found", func(t *testing.T, docs string) {
+		absent := "/api/documents/" + absentID
+		_ = c.Get(t, absent+"/directories/root/directories").Problem(t, http.StatusNotFound)
+		_ = c.Get(t, absent+"/directories/root/files").Problem(t, http.StatusNotFound)
+		// A real organization without a root still lists an empty page.
+		if p := webtest.Decode[filePage](t, c.Get(t, docs+"/directories/root/files"), http.StatusOK); len(p.Items) != 0 || p.Total == nil || *p.Total != 0 {
+			t.Errorf("the rootless organization's files = %+v; want an empty page", p)
+		}
 	})
 
 	run("a download round-trips its bytes and revalidates", func(t *testing.T, docs string) {
 		const body, contentType = "a,b\n1,2\n", "text/csv; charset=utf-8"
-		report := webtest.Decode[identity](t, c.Put(t, docs+"/directories/root/files/report.csv", webtest.Raw{ContentType: contentType, Body: []byte(body)}), http.StatusCreated)
+		report := webtest.Decode[identity](t, c.Post(t, docs+"/directories/root/files?name=report.csv", webtest.Raw{ContentType: contentType, Body: []byte(body)}), http.StatusCreated)
 		content := docs + "/files/" + report.ID + "/content"
 
 		r := c.Get(t, content).Expect(t, http.StatusOK)
@@ -224,7 +261,7 @@ func TestDocument(t *testing.T) {
 			return webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": parent, "name": name}), http.StatusCreated)
 		}
 		put := func(docs, dir, name string) identity {
-			return webtest.Decode[identity](t, c.Put(t, docs+"/directories/"+dir+"/files/"+name, webtest.Raw{ContentType: "text/plain", Body: []byte(name)}), http.StatusCreated)
+			return webtest.Decode[identity](t, c.Post(t, docs+"/directories/"+dir+"/files?name="+name, webtest.Raw{ContentType: "text/plain", Body: []byte(name)}), http.StatusCreated)
 		}
 		reports, inbox := mkdir(adocs, "root", "reports"), mkdir(bdocs, "root", "inbox")
 		archive := mkdir(adocs, reports.ID, "archive")
@@ -246,7 +283,7 @@ func TestDocument(t *testing.T) {
 				return c.Post(t, bdocs+"/directories", map[string]string{"parent_id": id, "name": "x"})
 			},
 			"upload into a directory": func(id string) *webtest.Response {
-				return c.Put(t, bdocs+"/directories/"+id+"/files/x.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("x")})
+				return c.Post(t, bdocs+"/directories/"+id+"/files?name=x.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("x")})
 			},
 			"move a directory": func(id string) *webtest.Response {
 				return c.Post(t, bdocs+"/directories/"+id+"/move", map[string]string{"parent_id": "root", "name": "archive"}, webtest.IfMatch(archive.Version))

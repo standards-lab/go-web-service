@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -207,6 +208,73 @@ func TestStore_ARefusedCompletionDeletesTheLogosObject(t *testing.T) {
 			noImage(t, rec)
 		})
 	}
+}
+
+// hangUp is a request's context whose client hangs up once the recorder
+// has logged after calls: its Done closes then, and Err reports the
+// cancellation. Every call returns the one channel, so a watcher that read
+// it earlier sees it close too.
+type hangUp struct {
+	context.Context
+	rec   *sqltest.Recorder
+	after int
+	once  sync.Once
+	done  chan struct{}
+}
+
+func newHangUp(rec *sqltest.Recorder, after int) *hangUp {
+	return &hangUp{Context: context.Background(), rec: rec, after: after, done: make(chan struct{})}
+}
+
+func (c *hangUp) Done() <-chan struct{} {
+	if len(c.rec.Calls()) >= c.after {
+		c.once.Do(func() { close(c.done) })
+	}
+	return c.done
+}
+
+func (c *hangUp) Err() error {
+	select {
+	case <-c.Done():
+		return context.Canceled
+	default:
+		return nil
+	}
+}
+
+// A client that hangs up once its file is written, as the activation
+// begins, cancels the activation, and the new file, available and
+// unreferenced, is still retired, its row and its object: the stale
+// reclaim, which reaches only pending and deleting rows, would never
+// remove it.
+func TestStore_AHangUpAfterTheWriteRetiresTheNewFile(t *testing.T) {
+	s, rec, fake := serviceOver(t, sqltest.ReturningDialect{},
+		directoryRow(), row(), fileRows(file(newFileID, blobfs.StatusPending, 1)),
+		fileRows(file(newFileID, blobfs.StatusAvailable, 2)),         // complete, on the pool
+		fileRows(file(newFileID, blobfs.StatusDeleting, 3)), exec(1), // the new file retired
+	)
+	// The calls before the hang-up: the directory, the write's
+	// transaction, the completion, and the activation's begin.
+	ctx := newHangUp(rec, 7)
+	if _, err := s.PutLogo(ctx, validID, logoUpload(t)); !errors.Is(err, context.Canceled) {
+		t.Fatalf("PutLogo = %v; want the hang-up's cancellation", err)
+	}
+	if rec.Pending() != 0 {
+		t.Errorf("pending = %d; want the retire to run after the hang-up: %v", rec.Pending(), rec.Ops())
+	}
+	var retired bool
+	for _, c := range rec.Calls() {
+		if strings.HasPrefix(c.SQL, "UPDATE blobfs_file") && len(c.Args) > 0 && c.Args[0] == newFileID {
+			retired = true
+		}
+	}
+	if !retired {
+		t.Errorf("the new file's delete never began: %v", rec.Ops())
+	}
+	if _, err := fake.Get(context.Background(), file(newFileID, blobfs.StatusPending, 1).Key, storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
+		t.Errorf("the new logo's object outlived the hang-up: %v", err)
+	}
+	noImage(t, rec)
 }
 
 // A replacement that loses the race to activate is the unique violation,
@@ -405,8 +473,9 @@ func TestLogoSeed_ALogoActivatedMeanwhileRetiresTheSeededFile(t *testing.T) {
 
 // What the seed does not own it leaves alone, retiring nothing: a file
 // found under the id that another organization's image binds, whose
-// organization a client renamed so the state's path names a new row, and
-// a file found deleting.
+// organization a client renamed so the state's path names a new row, a
+// file found deleting, and a row that holds the seeded name under another
+// id.
 func TestLogoSeed_LeavesAFileItDoesNotOwnAlone(t *testing.T) {
 	fixtures, _ := seedFixtures(t)
 	type seedCase struct {
@@ -426,6 +495,15 @@ func TestLogoSeed_LeavesAFileItDoesNotOwnAlone(t *testing.T) {
 			row(), fileRows(), directoryRow(),
 			fileRows(file(seededLogoID, blobfs.StatusDeleting, 3)),
 		}, []sqltest.Op{q, q, q, begin, q, commit}},
+	}
+	// A row that holds the seeded name under another id, pending or
+	// available, is not the seed's: nothing is put over it or activated.
+	for _, status := range []blobfs.Status{blobfs.StatusPending, blobfs.StatusAvailable} {
+		other := file(newFileID, status, 2)
+		other.Name = seededLogoID + ".png"
+		cases["held under another id, "+string(status)] = seedCase{[]sqltest.Response{
+			row(), fileRows(), directoryRow(), fileRows(other),
+		}, []sqltest.Op{q, q, q, begin, q, commit}}
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

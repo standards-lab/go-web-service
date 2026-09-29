@@ -51,7 +51,7 @@ func TestDocumentSweep(t *testing.T) {
 	// put uploads a file and returns its object key, blobfs's id/name.
 	put := func(t *testing.T, docs, dir, name string) string {
 		t.Helper()
-		id := webtest.Decode[identity](t, c.Put(t, docs+"/directories/"+dir+"/files/"+name, webtest.Raw{ContentType: "text/plain", Body: []byte(name)}), http.StatusCreated)
+		id := webtest.Decode[identity](t, c.Post(t, docs+"/directories/"+dir+"/files?name="+name, webtest.Raw{ContentType: "text/plain", Body: []byte(name)}), http.StatusCreated)
 		return id.ID + "/" + name
 	}
 	stored := func(t *testing.T, key string) bool {
@@ -191,7 +191,7 @@ func TestSweepAtStartup(t *testing.T) {
 	integration.Reset(t, c, integration.Default)
 	docs := "/api/documents/" + tree(t, c)[docsOrg].ID
 	reports := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)
-	file := webtest.Decode[identity](t, c.Put(t, docs+"/directories/"+reports.ID+"/files/q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("q3")}), http.StatusCreated)
+	file := webtest.Decode[identity](t, c.Post(t, docs+"/directories/"+reports.ID+"/files?name=q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("q3")}), http.StatusCreated)
 	key := file.ID + "/q3.txt"
 	refusals := strings.Count(first.Output(), refusedRecord)
 

@@ -142,8 +142,12 @@ func (s *Seeder) States() []string {
 // Seed applies the named state: every Seed's rows in one transaction, in
 // the order the contributions were given, then, once it commits, every
 // FileSeed's files, each through the storage protocols. It is idempotent,
-// leaving an existing row or file as it is, so it runs at every startup of
-// an environment that names a set and on demand from the admin mount. The
+// leaving an existing row or file as it is, and it runs at every start of
+// an environment that names a state, not only the first, and on demand
+// from the admin mount. Each run writes again whatever the state names
+// that is missing, so a seeded organization, logo, or file a client
+// deleted is restored at the next start. Of the checked-in
+// configurations, only the local overlay names a state. The
 // counts are what this run inserted, rows or files, for every
 // contribution; one the state does not carry, or a seeded database,
 // reports zero. A key no contribution reads is a defect in the file,

@@ -251,7 +251,7 @@ func TestEnsure_CreatesAndStoresOverALeftoverObject(t *testing.T) {
 	if _, err := fake.Put(ctx, key, strings.NewReader("stale bytes"), storage.PutOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	got, stored, err := st.Ensure(ctx, db, strings.NewReader("report"), 6, ensure(ctx, st))
+	got, stored, err := st.Ensure(ctx, db, fileID, strings.NewReader("report"), 6, ensure(ctx, st))
 	if err != nil || !stored || got.Status != blobfs.StatusAvailable {
 		t.Fatalf("Ensure = %+v, %v, %v; want the file stored", got, stored, err)
 	}
@@ -276,7 +276,7 @@ func TestEnsure_ResumesAPendingRow(t *testing.T) {
 	st, db, rec, fake := protocols(t,
 		fileRows(file(blobfs.StatusPending, 1)), fileRows(file(blobfs.StatusAvailable, 2)),
 	)
-	if _, stored, err := st.Ensure(ctx, db, strings.NewReader("report"), 6, ensure(ctx, st)); err != nil || !stored {
+	if _, stored, err := st.Ensure(ctx, db, fileID, strings.NewReader("report"), 6, ensure(ctx, st)); err != nil || !stored {
 		t.Fatalf("Ensure = %v, %v; want the pending row completed", stored, err)
 	}
 	if fake.Puts() != 1 {
@@ -299,13 +299,38 @@ func TestEnsure_APresentRowIsLeftAlone(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			st, db, rec, fake := protocols(t, fileRows(file(c.status, 2)))
-			got, stored, err := st.Ensure(ctx, db, strings.NewReader("report"), 6, ensure(ctx, st))
+			got, stored, err := st.Ensure(ctx, db, fileID, strings.NewReader("report"), 6, ensure(ctx, st))
 			if !errors.Is(err, c.want) || stored || (c.want == nil && got.ID != fileID) {
 				t.Fatalf("Ensure = %+v, %v, %v; want the row as it stands, %v", got, stored, err, c.want)
 			}
 			if fake.Puts() != 0 {
 				t.Errorf("puts = %d; want none", fake.Puts())
 			}
+			sameOps(t, rec, begin, q, commit)
+		})
+	}
+}
+
+// A row found by the name under another id is not the seed's: a client's
+// upload of the same name, pending or complete. It is left as it stands,
+// nothing put over its object and nothing retired, and reported as the
+// taken name.
+func TestEnsure_ARowUnderAnotherIDIsLeftAlone(t *testing.T) {
+	const clientID = "00000000-0000-7000-8000-0000000000c1"
+	for _, status := range []blobfs.Status{blobfs.StatusPending, blobfs.StatusAvailable, blobfs.StatusDeleting} {
+		t.Run(string(status), func(t *testing.T) {
+			ctx := context.Background()
+			client := file(status, 2)
+			client.ID, client.Key = clientID, clientID+"/report.txt"
+			st, db, rec, fake := protocols(t, fileRows(client))
+			got, stored, err := st.Ensure(ctx, db, fileID, strings.NewReader("report"), 6, ensure(ctx, st))
+			if !errors.Is(err, blobfs.ErrNameTaken) || stored || got.ID != "" {
+				t.Fatalf("Ensure = %+v, %v, %v; want the client's row reported as the taken name", got, stored, err)
+			}
+			if fake.Puts() != 0 {
+				t.Errorf("puts = %d; want none over the client's object", fake.Puts())
+			}
+			// The first transaction alone: no completion, no delete.
 			sameOps(t, rec, begin, q, commit)
 		})
 	}
@@ -321,7 +346,7 @@ func TestEnsure_ACompletionAnotherWriterWonIsFound(t *testing.T) {
 		fileRows(), fileRows(file(blobfs.StatusAvailable, 2)), // the completion matches no pending row at 1
 		fileRows(file(blobfs.StatusAvailable, 2)), // the row read back
 	)
-	got, stored, err := st.Ensure(ctx, db, strings.NewReader("report"), 6, ensure(ctx, st))
+	got, stored, err := st.Ensure(ctx, db, fileID, strings.NewReader("report"), 6, ensure(ctx, st))
 	if err != nil || stored || got.Status != blobfs.StatusAvailable || got.Version != 2 {
 		t.Fatalf("Ensure = %+v, %v, %v; want the other writer's row, found", got, stored, err)
 	}
@@ -339,7 +364,7 @@ func TestEnsure_ALostInsertRaceRetriesInAFreshTransaction(t *testing.T) {
 		fileRows(file(blobfs.StatusPending, 1)),   // the retry finds the other's pending row
 		fileRows(file(blobfs.StatusAvailable, 2)), // and completes it
 	)
-	if _, stored, err := st.Ensure(ctx, db, strings.NewReader("report"), 6, ensure(ctx, st)); err != nil || !stored {
+	if _, stored, err := st.Ensure(ctx, db, fileID, strings.NewReader("report"), 6, ensure(ctx, st)); err != nil || !stored {
 		t.Fatalf("Ensure = %v, %v; want the resumed row stored", stored, err)
 	}
 	sameOps(t, rec, begin, q, q, rollback, begin, q, commit, q)
@@ -357,7 +382,7 @@ func TestEnsure_AFailedPutAbandonsTheRow(t *testing.T) {
 	)
 	failed := errors.New("put failed")
 	fake.FailPut(failed)
-	if _, stored, err := st.Ensure(ctx, db, strings.NewReader("report"), 6, ensure(ctx, st)); !errors.Is(err, failed) || stored {
+	if _, stored, err := st.Ensure(ctx, db, fileID, strings.NewReader("report"), 6, ensure(ctx, st)); !errors.Is(err, failed) || stored {
 		t.Fatalf("Ensure = %v, %v; want the put's error", stored, err)
 	}
 	sameOps(t, rec, begin, q, q, commit, begin, q, commit, x)

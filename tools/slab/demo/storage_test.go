@@ -366,12 +366,12 @@ func (f *storageFake) serveDirectory(w http.ResponseWriter, r *http.Request, n *
 			return
 		}
 		f.list(w, r, n, rest[0] == "directories")
-	case len(rest) == 2 && rest[0] == "files" && r.Method == http.MethodPut:
+	case len(rest) == 1 && rest[0] == "files" && r.Method == http.MethodPost && r.URL.Query().Get("name") != "":
 		if f.inDeleting(n) {
 			writeProblem(w, http.StatusConflict, "the directory is being deleted")
 			return
 		}
-		file := &fakeNode{id: f.newID(), parent: n.id, name: rest[1], contentType: r.Header.Get("Content-Type"), status: "available", version: 2}
+		file := &fakeNode{id: f.newID(), parent: n.id, name: r.URL.Query().Get("name"), contentType: r.Header.Get("Content-Type"), status: "available", version: 2}
 		f.nodes[file.id] = file
 		writeJSON(w, http.StatusCreated, document.Identity{ID: file.id, Version: file.version})
 	default:
@@ -523,7 +523,7 @@ func TestStorage_SendsTheScenarioSequence(t *testing.T) {
 		{"GET " + document.Documents + "/" + fakeFinanceID + "/directories/" + paths[takenDirPath+"/"], false},
 		{"POST " + docs + "/directories", false},
 		{"POST " + docs + "/directories", false},
-		{"PUT " + docs + "/directories/", true},
+		{"POST " + docs + "/directories/", true},
 		{"DELETE " + docs + "/directories/", true},
 		{"POST " + stateRoute, false},
 	}

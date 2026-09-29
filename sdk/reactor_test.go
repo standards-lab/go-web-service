@@ -285,6 +285,78 @@ func TestReactor_ShutdownBeforeStart(t *testing.T) {
 	}
 }
 
+// A second Shutdown of a reactor retired before Start returns nil: it has
+// no source to stop.
+func TestReactor_ShutdownTwiceBeforeStart(t *testing.T) {
+	r := sdk.New(sdk.Every(time.Hour), func(context.Context, time.Time) error { return nil })
+	for i := range 2 {
+		if err := shutdown(t, r, failsafe); err != nil {
+			t.Errorf("Shutdown %d before Start = %v", i+1, err)
+		}
+	}
+}
+
+// A second Shutdown of a drained reactor returns at once, with the first's
+// outcome.
+func TestReactor_ShutdownTwiceAfterStart(t *testing.T) {
+	r := sdk.New(sdk.Every(time.Hour), func(context.Context, time.Time) error { return nil })
+	if err := r.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 2 {
+		if err := shutdown(t, r, failsafe); err != nil {
+			t.Errorf("Shutdown %d = %v", i+1, err)
+		}
+	}
+}
+
+// The drain signal closes when Shutdown begins, while the handler in
+// flight still runs on a live context, so a handler that works in steps
+// stops between them and the drain ends clean, without a grace.
+func TestReactor_DrainingClosesWhenShutdownBegins(t *testing.T) {
+	wake := sdk.Wake(time.Hour)
+	inFlight := make(chan struct{})
+	type seen struct {
+		drained bool
+		ctxErr  error
+		steps   int
+	}
+	got := make(chan seen, 1)
+	r := sdk.New(wake, func(ctx context.Context, _ time.Time) error {
+		close(inFlight)
+		steps := 0
+		for {
+			steps++
+			select {
+			case <-sdk.Draining(ctx):
+				got <- seen{true, ctx.Err(), steps}
+				return nil
+			case <-time.After(time.Millisecond):
+			}
+		}
+	})
+	if err := r.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	wake.Nudge()
+	recvOrFail(t, inFlight, "the handler to start")
+	if err := shutdown(t, r, failsafe); err != nil {
+		t.Fatalf("Shutdown = %v, want a clean drain", err)
+	}
+	res := recvOrFail(t, got, "the handler to see the drain")
+	if !res.drained || res.ctxErr != nil || res.steps == 0 {
+		t.Errorf("handler saw %+v; want the drain signal on a live context", res)
+	}
+}
+
+// A context no reactor gave has no drain signal: Draining is nil, which
+// never closes.
+func TestDraining_OutsideAReactor(t *testing.T) {
+	if ch := sdk.Draining(context.Background()); ch != nil {
+		t.Errorf("Draining(Background) = %v, want nil", ch)
+	}
+}
+
 func TestReactor_HandlerKeepsSourceDeadline(t *testing.T) {
 	src := &deadlineSource{d: 50 * time.Millisecond, stopped: make(chan struct{})}
 	type result struct {

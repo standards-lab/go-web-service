@@ -60,6 +60,10 @@ type SweepGate interface {
 // passes while a pass reports More, each pass holding gate shared, and
 // logs each pass to logger. One wake finishes the work waiting, in passes
 // of the configured batch, and the next wake finds whatever arrived since.
+// Once the reactor's drain begins (sdk.Draining), the worker runs no
+// further pass: the pass in flight finishes and the worker returns nil,
+// so a large backlog never holds a drain until the grace cancels it. What
+// remains is found in the database at the next start's wake.
 //
 // A pass's error never fails the worker. blobfs returns a pass's
 // persistent refusals joined (an object delete the store refused, a purge
@@ -74,7 +78,8 @@ type SweepGate interface {
 // under a running pass therefore never ends the process; an outage shows
 // on the database's and the store's own readiness checks instead. The one error
 // it returns is its context's, once the drain cancels it past the
-// reactor's Grace, which Shutdown reports as handlers cancelled.
+// reactor's Grace while a pass is in flight or waits on the gate, which
+// Shutdown reports as handlers cancelled.
 func (s *Storage) SweepWorker(db *sqlate.DB, gate SweepGate, logger *slog.Logger, opts ...bfdata.SweepOption) sdk.Func[time.Time] {
 	return sweepWorker(gated(gate, func(ctx context.Context) (bfdata.SweepResult, error) {
 		return s.FS.Sweep(ctx, db, s.Objects, opts...)
@@ -96,25 +101,32 @@ func gated(gate SweepGate, pass sweepPass) sweepPass {
 	}
 }
 
-// sweepWorker joins the loop to the logging policy over any pass, the seam
-// the worker's tests script.
+// sweepWorker joins the loop to the logging policy over any pass, and
+// hands the loop the reactor's drain signal as its stop.
 func sweepWorker(pass sweepPass, logger *slog.Logger) sdk.Func[time.Time] {
 	report := logPass(logger)
 	return func(ctx context.Context, _ time.Time) error {
-		return sweepUntilDone(ctx, pass, report)
+		return sweepUntilDone(ctx, sdk.Draining(ctx), pass, report)
 	}
 }
 
-// sweepUntilDone runs pass while it reports More, checking ctx before
-// each, and hands every pass's result and error to report. It returns nil
-// once a pass reports no More, and ctx's error once ctx ends, before a
-// pass or during one; a pass's own error is report's to judge and never
-// ends the loop. It knows nothing of this service, and is the half staged
+// sweepUntilDone runs pass while it reports More, checking ctx and stop
+// before each, and hands every pass's result and error to report. It
+// returns nil once a pass reports no More or once stop is closed, which
+// ends the loop between passes and never interrupts one, and ctx's error
+// once ctx ends, before a pass or during one; a pass's own error is
+// report's to judge and never ends the loop. A nil stop never closes. It
+// knows nothing of this service or the reactor, and is the half staged
 // for blobfs.
-func sweepUntilDone(ctx context.Context, pass sweepPass, report func(bfdata.SweepResult, error)) error {
+func sweepUntilDone(ctx context.Context, stop <-chan struct{}, pass sweepPass, report func(bfdata.SweepResult, error)) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		select {
+		case <-stop:
+			return nil
+		default:
 		}
 		res, err := pass(ctx)
 		if ctx.Err() != nil {

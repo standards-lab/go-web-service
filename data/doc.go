@@ -44,14 +44,16 @@
 // protocols every domain shares, staged for promotion to blobfs: Write,
 // blobfs's two-phase write with its abandon and its writer rule; Ensure,
 // its retry-safe form over blobfs's insert-or-find, which two writers of
-// one fixed id may share; Retire and Purge, its two-phase delete; and
+// one fixed id may share and which leaves a row holding the name under
+// another id alone; Retire and Purge, its two-phase delete; and
 // Serve, the read of an available file. A domain enters a protocol through
 // a callback run in the protocol's first transaction, so no domain concept
 // reaches here.
 //
 // Storage.SweepWorker is the sweep worker. It runs blobfs's sweep in
 // passes while a pass reports more, which finishes the branch deletes the
-// domains mark and reclaims stale rows, and it applies the service's
+// domains mark and reclaims stale rows, stops between passes once the
+// reactor's drain begins, and it applies the service's
 // policy for a pass's refusals: logged at warn, never returned. The
 // architecture defines a Reactor as an entry point that calls a Domain
 // Service; the sweep worker calls none, so it is not one. The composition

@@ -150,7 +150,10 @@ func (s *store) directory(ctx context.Context, organizationID, id string) (Direc
 	if err != nil {
 		return Directory{}, err
 	}
-	out := directoryOf(d, root)
+	out, err := directoryOf(d, root)
+	if err != nil {
+		return Directory{}, err
+	}
 	_, below, _ := strings.Cut(strings.TrimPrefix(path, "/"), "/")
 	out.Path = "/" + below
 	return out, nil
@@ -161,13 +164,13 @@ func (s *store) directory(ctx context.Context, organizationID, id string) (Direc
 func (s *store) listDirectories(ctx context.Context, organizationID, id string, q web.Query) ([]Directory, web.Paging, error) {
 	root, dir, err := s.scope(ctx, s.db, organizationID, id)
 	if err != nil {
-		return rootless[Directory](id, err)
+		return rootless[Directory](ctx, s, organizationID, id, err)
 	}
 	items, paging, err := listing(ctx, s.db, s.storage.FS.Directories, dir, q)
-	out := make([]Directory, len(items))
-	for i, d := range items {
-		out[i] = directoryOf(d, root)
+	if err != nil {
+		return nil, web.Paging{}, err
 	}
+	out, err := present(items, func(d blobfs.Directory) (Directory, error) { return directoryOf(d, root) })
 	return out, paging, err
 }
 
@@ -177,25 +180,29 @@ func (s *store) listDirectories(ctx context.Context, organizationID, id string, 
 func (s *store) listFiles(ctx context.Context, organizationID, id string, q web.Query) ([]File, web.Paging, error) {
 	_, dir, err := s.scope(ctx, s.db, organizationID, id)
 	if err != nil {
-		return rootless[File](id, err)
+		return rootless[File](ctx, s, organizationID, id, err)
 	}
 	items, paging, err := listing(ctx, s.db, s.storage.FS.Files, dir, q)
-	out := make([]File, len(items))
-	for i, f := range items {
-		out[i] = fileOf(f)
+	if err != nil {
+		return nil, web.Paging{}, err
 	}
+	out, err := present(items, fileOf)
 	return out, paging, err
 }
 
 // rootless answers a listing's scope failure: an organization without a
 // root yet has an empty hierarchy, so the alias lists as an empty, counted
-// page, while a specific id is not found. Any other failure is the
-// request's.
-func rootless[T any](id string, err error) ([]T, web.Paging, error) {
-	if id == RootAlias && errors.Is(err, sql.ErrNoRows) {
-		return nil, web.Paging{}, nil
+// page once the organization is read, while a nonexistent organization is
+// the missing row, as every other route answers it, and a specific id is
+// not found. Any other failure is the request's.
+func rootless[T any](ctx context.Context, s *store, organizationID, id string, err error) ([]T, web.Paging, error) {
+	if id != RootAlias || !errors.Is(err, sql.ErrNoRows) {
+		return nil, web.Paging{}, err
 	}
-	return nil, web.Paging{}, err
+	if err := s.organizationExists(ctx, s.db, organizationID); err != nil {
+		return nil, web.Paging{}, fmt.Errorf("organization %s: %w", organizationID, err)
+	}
+	return nil, web.Paging{}, nil
 }
 
 // deleteDirectory removes the empty directory at version, its scope
@@ -247,7 +254,7 @@ func (s *store) moveDirectory(ctx context.Context, organizationID, id string, ve
 	return Identity{ID: dir.ID, Version: dir.Version}, err
 }
 
-// putFile stores the upload as a new file named name in the directory,
+// uploadFile stores the upload as a new file named name in the directory,
 // ensuring the root when the directory is its alias, by the data package's
 // write protocol: the scope check and the pending row commit together
 // before any byte is stored, the put runs outside any transaction, and the
@@ -255,27 +262,61 @@ func (s *store) moveDirectory(ctx context.Context, organizationID, id string, ve
 // pending row, so its name is free for a retry; one whose retire fails too
 // leaves the row for the sweep. A completion refused because the row's
 // delete began or the sweep removed it, the mark of a branch that raced the
-// write, deletes the object just put; the row is the sweep's.
-func (s *store) putFile(ctx context.Context, organizationID, directoryID, name string, u web.Upload) (Identity, error) {
+// write, deletes the object just put; the row is the sweep's. A completion
+// refused because the stale reclaim began the row's own delete is the
+// file deleting, told apart from the branch's mark as deletingFile tells
+// it.
+func (s *store) uploadFile(ctx context.Context, organizationID, directoryID, name string, u web.Upload) (Identity, error) {
 	st := s.storage
 	directoryID, err := s.writable(ctx, organizationID, directoryID)
 	if err != nil {
 		return Identity{}, err
 	}
+	var created string
 	file, err := st.Write(ctx, s.db.DB, u.Body, u.Size, func(tx *sqlate.Tx) (blobfs.File, error) {
 		_, dir, err := s.scope(ctx, tx, organizationID, directoryID)
 		if err != nil {
 			return blobfs.File{}, err
 		}
-		return st.FS.Files.Create(ctx, tx, st.Objects, dir, name, u.ContentType)
+		file, err := st.FS.Files.Create(ctx, tx, st.Objects, dir, name, u.ContentType)
+		created = file.ID
+		return file, err
 	})
+	if err != nil && created != "" {
+		err = s.deletingFile(ctx, created, err)
+	}
 	return Identity{ID: file.ID, Version: file.Version}, err
+}
+
+// deletingFile tells a refusal blobfs reports as blobfs.ErrDeleting apart
+// by reading the file with id: a file whose own delete began, in a
+// directory that is not deleting, is data.ErrFileDeleting, while a file
+// deleting because its branch is marked, or one not found deleting, keeps
+// the refusal as the directory's. blobfs reports the file's own delete
+// and a directory's as one error; once it types them apart, this read
+// gives way to its own error. Any other error is returned as it is.
+func (s *store) deletingFile(ctx context.Context, id string, err error) error {
+	if !errors.Is(err, blobfs.ErrDeleting) {
+		return err
+	}
+	fs := s.storage.FS
+	file, ferr := fs.Files.Find(ctx, s.db, id)
+	if ferr != nil || file.Status != blobfs.StatusDeleting {
+		return err
+	}
+	if dir, derr := fs.Directories.Find(ctx, s.db, file.DirectoryID); derr != nil || dir.Status != blobfs.DirectoryStatusActive {
+		return err
+	}
+	return fmt.Errorf("file %s: %w: %w", id, data.ErrFileDeleting, err)
 }
 
 // file reads the file's metadata.
 func (s *store) file(ctx context.Context, organizationID, id string) (File, error) {
 	_, file, err := s.fileScope(ctx, s.db, organizationID, id)
-	return fileOf(file), err
+	if err != nil {
+		return File{}, err
+	}
+	return fileOf(file)
 }
 
 // content reads the file for its download. Only an available file is
@@ -296,7 +337,7 @@ func (s *store) content(ctx context.Context, organizationID, id string) (Content
 // protocol, its scope checked in the transaction that begins the delete. No
 // row of the layer references a file, so no reference is removed before
 // the delete. A file deleting already is the delete's retry, which
-// converges at any version.
+// converges at any version, so a delete is never refused as deleting.
 func (s *store) deleteFile(ctx context.Context, organizationID, id string, version int64) error {
 	return s.storage.Retire(ctx, s.db.DB, func(tx *sqlate.Tx) (string, error) {
 		_, file, err := s.fileScope(ctx, tx, organizationID, id)
@@ -305,7 +346,10 @@ func (s *store) deleteFile(ctx context.Context, organizationID, id string, versi
 }
 
 // moveFile moves the file into a directory within the same root, guarded
-// by its version. The key is untouched, so no object moves.
+// by its version. The key is untouched, so no object moves. A move refused
+// because the file's own delete began is the file deleting, and one
+// refused because a directory it reaches is deleting is the directory's,
+// as deletingFile tells them apart.
 func (s *store) moveFile(ctx context.Context, organizationID, id string, version int64, m MoveFile) (Identity, error) {
 	file, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (blobfs.File, error) {
 		root, _, err := s.fileScope(ctx, tx, organizationID, id)
@@ -318,7 +362,10 @@ func (s *store) moveFile(ctx context.Context, organizationID, id string, version
 		}
 		return s.storage.FS.Files.Move(ctx, tx, id, dir, m.Name, version)
 	})
-	return Identity{ID: file.ID, Version: file.Version}, err
+	if err != nil {
+		return Identity{}, s.deletingFile(ctx, id, err)
+	}
+	return Identity{ID: file.ID, Version: file.Version}, nil
 }
 
 // seed is the layer's seed contribution, a file seed, to the data
@@ -391,7 +438,10 @@ func (s *store) seedEntries(ctx context.Context, parent string, entries []seedEn
 // id: a directory on the pool, then its entries, and a file by the write
 // protocol's retry-safe form, its content put and the row completed. An
 // entry already there by name is left as it is and keeps its own id, the
-// directory's contents still ensured beneath it. An entry whose id a row
+// directory's contents still ensured beneath it: a file there under
+// another id, a client's upload pending or complete, is never written
+// over, since the write protocol reports it as a taken name. An entry
+// whose id a row
 // already carries under another name, one a client moved or renamed, is
 // left where the client put it, a directory with its contents. So is an
 // entry whose delete is under way, which the sweep finishes and the next
@@ -422,11 +472,11 @@ func (s *store) seedEntry(ctx context.Context, parent string, e seedEntry) (int,
 		}
 		return n, err
 	}
-	_, stored, err := st.Ensure(ctx, s.db.DB, strings.NewReader(e.Content), int64(len(e.Content)), func(tx *sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
+	_, stored, err := st.Ensure(ctx, s.db.DB, e.ID, strings.NewReader(e.Content), int64(len(e.Content)), func(tx *sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
 		return st.FS.Files.Ensure(ctx, tx, st.Objects, parent, e.Name, e.ContentType, bfdata.WithID(e.ID))
 	})
 	switch {
-	case errors.Is(err, blobfs.ErrIDTaken), errors.Is(err, blobfs.ErrDeleting):
+	case errors.Is(err, blobfs.ErrIDTaken), errors.Is(err, blobfs.ErrNameTaken), errors.Is(err, blobfs.ErrDeleting):
 		return 0, nil
 	case err != nil:
 		return 0, err
@@ -438,45 +488,73 @@ func (s *store) seedEntry(ctx context.Context, parent string, e seedEntry) (int,
 
 // directoryOf presents a blobfs directory; the document root has no parent
 // the API shows and is named "/", as blobfs names its own root.
-func directoryOf(d blobfs.Directory, root string) Directory {
-	out := Directory{ID: d.ID, ParentID: d.ParentID, Name: d.Name, Status: directoryStatus(d.Status), Version: d.Version, CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt}
+func directoryOf(d blobfs.Directory, root string) (Directory, error) {
+	status, err := directoryStatus(d.Status)
+	if err != nil {
+		return Directory{}, fmt.Errorf("directory %s: %w", d.ID, err)
+	}
+	out := Directory{ID: d.ID, ParentID: d.ParentID, Name: d.Name, Status: status, Version: d.Version, CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt}
 	if d.ID == root {
 		out.ParentID, out.Name = nil, "/"
 	}
-	return out
+	return out, nil
 }
 
 // fileOf presents a blobfs file without its object key.
-func fileOf(f blobfs.File) File {
-	return File{
-		ID: f.ID, DirectoryID: f.DirectoryID, Name: f.Name, Status: fileStatus(f.Status), Size: f.Size,
-		ContentType: f.ContentType, Version: f.Version, CreatedAt: f.CreatedAt, UpdatedAt: f.UpdatedAt,
+func fileOf(f blobfs.File) (File, error) {
+	status, err := fileStatus(f.Status)
+	if err != nil {
+		return File{}, fmt.Errorf("file %s: %w", f.ID, err)
 	}
+	return File{
+		ID: f.ID, DirectoryID: f.DirectoryID, Name: f.Name, Status: status, Size: f.Size,
+		ContentType: f.ContentType, Version: f.Version, CreatedAt: f.CreatedAt, UpdatedAt: f.UpdatedAt,
+	}, nil
 }
 
-// directoryStatus names blobfs's directory status in the API's vocabulary.
-// A status the layer does not name yet passes through as blobfs's text,
-// so a status blobfs adds is named here when the layer presents it.
-func directoryStatus(s blobfs.DirectoryStatus) DirectoryStatus {
+// present presents each of a listing's rows by of, or fails on the first
+// row of refuses.
+func present[T, U any](items []T, of func(T) (U, error)) ([]U, error) {
+	out := make([]U, len(items))
+	for i, item := range items {
+		var err error
+		if out[i], err = of(item); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// errUnknownStatus is a blobfs status the layer does not name: one the
+// library added that this layer has not mapped yet. No handler matches
+// it, so the read that meets it answers 500, a server fault, rather than
+// put the library's text on the wire.
+var errUnknownStatus = errors.New("document: a blobfs status the layer does not name")
+
+// directoryStatus names blobfs's directory status in the API's vocabulary,
+// the layer's own, so a change to the library's names never changes the
+// wire. A status the layer does not name is errUnknownStatus: a status
+// blobfs adds is named here before the layer can present it.
+func directoryStatus(s blobfs.DirectoryStatus) (DirectoryStatus, error) {
 	switch s {
 	case blobfs.DirectoryStatusActive:
-		return DirectoryActive
+		return DirectoryActive, nil
 	case blobfs.DirectoryStatusDeleting:
-		return DirectoryDeleting
+		return DirectoryDeleting, nil
 	}
-	return DirectoryStatus(s)
+	return "", fmt.Errorf("directory status %q: %w", s, errUnknownStatus)
 }
 
 // fileStatus names blobfs's file status in the API's vocabulary, as
 // directoryStatus does.
-func fileStatus(s blobfs.Status) FileStatus {
+func fileStatus(s blobfs.Status) (FileStatus, error) {
 	switch s {
 	case blobfs.StatusPending:
-		return FilePending
+		return FilePending, nil
 	case blobfs.StatusAvailable:
-		return FileAvailable
+		return FileAvailable, nil
 	case blobfs.StatusDeleting:
-		return FileDeleting
+		return FileDeleting, nil
 	}
-	return FileStatus(s)
+	return "", fmt.Errorf("file status %q: %w", s, errUnknownStatus)
 }

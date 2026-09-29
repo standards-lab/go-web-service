@@ -29,7 +29,9 @@
 // missing header is 428, a stale version 412; state conflicts are 409,
 // with a curated detail and never the error's own text: a taken code, a
 // missing parent, a cycle, and a concurrent logo replacement all read "the
-// request conflicts with the current state".
+// request conflicts with the current state", and a new logo file whose
+// own delete began before its activation reads "the file is being
+// deleted" (data.Status's Detail constants).
 // The path is projected at read time by the lineage CTE (standard
 // SQL:1999) and is an ordinary contract field, filterable and sortable
 // like any other.
@@ -48,9 +50,10 @@
 // Otherwise the file is written under its fixed id by the shared write
 // protocol's retry-safe form and activated, in storage.go beside the
 // logo's other protocols. The seed leaves alone what it does not own: a
-// file under the id that another organization's image binds, a file being
-// deleted, and a logo that became active meanwhile, in which case the seed
-// retires the file it stored.
+// file under the id that another organization's image binds, a row that
+// holds the fixed name under another id, a file being deleted, and a logo
+// that became active meanwhile, in which case the seed retires the file it
+// stored.
 //
 // The logo is ownership at blobfs's file grain: an organization_image row
 // binds one file to the organization, and a partial unique index admits one
@@ -70,7 +73,10 @@
 // the replaced file's object and row are purged after the commit. A
 // concurrent replacement that activates first is a unique violation, 409,
 // and the losing file is retired by the shared delete protocol, as a logo
-// delete retires the active one. The read serves an available file's bytes
+// delete retires the active one. The steps after the write, that retire
+// and the replaced file's purge, run whatever the client does: a client
+// that hangs up once its bytes are stored does not cancel them, since the
+// stale reclaim never removes an available file no image references. The read serves an available file's bytes
 // by proxy through the shared read, revalidated by its entity tag.
 //
 // The layer has two validators, the version and the object ETag, which

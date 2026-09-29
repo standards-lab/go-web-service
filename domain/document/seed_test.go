@@ -129,6 +129,30 @@ func TestSeed_AnEntryItDoesNotOwnIsLeftAlone(t *testing.T) {
 	}
 }
 
+// A file there by the entry's name under another id, a client's upload
+// pending or complete, is not the seed's: nothing is put over its object,
+// nothing is retired, and nothing is counted.
+func TestSeed_AClientsFileUnderTheNameIsLeftAlone(t *testing.T) {
+	for _, status := range []blobfs.Status{blobfs.StatusPending, blobfs.StatusAvailable} {
+		t.Run(string(status), func(t *testing.T) {
+			client := seedFile(status, 1)
+			client.ID, client.Key = fileID, fileID+"/q1.csv"
+			s, rec, fake := serviceOver(t,
+				idRow(parentOrgID), organization(), root(seedRootID),
+				dirRows(directory(seedDirID, seedRootID, "reports", 1)),
+				fileRows(client), // the name, held by the client's row
+			)
+			if n, err := s.Seed().Write(context.Background(), treeRows, nil); err != nil || n != 0 {
+				t.Fatalf("Write = %d, %v; want the client's file left alone", n, err)
+			}
+			if fake.Puts() != 0 {
+				t.Errorf("puts = %d; want none over the client's object", fake.Puts())
+			}
+			sameOps(t, rec, q, q, q, q, begin, q, commit)
+		})
+	}
+}
+
 // A concurrent seed that commits the directory between the lookup and the
 // insert takes the id; the retry finds its directory by name and seeds
 // beneath it.

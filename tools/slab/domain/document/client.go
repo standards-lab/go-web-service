@@ -102,10 +102,10 @@ func (c *Client) DirectoryAt(ctx context.Context, location string) (*httpx.Respo
 	return c.http.Get(ctx, u.RequestURI())
 }
 
-// PutFile sends PUT Documents/{org}/directories/{dir}/files/{name} with body
-// as the raw request body under contentType.
-func (c *Client) PutFile(ctx context.Context, org, dir, name, contentType string, body []byte) (*httpx.Response, error) {
-	return c.http.Put(ctx, directory(org, dir)+"/files/"+url.PathEscape(name), body, httpx.Header{Name: "Content-Type", Value: contentType})
+// UploadFile sends POST Documents/{org}/directories/{dir}/files?name={name}
+// with body as the raw request body under contentType.
+func (c *Client) UploadFile(ctx context.Context, org, dir, name, contentType string, body []byte) (*httpx.Response, error) {
+	return c.http.Post(ctx, directory(org, dir)+"/files?"+url.Values{"name": {name}}.Encode(), body, httpx.Header{Name: "Content-Type", Value: contentType})
 }
 
 // File sends GET Documents/{org}/files/{id}, the file's metadata.

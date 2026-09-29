@@ -118,15 +118,15 @@ func (s *Service) MoveDirectory(ctx context.Context, organizationID, id string, 
 	return s.store.moveDirectory(ctx, organizationID, id, version, m)
 }
 
-// PutFile stores the upload as a new file named name in the directory,
+// UploadFile stores the upload as a new file named name in the directory,
 // ensuring the root when the directory is its alias, and returns the
 // file's identity. A name blobfs would refuse is refused before any I/O; a
 // taken name is a conflict.
-func (s *Service) PutFile(ctx context.Context, organizationID, directoryID, name string, u web.Upload) (Identity, error) {
+func (s *Service) UploadFile(ctx context.Context, organizationID, directoryID, name string, u web.Upload) (Identity, error) {
 	if err := validName(name); err != nil {
 		return Identity{}, err
 	}
-	return s.store.putFile(ctx, organizationID, directoryID, name, u)
+	return s.store.uploadFile(ctx, organizationID, directoryID, name, u)
 }
 
 // File returns the file's metadata.

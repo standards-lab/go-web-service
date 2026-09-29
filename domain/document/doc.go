@@ -29,8 +29,10 @@
 // row at the file grain. A directory id segment may be the literal root,
 // the alias of that directory. A write that needs the root ensures it
 // on first use, the directory and its owner row in one transaction after
-// the organization is read; a read before then answers an empty listing, or
-// not found for a specific id. Every route that takes an id checks its
+// the organization is read; a read before then answers an empty listing
+// once the organization is read, or not found for a specific id, and a
+// listing for an organization that does not exist is not found, as every
+// route answers it. Every route that takes an id checks its
 // scope first: it reads the owner row, then asks blobfs whether the
 // directory, or the file's directory, lies within the root. An id outside
 // is not found, indistinguishable from an absent one, so no request reads,
@@ -52,22 +54,36 @@
 // A conflict is a 409 with a curated detail, never the error's own text,
 // which would name blobfs's operation, ids, and constraints: "an entry
 // with that name already exists", "the directory is not empty", "the
-// directory is being deleted", "the file is referenced", or otherwise "the
-// request conflicts with the current state" (data.Status's Detail
-// constants).
+// directory is being deleted", "the file is being deleted", "the file is
+// referenced", or otherwise "the request conflicts with the current state"
+// (data.Status's Detail constants). blobfs refuses a change as deleting
+// both when the file's own delete has begun and when a directory it
+// reaches is deleting, so the layer reads the file back to tell them
+// apart: a move of a file whose own delete began, in a directory that is
+// not deleting, is "the file is being deleted", and one in a marked
+// branch or into a deleting directory is the directory's. An upload is
+// refused the same way when its row's delete began before it completed. A
+// file delete is never refused as deleting: a repeated delete converges.
 //
 // A directory reads with its status, active until blobfs marks its branch
 // deleting, and a file with its stage, pending, available, or deleting.
 // The statuses are the layer's own vocabulary (DirectoryStatus and
 // FileStatus), mapped from blobfs's in storage.go, so the wire never
-// carries a library type. A deleting branch's directories and files still
+// carries a library type and a change to the library's names never changes
+// the wire. A status the layer does not name, one blobfs added, is a
+// server fault (500) on the read that meets it, never passed through. A deleting branch's directories and files still
 // read by id, with their status, while every listing hides the branch: its
 // parent lists without it, and a listing of a directory within it is not
 // found.
 //
-// An upload is a raw body of at most 10 MiB in any media type. The shared
-// write protocol stores it in three steps: the pending row, the put, and
-// the completion. A put or a completion that fails abandons the pending
+// An upload is a POST of a raw body of at most 10 MiB in any media type
+// to its directory's files, the new file's name in the required name
+// query parameter, answered 201 with the file's metadata read as its
+// Location. It is a POST, not a PUT to the name, because it creates a new
+// file under an id the server mints and is not idempotent: a retry after a
+// lost response is a second create, refused with the name's conflict.
+// The shared write protocol stores it in three steps: the pending row, the
+// put, and the completion. A put or a completion that fails abandons the pending
 // row, and a taken name is a conflict. A completion refused because a mark
 // or the sweep reached the row deletes the object just put, since a sweep
 // that ran before the put landed could not have deleted it. A download is
@@ -100,8 +116,10 @@
 // insert-or-find on the pool, and the files by the shared write protocol's
 // retry-safe form, so a rerun finds every entry and a reset writes each
 // file again under the same key. An entry already there by name keeps its
-// own id and content; one a client moved or renamed, whose id a row holds
-// under another name, and one being deleted are left as they stand.
+// own id and content, and a client's file there under another id, pending
+// or complete, is never written over; one a client moved or renamed,
+// whose id a row holds under another name, and one being deleted are left
+// as they stand.
 //
 // A file delete is blobfs's delete protocol, 204. A directory delete
 // removes an empty directory, 204; removing the root removes its owner row

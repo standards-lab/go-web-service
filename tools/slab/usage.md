@@ -91,6 +91,7 @@ mise run slab -- docs dirs list <acme-id> root --sort name                     #
 # upload, list, read back, revalidate:
 mise run slab -- docs files put <acme-id> <reports-id> q3.pdf                  # 201 at version 2; stored as q3.pdf, application/pdf
 mise run slab -- docs files put <acme-id> <reports-id> notes --name "Q3 notes" # no extension: application/octet-stream
+mise run slab -- docs files put <acme-id> <reports-id> q3.pdf                  # 409: the upload is a POST that creates, and q3.pdf is taken
 mise run slab -- docs files list <acme-id> <reports-id> --size 1               # page 1 and next; continue with --cursor <next>
 mise run slab -- docs files show <acme-id> <file-id>                           # the metadata: status, size, version
 mise run slab -- docs files get <acme-id> <file-id> --out /tmp/q3.pdf          # headers, Content-Disposition among them

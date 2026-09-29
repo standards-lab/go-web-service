@@ -164,7 +164,9 @@ membership, and `name[like]=%25ing` names an operator in brackets. Its envelope 
 filtered `total`, `more`, and a `next` cursor. Sending `cursor=<next>` in place of `page`, with
 the same sort and filters, continues after the last row, so a tree that changes between
 requests neither skips nor repeats one. A continued page omits `page`; a sort on `parent_id`,
-the one nullable field, pages by number alone.
+the one nullable field, pages by number alone. The total is counted in the page's own
+statement, from the rows it returns, so a page past the last, which returns none, omits `total`
+too; its `more` is false. The document listings follow the same contract.
 
 The guarded commands (`PUT`, transfer, `DELETE`) take the row's version in `If-Match: "3"`; a
 missing header answers 428 and a stale version 412. Every rejection is an RFC 9457 problem. A
@@ -298,6 +300,14 @@ The object storage admin service is mounted under `/admin/storage`:
 A store that cannot be reached answers 503 with the provider's reason. The admin mount serves on
 the API listener until the management listener lands; it is not for a public deployment as it
 stands.
+
+A container deleted while the service runs makes every storage operation a 503, a download's
+read included, and takes the storage check on `/readyz` down; the rows are untouched. `POST
+/admin/storage/container` creates it again, empty, and readiness recovers, but each stored
+file's row now names an object that no longer exists, and its download answers 404. In
+development, a reset to a seeded state (`mise run db-state default`) writes the seeded files
+again; anything else is uploaded again. The service does not reconcile rows against the store:
+blobfs defers that reconciler to the event flow `v1.messaging` brings.
 
 ## Sweep
 

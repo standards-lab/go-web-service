@@ -1,7 +1,7 @@
 # Domain architecture
 
-This note holds the rules every domain layer is built by. The organization package is the only
-domain layer; a rule leaves this note once the code expresses it in more than one layer.
+This note holds the rules every domain layer is built by. The organization and document packages
+are the domain layers; a rule leaves this note once it lands in the architecture repository.
 
 ## The domain layer
 
@@ -30,7 +30,7 @@ layer:
   domain's name, binds each statement to a typed handle (a projection for the read model, rows
   for a scan, a guard for a version-checked command), and exposes each operation as a store
   method that reads as what it does. Translation files are capability-named, one per
-  infrastructure integration (`storage.go`, `messaging.go`, and `ai.go` are planned). A
+  infrastructure integration (`storage.go` in both domains; `messaging.go` and `ai.go` are planned). A
   service never touches an infrastructure API outside its translation file.
 - `service.go`: the single domain service, a concrete type constructed from the `data` package,
   exposing its statement verification as `Verify` for the composition root to run at startup, its
@@ -143,13 +143,17 @@ the operation through exported API; an inelegant-but-expressible shape stages in
 
 ## Promotion candidates
 
-Two rules are candidates for the architecture repository once a second domain layer proves
-them:
+The document layer is the second domain layer, and it proves three rules, recorded for promotion
+to the architecture repository at the storage lane's fold:
 
 - The domain layer as a compositional grouping (one package, one Domain Service, one handler)
   is a candidate Go Elemental expression.
 - The capability-named translation file is the in-package counterpart of the Elemental
-  Architecture's downward-dependency rule.
+  Architecture's downward-dependency rule; both domains' `storage.go` hold it.
+- Cross-domain coupling runs two ways: downward as an SQL check in the consumer's transaction
+  (the document layer's `organization_exists` inside the root's transaction, a foreign key the
+  backstop), upward as an interface the consuming domain declares and the composition root
+  injects (`document.Sweeper`, satisfied by the sweep's waker).
 
 ## Deferred by design
 

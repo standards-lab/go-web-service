@@ -24,8 +24,8 @@ section the code comes to express is deleted.
 
 ## Reads and writes
 
-The organization domain runs on authored SQL; `domain-architecture.md` and `internal/app/doc.go`
-hold the rules the next layer is built by. Ids are database-minted (`uuidv7()`) and `RETURNING` is
+The organization and document domains run on authored SQL; `domain-architecture.md` and
+`internal/app/doc.go` hold the rules the next layer is built by. Ids are database-minted (`uuidv7()`) and `RETURNING` is
 the application's identity pattern, both on the port list. Base packages outside `internal/` are
 importable by other modules, a deliberate choice for a reference service, with the wiring kept
 compiler-private under `internal/`.
@@ -56,8 +56,9 @@ catalog templates with owned instances, and category branches composed over a ge
   is administrative. The pattern pair for the catalog adds a `deleted_at` column, a read model
   that excludes deleted rows with a recycle view beside it, partial unique indexes over live
   rows, and the delete pattern as an update.
-- Cross-domain invariants are enforced two ways: an SQL check inside the transaction where the
-  dependency runs downward (custody checks person status), and an interface declared by the
+- Cross-domain invariants are enforced two ways, settled by the document layer
+  (`domain-architecture.md`, "Promotion candidates"): an SQL check inside the transaction where
+  the dependency runs downward (custody checks person status), and an interface declared by the
   consuming domain and injected at the composition root where the check would otherwise run
   upward (people declares a custody check so deactivation is blocked while custody is open;
   inventory implements it).

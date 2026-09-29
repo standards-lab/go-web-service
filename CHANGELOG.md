@@ -54,8 +54,9 @@ accumulate under [Unreleased] until the first cut.
   in the container, writes it again under the same key.
 - `slab demo storage`, a narrated scenario of the storage end to end, and slab's `org logo`,
   `docs`, and `admin storage` commands.
-- The integration tier's storage cases (`TestDocument`, `TestDocumentSweep`,
-  `TestSweepAtStartup`, `TestSweepUnderReset`, `TestOrganizationLogo`, `TestSeededStorage`),
+- The integration tier's storage cases (`TestDocument`, `TestDocumentRefusedUpload`,
+  `TestStorageOutage`, `TestDocumentSweep`, `TestSweepAtStartup`, `TestSweepUnderReset`,
+  `TestOrganizationLogo`, `TestSeededStorage`),
   the object store relayed through a forwarder (`Options.Storage`) and read beneath the API
   (`integration.Objects`); a failed test prints the service's output.
 - Rate limiting on the router-level middleware stack, over

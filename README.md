@@ -375,10 +375,18 @@ state control through the admin mount; nothing in the service exists for the tes
 The storage cases:
 
 - `TestDocument`: the document API's contract, the deleting state, the guarded deletes, the
-  conflicts' curated details (a file's own delete told apart from its directory's), the listings
-  of an organization that does not exist, a download's round trip with its exact bytes and headers and its
-  304s, and cross-organization isolation, one organization reaching none of another's
+  conflicts' curated details (a file's own delete told apart from its directory's), both
+  listings paged by number and by cursor with their cursor 400s, a file delete the severed store
+  refuses, left deleting and finished by its retry at the client's version, the listings of an
+  organization that does not exist, a download's round trip with its exact bytes and headers and
+  its 304s, and cross-organization isolation, one organization reaching none of another's
   directories or files.
+- `TestDocumentRefusedUpload`: an upload through a severed store answers 503 and leaves no
+  object; its abandon is refused too, so the row is left deleting, hidden from the listing but
+  holding its name (409) until the sweep's stale reclaim, after which the same upload stores.
+- `TestStorageOutage`: with the store severed, `/readyz` names the `storage` check, a download
+  and an upload answer 503, and the metadata reads answer 200; the service recovers without a
+  restart.
 - `TestDocumentSweep`: a marked branch swept of its rows and objects, a refused pass that
   converges once the store returns, and the root's recursive delete.
 - `TestSweepAtStartup`: a branch marked before a restart is swept at the next start.

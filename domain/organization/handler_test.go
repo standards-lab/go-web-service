@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/standards-lab/blobfs/data/datatest"
 	"github.com/standards-lab/go-web-sdk"
@@ -24,7 +25,7 @@ func module(t *testing.T, responses ...sqltest.Response) http.Handler {
 	t.Helper()
 	svc, _ := service(t, responses...)
 	r := web.NewRouter()
-	r.Mount(web.NewModule(organization.Routes(svc, web.Limits{DefaultSize: 20, MaxSize: 100}, slog.New(slog.DiscardHandler))))
+	r.Mount(web.NewModule(organization.Routes(svc, web.Limits{DefaultSize: 20, MaxSize: 100}, transfer, slog.New(slog.DiscardHandler))))
 	return r
 }
 
@@ -225,3 +226,7 @@ func TestRoutes_AConflictCarriesItsCuratedDetail(t *testing.T) {
 		}
 	}
 }
+
+// transfer sizes the test routes' transfers at 1 MiB/s with a second's
+// grace; a recorder has no connection deadlines for it to set.
+func transfer(limit int64) web.Transfer { return web.NewTransfer(limit, 1<<20, time.Second) }

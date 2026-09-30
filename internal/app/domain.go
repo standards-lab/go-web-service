@@ -34,8 +34,8 @@ func newDomain(infra *Infrastructure, sweep document.Sweeper) *Domain {
 }
 
 // mountAPI builds the API mount, /api, with each domain layer's route group
-// mounted into it, each handed the paging policy from cfg and the service's
-// logger for its error writer. Every collection read may continue by
+// mounted into it, each handed the paging policy and the server's transfer
+// sizing from cfg and the service's logger for its error writer. Every collection read may continue by
 // cursor. Each read issues a cursor on every sort its keyset can continue
 // and pages by number otherwise, as the organization list does on its one
 // nullable field, parent_id.
@@ -43,7 +43,7 @@ func mountAPI(dom *Domain, cfg *config.Config, logger *slog.Logger) *web.Group {
 	api := web.NewGroup("/api")
 	reads := cfg.Reads.Limits()
 	reads.Cursor = true
-	api.Mount(organization.Routes(dom.Organization, reads, logger))
-	api.Mount(document.Routes(dom.Document, reads, logger))
+	api.Mount(organization.Routes(dom.Organization, reads, cfg.Server.Transfer, logger))
+	api.Mount(document.Routes(dom.Document, reads, cfg.Server.Transfer, logger))
 	return api
 }

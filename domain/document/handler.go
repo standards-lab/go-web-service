@@ -23,21 +23,23 @@ const maxCommandBody = 1 << 16
 const maxFileBody = 10 << 20
 
 // handler binds the layer's endpoints to its service under the injected
-// paging policy. Every handler returns its error; the group's writer maps
-// it to a problem.
+// paging policy and file transfer. Every handler returns its error; the
+// group's writer maps it to a problem.
 type handler struct {
 	service *Service
 	limits  web.Limits
+	files   web.Transfer
 }
 
 // Routes builds the layer's route group, /documents/{org}, with the
 // directory routes under /directories/{id} ({id} may be RootAlias) and the
 // file routes under /files/{id}; the README's API section lists them. The
 // moves and deletes take their version from If-Match. limits is the paging
-// policy of the listings, and logger records the cause of every 5xx the
-// group's error writer sends.
-func Routes(service *Service, limits web.Limits, logger *slog.Logger) *web.Group {
-	h := &handler{service: service, limits: limits}
+// policy of the listings; transfer sizes the deadlines of a file's upload
+// and download from the layer's limit, maxFileBody; and logger records the
+// cause of every 5xx the group's error writer sends.
+func Routes(service *Service, limits web.Limits, transfer func(limit int64) web.Transfer, logger *slog.Logger) *web.Group {
+	h := &handler{service: service, limits: limits, files: transfer(maxFileBody)}
 	ew := web.NewErrorWriter(logger, status, data.Status)
 	g := web.NewGroup("/documents")
 	g.SetErrorWriter(ew)
@@ -190,7 +192,10 @@ func (h *handler) uploadFile(w http.ResponseWriter, r *http.Request) error {
 	if name == "" {
 		return fmt.Errorf("%w: the name query parameter is required", ErrValidation)
 	}
-	upload, err := web.ReadUpload(w, r, maxFileBody)
+	if err := h.files.WidenUpload(w, r); err != nil {
+		return err
+	}
+	upload, err := web.ReadUpload(w, r, h.files.Limit())
 	if err != nil {
 		return err
 	}
@@ -226,6 +231,9 @@ func (h *handler) content(w http.ResponseWriter, r *http.Request) error {
 	}
 	c, err := h.service.Content(r.Context(), org, id)
 	if err != nil {
+		return err
+	}
+	if err := h.files.WidenDownload(w, c.Object.Size); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Disposition", web.Attachment(c.Name))

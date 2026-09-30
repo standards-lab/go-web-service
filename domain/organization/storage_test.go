@@ -282,7 +282,7 @@ func TestStore_ALostActivationIs409AndRetiresTheNewFile(t *testing.T) {
 		datatest.FileRows(file(newFileID, blobfs.StatusDeleting, 3)), exec(1), // the new file retired
 	)
 	r := web.NewRouter()
-	r.Mount(web.NewModule(organization.Routes(s, web.Limits{DefaultSize: 20, MaxSize: 100}, slog.New(slog.DiscardHandler))))
+	r.Mount(web.NewModule(organization.Routes(s, web.Limits{DefaultSize: 20, MaxSize: 100}, transfer, slog.New(slog.DiscardHandler))))
 	problem(t, upload(t, r, "/organizations/"+validID+"/logo", "image/png", "png", 3), 409)
 	sameOps(t, rec,
 		q,
@@ -310,7 +310,7 @@ func TestStore_AHoldRefusedByTheFilesOwnDeleteIs409(t *testing.T) {
 		datatest.FileRows(file(newFileID, blobfs.StatusDeleting, 3)), exec(1), // the new file retired
 	)
 	r := web.NewRouter()
-	r.Mount(web.NewModule(organization.Routes(s, web.Limits{DefaultSize: 20, MaxSize: 100}, slog.New(slog.DiscardHandler))))
+	r.Mount(web.NewModule(organization.Routes(s, web.Limits{DefaultSize: 20, MaxSize: 100}, transfer, slog.New(slog.DiscardHandler))))
 	body := problem(t, upload(t, r, "/organizations/"+validID+"/logo", "image/png", "png", 3), 409)
 	if body["detail"] != "the file is being deleted" {
 		t.Errorf("detail = %v; want the file's own delete", body["detail"])
@@ -340,7 +340,7 @@ func TestStore_AHoldRefusedAfterTheReclaimIs409(t *testing.T) {
 		datatest.FileRows(), datatest.FileRows(),  // the abandon's delete matches nothing; its read finds the row purged
 	)
 	r := web.NewRouter()
-	r.Mount(web.NewModule(organization.Routes(s, web.Limits{DefaultSize: 20, MaxSize: 100}, slog.New(slog.DiscardHandler))))
+	r.Mount(web.NewModule(organization.Routes(s, web.Limits{DefaultSize: 20, MaxSize: 100}, transfer, slog.New(slog.DiscardHandler))))
 	body := problem(t, upload(t, r, "/organizations/"+validID+"/logo", "image/png", "png", 3), 409)
 	if body["detail"] != "the file is being deleted" {
 		t.Errorf("detail = %v; want the file's own delete", body["detail"])
@@ -398,7 +398,7 @@ func TestPutLogo_AnswersCreatedWithLocation(t *testing.T) {
 		exec(1), datatest.FileRows(), exec(1), // the hold, no current logo, the new image
 	)
 	r := web.NewRouter()
-	r.Mount(web.NewModule(organization.Routes(s, web.Limits{DefaultSize: 20, MaxSize: 100}, slog.New(slog.DiscardHandler))))
+	r.Mount(web.NewModule(organization.Routes(s, web.Limits{DefaultSize: 20, MaxSize: 100}, transfer, slog.New(slog.DiscardHandler))))
 	path := "/organizations/" + validID + "/logo"
 	rec := upload(t, r, path, "image/png", "png", 3)
 	if rec.Code != 201 || rec.Header().Get("Location") != path || strings.TrimSpace(rec.Body.String()) != `{"id":"`+newFileID+`"}` {

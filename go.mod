@@ -10,9 +10,9 @@ require (
 	github.com/standards-lab/go-database/postgres v0.4.0
 	github.com/standards-lab/go-observability v0.1.0
 	github.com/standards-lab/go-observability/otlp v0.1.0
-	github.com/standards-lab/go-storage v0.3.0
-	github.com/standards-lab/go-storage/azureblob v0.3.0
-	github.com/standards-lab/go-web-sdk v0.13.0
+	github.com/standards-lab/go-storage v0.4.0
+	github.com/standards-lab/go-storage/azureblob v0.4.0
+	github.com/standards-lab/go-web-sdk v0.14.0
 	github.com/standards-lab/go-web-sdk/middleware/rate-limit v0.2.0
 	github.com/standards-lab/sqlate v0.4.1
 	github.com/standards-lab/sqlate/postgres v0.4.0

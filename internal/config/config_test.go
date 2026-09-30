@@ -174,10 +174,11 @@ func TestConfig_ShippedFilesLoad(t *testing.T) {
 	if cfg.Admin.SeedState() != "default" || cfg.Storage.Options["max_retries"] != "1" || cfg.Storage.Options["try_timeout"] == "" {
 		t.Errorf("loaded admin seed %q, storage options %v; want the overlay over the base", cfg.Admin.SeedState(), cfg.Storage.Options)
 	}
-	// A download's body is read within one storage try, so the base file
-	// sets the try's bound to the server's write timeout, the time the
-	// server gives a response.
-	if try, err := time.ParseDuration(cfg.Storage.Options["try_timeout"]); err != nil || try != time.Duration(*cfg.Server.WriteTimeout) {
-		t.Errorf("try_timeout = %q (%v), want the server's write_timeout, %s", cfg.Storage.Options["try_timeout"], err, time.Duration(*cfg.Server.WriteTimeout))
+	// A download's body resumes past a storage try's deadline, and the
+	// store's read idle timeout bounds each read with its resumptions, so
+	// the base file sets the try below the idle bound: a stalled try
+	// resumes once before the store is cut off.
+	if try, err := time.ParseDuration(cfg.Storage.Options["try_timeout"]); err != nil || try >= cfg.Storage.ReadIdleTimeout.Duration() {
+		t.Errorf("try_timeout = %q (%v), want it below read_idle_timeout, %s", cfg.Storage.Options["try_timeout"], err, cfg.Storage.ReadIdleTimeout.Duration())
 	}
 }

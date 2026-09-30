@@ -33,7 +33,7 @@ func module(t *testing.T, responses ...sqltest.Response) http.Handler {
 // routes mounts the layer's route group over svc as its own module.
 func routes(svc *document.Service) http.Handler {
 	r := web.NewRouter()
-	r.Mount(web.NewModule(document.Routes(svc, web.Limits{DefaultSize: 20, MaxSize: 100, Cursor: true}, slog.New(slog.DiscardHandler))))
+	r.Mount(web.NewModule(document.Routes(svc, web.Limits{DefaultSize: 20, MaxSize: 100, Cursor: true}, transfer, slog.New(slog.DiscardHandler))))
 	return r
 }
 
@@ -513,3 +513,7 @@ func TestReads_WireShape(t *testing.T) {
 		})
 	}
 }
+
+// transfer sizes the test routes' transfers at 1 MiB/s with a second's
+// grace; a recorder has no connection deadlines for it to set.
+func transfer(limit int64) web.Transfer { return web.NewTransfer(limit, 1<<20, time.Second) }

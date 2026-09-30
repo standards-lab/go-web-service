@@ -22,21 +22,23 @@ const maxCommandBody = 1 << 16
 const maxLogoBody = 1 << 20
 
 // handler binds the layer's endpoints to its service under the injected
-// paging policy. Every handler returns its error; the group's writer maps
-// it to a problem.
+// paging policy and logo transfer. Every handler returns its error; the
+// group's writer maps it to a problem.
 type handler struct {
 	service *Service
 	limits  web.Limits
+	logos   web.Transfer
 }
 
 // Routes builds the layer's route group, /organizations: the list, the
 // read by id, the lookup by path (/lookup?path=/acme/engineering, a query
 // so no wildcard overlaps a sub-resource of /{id}), the four commands, and
 // the logo at /{id}/logo; the README's API section lists them. limits is
-// the list's paging policy, and logger records the cause of every 5xx the
-// group's error writer sends.
-func Routes(service *Service, limits web.Limits, logger *slog.Logger) *web.Group {
-	h := &handler{service: service, limits: limits}
+// the list's paging policy; transfer sizes the deadlines of a logo's upload
+// and download from the layer's limit, maxLogoBody; and logger records the
+// cause of every 5xx the group's error writer sends.
+func Routes(service *Service, limits web.Limits, transfer func(limit int64) web.Transfer, logger *slog.Logger) *web.Group {
+	h := &handler{service: service, limits: limits, logos: transfer(maxLogoBody)}
 	ew := web.NewErrorWriter(logger, status, data.Status)
 	g := web.NewGroup("/organizations")
 	g.SetErrorWriter(ew)
@@ -150,7 +152,10 @@ func (h *handler) putLogo(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	upload, err := web.ReadUpload(w, r, maxLogoBody)
+	if err := h.logos.WidenUpload(w, r); err != nil {
+		return err
+	}
+	upload, err := web.ReadUpload(w, r, h.logos.Limit())
 	if err != nil {
 		return err
 	}
@@ -172,6 +177,9 @@ func (h *handler) logo(w http.ResponseWriter, r *http.Request) error {
 	}
 	logo, err := h.service.Logo(r.Context(), id)
 	if err != nil {
+		return err
+	}
+	if err := h.logos.WidenDownload(w, logo.Object.Size); err != nil {
 		return err
 	}
 	w.Header().Set("Cache-Control", "no-cache")

@@ -20,7 +20,11 @@
   },
   "storage": {
     "container": "go-web-service",
-    "max_object_size": 10485760
+    "max_object_size": 10485760,
+    "request_timeout": "3s",
+    "options": {
+      "max_retries": "1"
+    }
   },
   "observability": {
     "endpoint": "127.0.0.1:4317"

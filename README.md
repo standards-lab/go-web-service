@@ -457,7 +457,8 @@ The `storage` block is go-storage's, each setting with its override:
 | `key` | `APP_STORAGE_KEY` | none, required; a secret, and `secrets.example.json` carries Azurite's published development key |
 | `max_object_size` | `APP_STORAGE_MAX_OBJECT_SIZE` | 10485760 bytes, 10 MiB (`config.json`); 0 is unbounded |
 | `list_page_size` | `APP_STORAGE_LIST_PAGE_SIZE` | 0, the provider's own page size |
-| `request_timeout` | `APP_STORAGE_REQUEST_TIMEOUT` | `10s`, bounding the store's own startup check and readiness probe |
+| `request_timeout` | `APP_STORAGE_REQUEST_TIMEOUT` | `3s` (`config.json`; go-storage's own is `10s`), bounding the store's own startup check and readiness probe, so `/readyz` answers within it when the store is down |
+| `options.<key>` | `APP_STORAGE_OPTIONS_<KEY>` | the provider's settings; `config.json` sets azureblob's `max_retries` to `1` (the SDK's own is 3 with exponential backoff), so a request to a store that is down fails in seconds, not tens of seconds |
 | `options` | none | the provider's own settings (`max_retries`, `block_size`, `concurrency`) |
 
 The `sweep` block schedules the [sweep](#sweep): `interval` (`APP_SWEEP_INTERVAL`, `30s`), the

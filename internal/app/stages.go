@@ -15,11 +15,11 @@ const (
 	// readiness check.
 	stageInfrastructure = 0
 
-	// stageSchema verifies and corrects the schema, then checks every
-	// statement against it and seeds: go-database's admin service over the
-	// pool started a stage earlier, its seeder verifying the data package's
-	// statements, each domain's, and blobfs's. The root declares the
-	// service itself (admin.go).
+	// stageSchema verifies and corrects the schema, checks every statement
+	// against it, and seeds. go-database's admin service runs it over the
+	// pool started a stage earlier, and its seeder verifies the data
+	// package's statements, each domain's, and blobfs's. The root declares
+	// the service itself (admin.go).
 	stageSchema = stageInfrastructure + 1
 
 	// stageReactors runs the reactors (reactors.go) once every table they

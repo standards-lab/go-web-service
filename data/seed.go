@@ -32,9 +32,10 @@ type Contribution interface {
 	// Key names the contribution's rows in a state file and its count in
 	// the seed's result.
 	Key() string
-	// Verifiers check against the live schema the statements the
-	// contribution runs: the domain's store, blobfs's. Each is comparable,
-	// a pointer, so one that several contributions share is verified once.
+	// Verifiers returns the verifiers of the statements the contribution
+	// runs (the domain's store, blobfs's), which the seeder checks against
+	// the live schema. Each is a comparable pointer, so one that several
+	// contributions share is verified once.
 	Verifiers() []query.Verifier
 }
 
@@ -116,8 +117,8 @@ func NewSeeder(db *Database, contributions ...Contribution) *Seeder {
 
 // Verify checks the package's statements and every contribution's
 // verifiers against the live schema, each verifier once. The admin service
-// runs it at startup, before it seeds, and on a verify request, so it is
-// the service's one statement check.
+// runs it at startup, before it seeds, and on a verify request; it is the
+// service's only statement check.
 func (s *Seeder) Verify(ctx context.Context) error {
 	vs := []query.Verifier{s.db.stmts}
 	seen := map[query.Verifier]bool{}
@@ -153,7 +154,7 @@ func (s *Seeder) States() []string {
 // the order the contributions were given, then, once it commits, every
 // FileSeed's files. It is idempotent, leaving an existing row or file as
 // it is and writing again whatever the state names that is missing. The
-// counts are what this run stored, per contribution, zero for one the
+// counts are what this run stored per contribution, zero for one the
 // state does not carry. A key no contribution reads is a defect in the
 // file, refused before any I/O.
 //

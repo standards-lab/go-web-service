@@ -113,7 +113,7 @@ limitation.
 
 Startup connects the database and the object store, applies any pending migration, checks every
 statement against the schema, seeds the configured state (the `local` overlay names `default`),
-starts the [sweep](#sweep), and starts the server last; the drain runs in reverse. The stage
+starts the [sweep](#sweep), and starts the server last. The drain runs in reverse. The stage
 table in `internal/app/stages.go` is the one declaration of that order. The service then logs
 `server ready` on `localhost:8080` (the `local` overlay binds loopback and runs debug logging).
 From a second shell:
@@ -160,8 +160,8 @@ conflict, 409, carries a curated `detail` naming its kind and never the underlyi
 text: "the request conflicts with the current state" for a taken code, a missing parent, a
 cycle, a concurrent logo replacement, and a delete of an organization that still has children,
 a logo, or a document root, and "the file is being deleted" for a logo `PUT` whose new file's
-delete began before its activation. A seeded organization holds a logo, so its delete answers 409 until
-its logo is deleted.
+delete began before its activation. A seeded organization holds a logo, so its delete answers
+409 until its logo is deleted.
 
 The logo is a raw body of at most 1 MiB in a raster type, PNG, JPEG, WebP, or GIF; any other
 type, SVG included, answers 415. A `PUT` answers 201 with the logo's `Location` and
@@ -170,8 +170,9 @@ replaced a logo, since every `PUT` stores a new file. The logo routes take no `I
 last write wins, and a 409, not a precondition, tells apart two replacements racing to
 activate. The `GET` is served `Cache-Control: no-cache` with the object's `ETag` and
 `Last-Modified`, so a client revalidates on every use. Once a replacement or a delete commits,
-the old file's object and row are purged; a purge that fails is logged at warn and the request
-still succeeds (201 or 204), the file left deleting for the sweep's stale reclaim.
+the service purges the old file's object and row. If the purge fails, the service logs it at
+warn and the request still succeeds (201 or 204); the file stays deleting until the sweep's stale
+reclaim.
 
 ```sh
 curl localhost:8080/api/organizations                          # the seeded reference data, paged
@@ -197,15 +198,15 @@ answer an empty page, and for an organization that does not exist, 404:
 | `DELETE` | `/files/{id}` | Delete a file |
 | `POST` | `/files/{id}/move` | Move it into a directory within the root |
 
-- An upload is a `POST` to its directory's files, the file's name in the required `name`
-  parameter, and answers 201 with the file's metadata read as its `Location`. It creates a new
+- An upload is a `POST` to its directory's files, with the file's name in the required `name`
+  parameter. It answers 201 with the file's metadata read as its `Location`. It creates a new
   file under an id the server mints, so it is not idempotent: a retry after a lost response
   answers 409 on the name the first took.
 - An upload the store refuses while it is unreachable answers 503. If the store also refuses
   the abandon's object delete, the file is left deleting, hidden from the listings, and keeps
   its name until the sweep's stale reclaim (`sweep.stale_age`); an upload of that name
   meanwhile answers 409 "the file is being deleted". An upload whose body ends before its
-  declared length is the request's fault, 400, never an outage.
+  declared length answers 400, since the request is at fault, never 503.
 - The moves and the deletes take the row's version in `If-Match`: 428 when it is missing, 412
   when it is stale.
 - A recursive delete marks the branch deleting and answers 202 with the directory's read as its
@@ -217,14 +218,14 @@ answer an empty page, and for an organization that does not exist, 404:
 - Every conflict carries one of six curated details: "an entry with that name already exists",
   "the directory is not empty", "the directory is being deleted", "the file is being deleted",
   "the file is referenced", or "the request conflicts with the current state". A move of a file
-  whose own delete began answers "the file is being deleted"; a file in a marked branch, or a
-  move into one, answers the directory's detail.
+  whose own delete began, in a directory that is not deleting, answers "the file is being
+  deleted"; a file in a marked branch, or a move into one, answers the directory's detail.
 
 An id outside the organization's document root answers 404, as an absent one does, so no
 request reads, moves, or deletes across organizations. A download is served as
 `Content-Disposition: attachment` with `Cache-Control: private, no-cache`, never rendered
 inline, since stored HTML would run in the API's origin. A download whose object cannot be
-opened answers its problem with none of the file's headers and `Cache-Control: no-store`.
+opened answers its problem with `Cache-Control: no-store` and none of the file's headers.
 
 Two validators share HTTP's entity-tag syntax, the version and the object ETag, and neither
 stands in for the other:
@@ -269,9 +270,8 @@ the first; of the checked-in configurations, only the local overlay names one (`
 seed applies idempotently: it leaves a row or file that exists as it is and writes again any the
 state names that is missing, so a seeded organization, logo, or file deleted since the last
 start is restored at the next. The seed's response, and the state's `seeded` member, count what
-the run stored under the same keys. The
-rows commit in one transaction first, and the files are written after it commits, since a
-file's object is put outside any transaction.
+the run stored under the same keys. The rows commit in one transaction first, and the files are
+written after it commits, since a file's object is put outside any transaction.
 
 The state operation is destructive, in the class of `down` and `force`, and
 `mise run db-state <state>` runs it against the local service. A reset reverts blobfs's tables
@@ -364,9 +364,9 @@ stores objects over go-storage's fake. The integration tier, `mise run integrati
 composed service black-box through its API against the compose stack, in CI on every merge to
 main and on demand from the Actions tab.
 
-The suite lives in the `integration` package under the `integration` build tag, each file named
-for the surface it asserts (`organization_test.go`, `document_test.go`, `logo_test.go`,
-`sweep_test.go`, `outage_test.go`, and the rest), each test's comment stating what it proves.
+The suite lives in the `integration` package under the `integration` build tag. Each file is
+named for the surface it asserts (`organization_test.go`, `document_test.go`, `logo_test.go`,
+`sweep_test.go`, `outage_test.go`, and the rest), and each test's comment states what it proves.
 Its harness is the toolkit the SDKs ship beside what it exercises: go-core's
 `process/processtest` builds `cmd/server` once, runs it as a subprocess configured by `APP_*`
 variables on a reserved port, and relays the database or the object store through a loopback
@@ -400,9 +400,9 @@ Configuration layers in a fixed precedence, later sources winning:
    `APP_OBSERVABILITY_SAMPLE_RATIO`, the rate limit (`APP_RATE_LIMIT_REQUESTS`,
    `APP_RATE_LIMIT_WINDOW`), the reads paging policy
    (`APP_READS_DEFAULT_SIZE`, `APP_READS_MAX_SIZE`), the admin seed set (`APP_ADMIN_SEED`, a
-   state name; an empty value is unset, as for every override, so only a file's
-   `"seed": ""` clears a configured one), and the sweep's interval, pass size, and stale age (`APP_SWEEP_INTERVAL`,
-   `APP_SWEEP_BATCH`, `APP_SWEEP_STALE_AGE`).
+   state name), and the sweep's interval, pass size, and stale age (`APP_SWEEP_INTERVAL`,
+   `APP_SWEEP_BATCH`, `APP_SWEEP_STALE_AGE`). An empty value counts as unset, as it does for every
+   override, so only a file's `"seed": ""` clears a configured seed set.
 
 Every file is optional: a deployment can run on the base file and environment variables alone,
 or on environment variables only. Each file decodes strictly: a key the configuration does not
@@ -419,7 +419,17 @@ The `storage` block is go-storage's, each setting with its override:
 | `max_object_size` | `APP_STORAGE_MAX_OBJECT_SIZE` | 10485760 bytes, 10 MiB (`config.json`); 0 is unbounded |
 | `list_page_size` | `APP_STORAGE_LIST_PAGE_SIZE` | 0, the provider's own page size |
 | `request_timeout` | `APP_STORAGE_REQUEST_TIMEOUT` | `3s` (`config.json`; go-storage's own is `10s`), bounding the store's own startup check and readiness probe, so `/readyz` answers within it when the store is down; the object operations take no bound from it |
-| `options.<key>` | `APP_STORAGE_OPTIONS_<KEY>` | azureblob's own settings. `try_timeout` bounds each try of an object operation, a `Put` block's upload or a `Get` whose body the client must finish reading within it: `15m` (`config.json`), set together with `server.write_timeout`: a download's body is read within one try, and the server gives the response `write_timeout`, so a shorter try would cut off a slow client's download the server still allows (at `60s`, a 10 MiB download to a client slower than about 175 KB/s). The cost is that a stalled store holds a request for up to one try per attempt. `max_retries` is how many times a failed try is retried: the SDK's 3, with exponential backoff from 800 ms, in `config.json`, and `1` in the `local` overlay and the integration harness, so a store that is down is refused in about a second. `block_size` and `concurrency` size a `Put`'s staged blocks |
+| `options.<key>` | `APP_STORAGE_OPTIONS_<KEY>` | azureblob's own settings: `try_timeout`, `max_retries`, `block_size`, and `concurrency`, described below |
+
+azureblob's `try_timeout` bounds each try of an object operation: a `Put` block's upload, or a
+`Get` whose body the client must finish reading within the try. `config.json` sets it to `15m`,
+together with `server.write_timeout`. A download's body is read within one try, and the server
+gives the response `write_timeout`, so a shorter try would cut off a slow client's download the
+server still allows: at `60s`, a 10 MiB download to a client slower than about 175 KB/s. The
+cost is that a stalled store holds a request for up to one try per attempt. `max_retries` sets
+how many times a failed try is retried. `config.json` keeps the SDK's 3, with exponential
+backoff from 800 ms; the `local` overlay and the integration harness set `1`, so a store that is
+down is refused in about a second. `block_size` and `concurrency` size a `Put`'s staged blocks.
 
 The `sweep` block schedules the [sweep](#sweep): `interval` (`APP_SWEEP_INTERVAL`, `30s`), the
 backstop wake; `batch` (`APP_SWEEP_BATCH`, 100), the records one pass handles; and `stale_age`

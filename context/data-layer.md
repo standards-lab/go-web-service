@@ -11,11 +11,11 @@ section the code comes to express is deleted.
   in authored files throughout, and native Postgres features where they earn it, each in a
   file that declares it in its header and so enters the port list (the README's Stack section).
   Standard SQL is preferred where it costs nothing; a native choice is a choice, named as such.
-- A library change is prototyped natively in the SDK repository that owns it, go-database for
-  the persistence surface and go-web-sdk for the web surface, linked into this repository
-  through the local gitignored `go.work` during development. A convention proven here before
-  its library is settled stages in the flat root `sdk` package (`domain-architecture.md`);
-  nothing is staged under a `pkg/` tree.
+- A library change is prototyped natively in the SDK repository that owns it: go-database for
+  the persistence surface, go-web-sdk for the web surface. During development the local
+  gitignored `go.work` links that repository into this one. A convention proven here before its
+  library is settled stages in the flat root `sdk` package (`domain-architecture.md`); nothing
+  is staged under a `pkg/` tree.
 - The layer spans the SDKs and this service. The reads and writes slices are coordinated
   sessions — a library slice and the service slice that proves it, planned together, each
   repository on its own branch with its own pull request. The domain slices are service-only.
@@ -72,20 +72,20 @@ surfaces, routes, constraint names, and enum vocabularies are settled per task.
 ## Evaluation evidence (`v1.data.evaluation`)
 
 The `v1.data.evaluation` task weighs this evidence. The `sdk` package stages `Command` for
-go-web-sdk (its path parse, `PathUUID`, promoted in go-web-sdk v0.13.0) and the reactor and the
-quiesce gate for go-core. The `data` package holds the shared status matcher and the directives
-lowering, which the template cannot scaffold while it stays engine-free. A generic seed helper is a
-fit question for the evaluation: it promotes to go-database when its shape is the library's own, not
-when a second service repeats the per-table loop. It also decides whether a linter (`depguard`,
-denying the provider modules outside the composition root) enforces the provider import boundary the
-README's Stack section states.
+go-web-sdk, and the reactor and the quiesce gate for go-core; `Command`'s path parse is already
+promoted, as go-web-sdk v0.13.0's `PathUUID`. The `data` package holds the shared status matcher and
+the directives lowering, which the template cannot scaffold while it stays engine-free. A generic
+seed helper is a fit question for the evaluation: it promotes to go-database when its shape is the
+library's own, not when a second service repeats the per-table loop. It also decides whether a
+linter (`depguard`, denying the provider modules outside the composition root) enforces the provider
+import boundary the README's Stack section states.
 
-## The general sweeper
+## When to build a general sweeper
 
-The sweep worker (`data.Storage.SweepWorker`) is the standalone sweeper of blobfs's deletes, the
-one reclamation the service runs. The moment any other layer needs sweeper-like reclamation
+The sweep worker (`data.Storage.SweepWorker`) is a standalone sweeper for blobfs's deletes and the
+only reclamation the service runs. When another layer first needs sweeper-like reclamation
 (outbox cleanup, expired sessions, soft-delete purge, or any cascade beyond pruning SQL rows),
-that step builds the general sweeper and moves blobfs's sweep onto it as its first reclaimer; it
+that task builds a general sweeper and moves blobfs's sweep onto it as its first reclaimer. It
 never builds a second standalone worker.
 
 ## Prior R&D

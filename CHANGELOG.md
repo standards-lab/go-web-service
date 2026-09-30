@@ -25,15 +25,16 @@ accumulate under [Unreleased] until the first cut.
   partway leaves a plain pending row the sweep reclaims, never an image that would block the
   organization's delete. The organization path
   read moved to `GET /api/organizations/lookup?path=…`.
-- The document domain under `/api/documents/{org}`: each organization's hierarchy of
-  directories and files over blobfs, rooted at a document root its first write creates and
-  bound by the `organization_directory` table. Directory create, read with its `status`
-  (`active` or `deleting`), cursor-paged listings, moves, and deletes; file uploads
-  (`POST /directories/{id}/files?name=…`) of at most 10 MiB, metadata, downloads as an attachment (`private, no-cache`, 304 on `If-None-Match` and
-  `If-Modified-Since`), moves, and deletes. An id outside the organization's root is 404. The
-  moves and the deletes take the row's version in `If-Match`; a recursive directory delete
-  marks the branch deleting and answers 202 with the directory's read as its `Location`, its
-  listings 404 and its writes 409 until the sweep removes it.
+- The document domain under `/api/documents/{org}`: each organization's hierarchy of directories
+  and files over blobfs, rooted at a document root its first write creates and bound by the
+  `organization_directory` table. Directory create, read with its `status` (`active` or
+  `deleting`), cursor-paged listings, moves, and deletes; file uploads (`POST
+  /directories/{id}/files?name=…`) of at most 10 MiB, metadata, downloads as an attachment
+  (`private, no-cache`, 304 on `If-None-Match` and `If-Modified-Since`), moves, and deletes. An id
+  outside the organization's root is 404. The moves and the deletes take the row's version in
+  `If-Match`; a recursive directory delete marks the branch deleting and answers 202 with the
+  directory's read as its `Location`, its listings 404 and its writes 409 until the sweep removes
+  it.
 - The sweep: data's background worker (`data.Storage.SweepWorker`), blobfs's sweep in bounded
   passes, staged on the reactor the composition root runs at its `reactors` stage. It finishes
   the branches a recursive delete marks and reclaims uploads and deletes left unfinished past
@@ -124,28 +125,29 @@ accumulate under [Unreleased] until the first cut.
 - The storage suite's closing releases, validated together: go-core v0.5.0, go-web-sdk v0.13.0
   with middleware/rate-limit v0.2.0, go-database v0.7.0 with postgres/v0.4.0, go-storage v0.3.0
   with azureblob/v0.3.0, and blobfs v0.5.0 with postgres/v0.3.0:
-  - A malformed path id is go-web-sdk's `PathUUID` refusal (`sdk.PathID`, promoted), and a
-    handler's panic answers a logged 500 through `middleware.Recoverer`.
-  - A listing omits `total` only when it did not count; a document root's alias before its first
-    write lists an empty page, counted on the first page as an empty root's is.
+  - go-web-sdk's `PathUUID` refuses a malformed path id (`sdk.PathID`, promoted).
+  - `middleware.Recoverer` answers a handler's panic with a logged 500.
+  - A listing omits `total` only when it did not count. Before its first write, a document
+    root's alias lists an empty page, counted on the first page as an empty root's is.
   - A download whose object fails to open answers `no-store`, with none of the file's headers.
   - `POST /admin/database/state` with an empty state resets to the configured seed.
   - Every configuration file decodes strictly: an unknown key fails the load.
-  - Startup's schema stage checks every statement once, through the seeder, before it seeds;
-    the `verify` stage is gone.
-- A logo replacement or delete whose purge fails after its commit succeeds and logs the failure
-  at warn; the stale reclaim finishes the file. A logo seed that loses its activation to another
-  logo leaves that logo and retires its own file, with no error.
-- An upload whose body fails is 400, no longer the 503 of a lost database connection.
-- Storage options: `try_timeout` (`15m`, set with `server.write_timeout`, since a download's
-  body is read within one try) bounds each object operation's try; `max_retries: 1` moves from
-  `config.json` to the `local` overlay and the integration harness.
+  - Startup's schema stage checks every statement once, through the seeder, before it seeds.
+    The `verify` stage is removed.
+- When a logo replacement or delete commits and its purge then fails, the request succeeds and
+  logs the failure at warn; the stale reclaim finishes the file.
+- A logo seed that loses its activation to another logo leaves that logo and retires its own
+  file, with no error.
+- An upload whose body fails answers 400, no longer a lost database connection's 503.
+- Storage options: `try_timeout` (`15m`) bounds each try of an object operation and is set with
+  `server.write_timeout`, since a download's body is read within one try. `max_retries: 1`
+  moves from `config.json` to the `local` overlay and the integration harness.
 - A directory read and an empty directory's delete run their scope check in their own
-  transaction; the logo's organization check is a key lookup.
+  transaction. The logo's organization check is a key lookup.
 - CI runs slab's vet, `go mod tidy -diff`, tests, and golangci-lint.
-- The storage libraries this service validated before them: blobfs v0.4.0 with postgres/v0.3.0, go-storage
-  v0.2.1 with azureblob/v0.2.0, go-web-sdk v0.12.0, and go-database v0.6.2, the promotions and
-  resolution items of `v1.storage.suite`:
+- The storage libraries this service validated before them: blobfs v0.4.0 with postgres/v0.3.0,
+  go-storage v0.2.1 with azureblob/v0.2.0, go-web-sdk v0.12.0, and go-database v0.6.2, the
+  promotions and resolution items of `v1.storage.suite`:
   - A lost container is a 503 on every storage operation, a download's read included, which
     answered 404 before; go-storage's `ErrContainerNotFound` replaces the service's workaround.
   - A file's own delete and a branch's are told apart by blobfs's `DeletingError`, with no

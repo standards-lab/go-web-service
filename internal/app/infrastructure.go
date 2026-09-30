@@ -49,7 +49,7 @@ type Infrastructure struct {
 // newInfrastructure constructs the infrastructure services in dependency
 // order, each registering on lc where it is built, at its stage from the
 // stage table, so a service cannot exist without its startup, shutdown, and
-// readiness declaration: the database and the object store at
+// readiness declaration. The database and the object store register at
 // stageInfrastructure, before the schema stage seeds objects. Construction
 // opens nothing. The pattern catalog is built here, once: the library's
 // namespace, blobfs's, and the application's. This file is the one place a

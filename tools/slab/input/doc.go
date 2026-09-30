@@ -7,14 +7,15 @@
 // identically, so the resolution belongs to none of them; it lives here,
 // beside output, for each to import.
 //
-// Body is the unguarded case: the --body bytes as given, or the value the
-// command builds from its flags, marshaled. GuardedBody is the case under a
-// precondition header: the same body, and the version its If-Match carries,
-// which the --version flag supplies or, on the --body path, a top-level
-// "version" number in the JSON stands in for. Neither function touches the
-// request; a command passes what they return to its client.
+// [Body] is the unguarded case: the --body bytes as given, or the value
+// the command builds from its flags, marshaled. [GuardedBody] is the case
+// under a precondition header: the same body, and the version its If-Match
+// carries, which the --version flag supplies or, on the --body path, a
+// top-level "version" number in the JSON stands in for. Neither function
+// touches the request; a command passes what they return to its client.
 //
-// ReadFlags is the read grammar a collection read's command binds (Bind)
-// and turns into its query pairs (Query); DefaultPageSize is the page size
-// the service gives a read that names none.
+// [ReadFlags] is the read grammar a collection read's command binds
+// ([ReadFlags.Bind]) and turns into its query pairs ([ReadFlags.Query]).
+// [DefaultPageSize] is the page size the service gives a read that names
+// none.
 package input

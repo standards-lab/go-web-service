@@ -18,8 +18,8 @@ import (
 // object store the rows' keys name. A domain runs blobfs's file protocols
 // (FS.WriteFile, FS.EnsureFile, FS.RemoveFile, FS.RemoveFileID,
 // FS.PurgeFile) over Objects, with its scope checks and its own rows in
-// their callbacks, and blobfs's steps directly for the rest; the read of an
-// available file, in the web SDK's terms, is Serve.
+// their callbacks, and runs blobfs's steps directly for the rest. Serve
+// reads an available file in the web SDK's terms.
 type Storage struct {
 	FS      *bfdata.Store
 	Objects *Objects
@@ -59,9 +59,9 @@ func (s *Storage) Serve(ctx context.Context, file blobfs.File) (Download, error)
 // A body read that timed out is not one: see [Objects.PutObject].
 var ErrBodyRead = errors.New("the request body could not be read")
 
-// Objects is the adapter between blobfs and a started store, the one place
-// the domains' file operations reach the object-store library, so no domain
-// imports it: blobfs's ObjectStore, and the open Serve streams through.
+// Objects adapts a started store to blobfs's ObjectStore and supplies the
+// open Serve streams through. It is the one place the domains' file
+// operations reach the object-store library, so no domain imports it.
 //
 // A missing container is go-storage's storage.ErrContainerNotFound on
 // every operation, which never matches storage.ErrNotFound, so a put, an
@@ -87,7 +87,7 @@ func (o *Objects) ValidateKey(key string) error {
 // A failed put is ErrBodyRead, wrapping the read's error, only when the
 // body failed in a way that points to the client: it ended short of its
 // declared size or broke off (io.ErrUnexpectedEOF, a reset connection, a
-// malformed chunk). That takes precedence over whatever the provider
+// malformed chunk). ErrBodyRead takes precedence over whatever the provider
 // reported, since a provider fails a put whose body fails. A body read
 // that timed out (a deadline, os.ErrDeadlineExceeded or any net.Error
 // whose Timeout is true) is ambiguous: a store that stalled stops reading

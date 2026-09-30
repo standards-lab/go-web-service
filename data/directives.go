@@ -68,10 +68,10 @@ func Read[T any](ctx context.Context, s sqlate.Session, p query.Projection[T], q
 
 // ReadListing is [Read] over one of blobfs's directory listings
 // (bfdata.Directories and bfdata.Files, each a bfdata.Listing) in place of
-// a projection: the rows under the directory with id, continued past a cursor when the query
-// names one and by page number otherwise. Every refusal of the directives
-// or the cursor is the request's error, as Read's is; what a refusal of
-// the anchor means is the caller's policy.
+// a projection: the rows under the directory with id, continued past a
+// cursor when the query names one and by page number otherwise. Every
+// refusal of the directives or the cursor is the request's error, as
+// Read's is; what a refusal of the anchor means is the caller's policy.
 func ReadListing[T any](ctx context.Context, s sqlate.Session, l bfdata.Listing[T], id string, q web.Query) (query.Collection[T], error) {
 	d := Directives(q)
 	if q.Cursor != "" {

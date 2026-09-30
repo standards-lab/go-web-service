@@ -37,9 +37,10 @@ const (
 	DetailConflict = "the request conflicts with the current state"
 )
 
-// Status is the web.ProblemMatcher over the vocabulary every domain's store
-// returns, blobfs's and go-storage's first, since a blobfs violation also
-// unwraps to the constraint error beneath it:
+// Status is the web.ProblemMatcher over the errors every domain's store
+// returns. It matches blobfs's and go-storage's errors before the
+// database's, since a blobfs violation also unwraps to the constraint
+// error beneath it, and maps them to:
 //
 //   - 400: a rejected directive, a malformed name, path, key, or id, an
 //     operation on the root, or ErrBodyRead; the detail is the refusal

@@ -4,8 +4,8 @@
 // startup runs. The admin mount is the /admin route group, the
 // administrative counterpart of /api; an admin domain is a package under
 // admin/ named for the infrastructure service it administers. The mount
-// serves on the API listener until the management listener gives it its
-// own, authenticated.
+// serves on the API listener until the planned management listener gives
+// it an authenticated listener of its own.
 //
 // The package's API:
 //

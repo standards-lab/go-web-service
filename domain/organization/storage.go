@@ -26,10 +26,10 @@ const imagesDirectory = "organization-images"
 
 // putLogo stores the upload as the organization's logo, named for its new
 // file id with ext, and makes it the active one. blobfs's two-phase write
-// stores the file, its pending row created once the organization is read,
-// so a missing organization is sql.ErrNoRows before any byte is stored; no
-// image references the pending row, so a write that stops partway leaves
-// only a row the stale reclaim removes.
+// stores the file. Its pending row is created once the organization is
+// read, so a missing organization is sql.ErrNoRows before any byte is
+// stored. No image references the pending row, so a write that stops
+// partway leaves only a row the stale reclaim removes.
 //
 // One transaction then holds the completed file, releases the replaced
 // logo (its image removed, its file's delete begun), and binds the new file
@@ -40,8 +40,9 @@ const imagesDirectory = "organization-images"
 // stale reclaim finishes the deleting row.
 //
 // The steps after the write run on a context the request's cancellation
-// does not reach: an available file no image references is one the stale
-// reclaim, which reaches only pending and deleting rows, never removes.
+// does not reach. A client that hangs up would otherwise leave an available
+// file no image references, which the stale reclaim never removes, since it
+// reaches only pending and deleting rows.
 func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload, ext string) (LogoIdentity, error) {
 	st := s.storage
 	// On the pool, Ensure finds the directory a concurrent first upload
@@ -192,10 +193,11 @@ func (s logoSeed) Write(ctx context.Context, raw json.RawMessage, fixtures fs.FS
 //
 // What the seed does not own it leaves as it stands, with no error: a file
 // under the id that another organization's image binds, a row holding the
-// id or the name otherwise, a file whose delete is under way, and a logo
-// that became active first, a concurrent seed's or a client's. Only a file
-// this run stored and could not activate is retired, at the version it
-// completed at, so no delete begins on a file an image may reference.
+// id under another name or the name under another id, a file whose delete
+// is under way, and a logo that became active first, a concurrent seed's
+// or a client's. Only a file this run stored and could not activate is
+// retired, at the version it completed at, so no delete begins on a file
+// an image may reference.
 func (s *store) seedLogo(ctx context.Context, l logoSeedRow, fixtures fs.FS) (bool, error) {
 	body, err := fs.ReadFile(fixtures, l.Fixture)
 	if err != nil {

@@ -22,8 +22,8 @@ func newSweepWake(cfg *config.Config) *sdk.Waker {
 	return wake
 }
 
-// newReactors constructs the reactors, the sweep the one so far, over
-// wake and gate, and registers each on lc at stageReactors with its Err
+// newReactors constructs the reactors over wake and gate (the sweep is the
+// only one) and registers each on lc at stageReactors with its Err
 // monitored, so a reactor that fails ends the process. Every reactor's
 // Grace is half the shutdown timeout: the drain runs the root stage first
 // under the one timeout, so the server keeps its share, and a reactor that

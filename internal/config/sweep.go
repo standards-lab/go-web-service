@@ -46,9 +46,9 @@ func (c *SweepConfig) Merge(src *SweepConfig) {
 }
 
 // Finalize applies the defaults, reads the block's environment overrides
-// (APP_SWEEP_INTERVAL, APP_SWEEP_BATCH,
-// APP_SWEEP_STALE_AGE), and validates: both durations positive and the
-// batch at least 1, the bounds blobfs's sweep refuses a pass outside.
+// (APP_SWEEP_INTERVAL, APP_SWEEP_BATCH, APP_SWEEP_STALE_AGE), and
+// validates: both durations positive and the batch at least 1, the bounds
+// blobfs's sweep refuses a pass outside.
 func (c *SweepConfig) Finalize(envPrefix string) error {
 	if c.Interval == 0 {
 		c.Interval = libconfig.Duration(defaultSweepInterval)

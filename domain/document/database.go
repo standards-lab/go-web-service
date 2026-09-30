@@ -49,8 +49,8 @@ func newStore(db *data.Database, st *data.Storage) *store {
 	}
 }
 
-// Verify prepares every statement against the live schema over sess; the
-// store is a query.Verifier.
+// Verify prepares every statement against the live schema over sess,
+// making the store a query.Verifier.
 func (s *store) Verify(ctx context.Context, sess sqlate.Session) error {
 	return query.Verify(ctx, sess, s.stmts)
 }

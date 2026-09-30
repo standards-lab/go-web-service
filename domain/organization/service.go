@@ -23,8 +23,8 @@ type Service struct {
 }
 
 // New constructs the service over the database and the object storage the
-// domains share, logging to logger what a request that succeeded left for
-// the sweep. Construction compiles and binds the statements and performs no
+// domains share. logger records what a request that succeeded left for the
+// sweep. Construction compiles and binds the statements and performs no
 // I/O.
 func New(db *data.Database, st *data.Storage, logger *slog.Logger) *Service {
 	return &Service{store: newStore(db, st, logger)}

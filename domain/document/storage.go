@@ -135,10 +135,10 @@ func (s *store) createDirectory(ctx context.Context, organizationID string, c Cr
 	return Identity{ID: dir.ID, Version: dir.Version}, err
 }
 
-// directory reads the directory with its path from the root, in one
-// transaction with its scope check, so the three reads see one tree:
-// blobfs's path runs from its own root, and its first segment is the
-// document root.
+// directory reads the directory with its path from the root. The scope
+// check, the directory, and its path run in one transaction, so the three
+// reads see one tree. blobfs's path runs from its own root, and its first
+// segment is the document root.
 func (s *store) directory(ctx context.Context, organizationID, id string) (Directory, error) {
 	fs := s.storage.FS
 	return s.db.Transact(ctx, func(tx *sqlate.Tx) (Directory, error) {
@@ -195,9 +195,9 @@ func (s *store) listFiles(ctx context.Context, organizationID, id string, q web.
 	return out, paging, err
 }
 
-// rootless answers a listing's scope failure: an organization without a
-// root yet has an empty hierarchy, so the alias lists as an empty page once
-// the organization is read, while a nonexistent organization is the missing
+// rootless answers a listing's scope failure. An organization without a
+// root yet has an empty hierarchy, so once the organization is read the
+// alias lists as an empty page. A nonexistent organization is the missing
 // row, as every other route answers it, and a specific id is not found. Any
 // other failure is the request's.
 //
@@ -272,10 +272,10 @@ func (s *store) moveDirectory(ctx context.Context, organizationID, id string, ve
 // uploadFile stores the upload as a new file named name in the directory,
 // ensuring the root when the directory is its alias, by blobfs's two-phase
 // write, whose first transaction runs the scope check with the pending
-// row's insert. A put or completion that fails abandons the row (the sweep
-// finishes one whose abandon fails too), and a completion refused as
-// deleting, a blobfs.DeletingError naming whose delete it was, deletes the
-// object just put.
+// row's insert. A put or completion that fails abandons the row, and the
+// sweep finishes one whose abandon fails too. A completion refused as
+// deleting (a blobfs.DeletingError, which names whose delete it was)
+// deletes the object just put.
 func (s *store) uploadFile(ctx context.Context, organizationID, directoryID, name string, u web.Upload) (Identity, error) {
 	st := s.storage
 	directoryID, err := s.writable(ctx, organizationID, directoryID)
@@ -315,10 +315,11 @@ func (s *store) content(ctx context.Context, organizationID, id string) (Content
 	return Content{Name: file.Name, Object: dl.Object, Open: dl.Open}, nil
 }
 
-// deleteFile removes the file at version by blobfs's two-phase delete, its scope checked in the transaction that begins the delete. No
-// row of the layer references a file, so no reference is removed before
-// the delete. A file deleting already is the delete's retry, which
-// converges at any version, so a delete is never refused as deleting.
+// deleteFile removes the file at version by blobfs's two-phase delete, its
+// scope checked in the transaction that begins the delete. No row of the
+// layer references a file, so no reference is removed before the delete.
+// A file deleting already is the delete's retry, which converges at any
+// version, so a delete is never refused as deleting.
 func (s *store) deleteFile(ctx context.Context, organizationID, id string, version int64) error {
 	st := s.storage
 	return st.FS.RemoveFile(ctx, s.db.DB, st.Objects, func(tx *sqlate.Tx) (string, error) {

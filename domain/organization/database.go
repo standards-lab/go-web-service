@@ -76,7 +76,7 @@ func newStore(db *data.Database, st *data.Storage, logger *slog.Logger) *store {
 }
 
 // Verify prepares every statement and the projection's field contract
-// against the live schema over sess; the store is a query.Verifier.
+// against the live schema over sess, making the store a query.Verifier.
 func (s *store) Verify(ctx context.Context, sess sqlate.Session) error {
 	return query.Verify(ctx, sess, s.stmts, s.view)
 }

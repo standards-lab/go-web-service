@@ -13,7 +13,7 @@ import (
 // joins one source of occurrences to one function for the process
 // lifetime. It is a lifecycle component with the Start, Shutdown, and Ready
 // methods other infrastructure exposes, plus Err for a failure while
-// running; it knows nothing of the coordinator, and the composition root
+// running. It knows nothing of the coordinator: the composition root
 // registers it with lifecycle.Coordinator.Add at the stage it chooses and
 // passes its Err to Coordinator.Monitor.
 //

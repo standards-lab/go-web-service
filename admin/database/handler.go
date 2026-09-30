@@ -29,9 +29,10 @@ var ErrUnconfirmed = errors.New(`database: a reset reverts every migration set a
 // migration that drops organization_directory, or the one that alters its
 // cascading foreign key, locks that table and blobfs_directory in the
 // opposite order from a pass's directory removal, so Postgres aborts one
-// (SQLSTATE 40P01). The gate is per process; with several replicas,
-// another replica's sweep can still meet a reset, a development operation
-// that would need a database lock the sweep takes too.
+// (SQLSTATE 40P01). The gate is per process: with several replicas,
+// another replica's sweep can still meet a reset. A reset is a development
+// operation; a multi-replica reset would need a database lock the sweep
+// takes too.
 type SchemaGate interface {
 	Exclusive(ctx context.Context) (release func(), err error)
 }

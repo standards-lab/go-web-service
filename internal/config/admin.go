@@ -13,8 +13,8 @@ import (
 // and the way the local overlay seeds. Empty applies none. A name the
 // seeder does not declare fails startup. A pointer field distinguishes
 // unset from an explicit empty, so an overlay file's "seed": "" clears the
-// base's name; APP_ADMIN_SEED cannot, since an empty environment value is
-// unset, as it is for every override.
+// base's name. APP_ADMIN_SEED cannot clear it, since an empty environment
+// value counts as unset, as it does for every override.
 type AdminConfig struct {
 	Seed *string `json:"seed"`
 }

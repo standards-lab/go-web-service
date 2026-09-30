@@ -58,10 +58,11 @@ func pacedPost(t *testing.T, s *integration.Service, path string, pause time.Dur
 	return resp.StatusCode, time.Since(start)
 }
 
-// An upload's deadline is its own: under a one-second read timeout and a
-// transfer rate of 4 KiB/s, 8 KiB earn three seconds. A client within the
-// rate uploads for longer than the read timeout; a client slower than the
-// rate is refused with a 408 once its three seconds pass.
+// An upload sets its own deadline: under a one-second read timeout and a
+// transfer rate of 4 KiB/s, an 8 KiB upload is allowed three seconds. A
+// client within the rate uploads for longer than the read timeout; a
+// client slower than the rate is refused with a 408 once its three seconds
+// pass.
 func TestTransferDeadlines(t *testing.T) {
 	s := integration.Start(t, integration.Options{Seed: integration.Default, Env: []string{
 		"APP_SERVER_READ_TIMEOUT=1s",
@@ -82,9 +83,9 @@ func TestTransferDeadlines(t *testing.T) {
 	}
 }
 
-// stallRelay forwards to target and, once stalled, passes no more bytes
-// from target to the client after a budget, as a store that stops sending
-// mid-body; Release lets them through again.
+// stallRelay forwards connections to target. Once stalled, it passes a
+// budget of bytes from target to the client and holds the rest, as a store
+// does that stops sending mid-body; Release lets them through again.
 type stallRelay struct {
 	target string
 	ln     net.Listener
@@ -179,9 +180,8 @@ func (r *stallRelay) downstream(down, up net.Conn) {
 }
 
 // A store that stops sending mid-download is cut off: the read idle
-// timeout ends the response short within seconds, where it would otherwise
-// hold the request open, and once the store sends again a download is
-// whole.
+// timeout ends the response short within seconds instead of holding the
+// request open. Once the store sends again, a download is whole.
 func TestStorageStall(t *testing.T) {
 	relay := newStallRelay(t, integration.StorageAddr())
 	s := integration.Start(t, integration.Options{Seed: integration.Default, Storage: relay.Addr(), Env: []string{

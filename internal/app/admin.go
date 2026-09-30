@@ -35,7 +35,7 @@ type Admin struct {
 // stageSchema, with the service as its own readiness check. The service
 // administers the data package's content: the migration sets, the
 // catalog, the statements registry, and the seeder, which verifies every
-// store the service runs (each domain's and blobfs's) and composes dom's
+// store the service runs and composes dom's
 // seed contributions in the tables' dependency order (the organizations'
 // rows, then the logos and document trees that name them). gate is the
 // quiesce gate the database admin routes hold around a schema change;

@@ -139,16 +139,16 @@ accumulate under [Unreleased] until the first cut.
 - A logo seed that loses its activation to another logo leaves that logo and retires its own
   file, with no error.
 - An upload whose body fails answers 400, no longer a lost database connection's 503.
-- Timeouts follow the Go convention. The server's read and write timeouts are `30s`, and an
-  upload or a download sets its own connection deadlines from its body's size and
-  `server.transfer_rate` (64 KiB/s), the slowest pace a client is allowed: an upload slower
-  than that answers 408 (`data.ErrBodyTimeout`), and a download ends short. `try_timeout` is
-  `10s`, one operation: a download's body resumes past it, and `storage.read_idle_timeout`
+- Timeouts follow the Go convention. The server's read and write timeouts are `30s`. An upload
+  or a download sets its own connection deadlines from its body's size and
+  `server.transfer_rate` (64 KiB/s), the slowest pace a client is allowed: a slower upload
+  answers 408 (`data.ErrBodyTimeout`), and a slower download ends short. `try_timeout` is `10s`
+  and bounds one operation: a download's body resumes past it, and `storage.read_idle_timeout`
   (`30s`) cuts off a store that stops sending. `max_retries: 1` moves from `config.json` to the
   `local` overlay and the integration harness.
-- The pins: go-storage v0.4.0 with azureblob/v0.4.0 and go-web-sdk v0.14.0.
-- The seeder verifies every store the composition root lists, a store that seeds nothing among
-  them; `Contribution.Verifiers` is removed.
+- The service pins go-storage v0.4.0 with azureblob/v0.4.0, and go-web-sdk v0.14.0.
+- The seeder verifies every store the composition root lists, including a store that seeds
+  nothing; `Contribution.Verifiers` is removed.
 - Before its first write, a document root's alias refuses a bad sort, filter, or cursor with 400,
   as a real root does.
 - A directory read and an empty directory's delete run their scope check in their own

@@ -31,8 +31,9 @@ func New(db *data.Database, st *data.Storage, logger *slog.Logger) *Service {
 	return &Service{store: newStore(db, st, logger)}
 }
 
-// Verifier is the layer's store, whose statements, the seed's among them,
-// the composition root hands the seeder to verify against the live schema.
+// Verifier returns the layer's store, which the composition root hands the
+// seeder to verify the store's statements, the seed's among them, against
+// the live schema.
 func (s *Service) Verifier() query.Verifier { return s.store }
 
 // Seed is the layer's row contribution to the data package's named states:

@@ -195,14 +195,13 @@ func (s *store) listFiles(ctx context.Context, organizationID, id string, q web.
 }
 
 // listScope is scope for a listing. An organization without a root yet
-// has an empty hierarchy, so once the organization is read the alias
-// resolves to an id minted for the read, which no directory has, since no
-// row holds an id not yet minted, and which blobfs lists as an empty
-// directory: the alias runs the listing itself, so it refuses what a
-// real root's listing refuses (a sort, filter, or cursor the read does not
-// accept) and reports the paging an empty root's would. A nonexistent
-// organization is the missing row, as every other route answers it, and a
-// specific id is not found.
+// has an empty hierarchy: once the organization is read, the alias
+// resolves to an id minted for the read, which no row holds, so blobfs
+// lists it as an empty directory. The alias thus runs the listing itself:
+// it refuses what a real root's listing refuses (a sort, filter, or cursor
+// the read does not accept) and reports the paging an empty root's would.
+// A nonexistent organization is the missing row, as every other route
+// answers it, and a specific id is not found.
 func (s *store) listScope(ctx context.Context, organizationID, id string) (root, dir string, err error) {
 	root, dir, err = s.scope(ctx, s.db, organizationID, id)
 	if id != RootAlias || !errors.Is(err, sql.ErrNoRows) {

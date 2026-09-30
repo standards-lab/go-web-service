@@ -181,9 +181,9 @@ curl 'localhost:8080/api/organizations/lookup?path=/acme/engineering'  # lookup 
 
 The document domain is mounted under `/api/documents/{org}`, each organization's hierarchy of
 directories and files over blobfs and the object store. A directory id may be `root`, the
-organization's document root, which its first write creates; until then, `root`'s listings
-answer an empty page, refusing a bad sort, filter, or cursor with 400 as any listing does, and
-for an organization that does not exist, 404:
+organization's document root, which its first write creates. Until then, `root`'s listings
+answer an empty page, or 404 for an organization that does not exist; like any listing, they
+refuse a bad sort, filter, or cursor with 400:
 
 | Method | Path | What it does |
 |--------|------|--------------|
@@ -423,22 +423,22 @@ The `storage` block is go-storage's, each setting with its override:
 | `read_idle_timeout` | `APP_STORAGE_READ_IDLE_TIMEOUT` | `30s`, bounding each read of a download's body from the store while the read is in progress, so a store that stops sending is cut off and a slow client never is |
 | `options.<key>` | `APP_STORAGE_OPTIONS_<KEY>` | azureblob's own settings: `try_timeout`, `max_retries`, `block_size`, and `concurrency`, described below |
 
-azureblob's `try_timeout` bounds each try of an object operation, one operation and never a
-whole transfer: a `Put` block's upload, or the part of a `Get`'s body read within the try. A
-download's body resumes past a try's deadline, so it runs as long as its client reads.
-`config.json` sets it to `10s`, below `read_idle_timeout`, so a try that stalls resumes once
-before the store is cut off; a stalled store holds an upload for at most one try per attempt.
-`max_retries` sets how many times a failed try is retried, and how many times a download's body
-resumes per read. `config.json` keeps the SDK's 3, with exponential
-backoff from 800 ms; the `local` overlay and the integration harness set `1`, so a store that is
-down is refused in about a second. `block_size` and `concurrency` size a `Put`'s staged blocks.
+azureblob's `try_timeout` bounds each try of one object operation, never a whole transfer: a
+`Put` block's upload, or the part of a `Get`'s body read within the try. A download's body
+resumes past a try's deadline, so it runs as long as its client reads. `config.json` sets it to
+`10s`, below `read_idle_timeout`, so a stalled try resumes once before the store is cut off; a
+stalled store holds an upload for at most one try per attempt. `max_retries` sets how many times
+a failed try is retried, and how many times a download's body resumes per read. `config.json`
+keeps the SDK's 3, with exponential backoff from 800 ms; the `local` overlay and the integration
+harness set `1`, so a store that is down is refused in about a second. `block_size` and
+`concurrency` size a `Put`'s staged blocks.
 
-The server's `read_timeout` and `write_timeout` are `30s` (`config.json`, go-web-sdk's defaults),
-sized for a request that moves no large body. An upload or a download sets its own connection
-deadlines through go-web-sdk's `Transfer`: the timeout plus the body's size, capped at the route's
-limit (10 MiB for a document, 1 MiB for a logo), at `transfer_rate` (`APP_SERVER_TRANSFER_RATE`,
-65536 bytes per second), the slowest pace a client is allowed. An upload slower than that answers
-408; a download slower than that ends short.
+The server's `read_timeout` and `write_timeout` are `30s` (`config.json`, go-web-sdk's
+defaults), sized for a request that moves no large body. An upload or a download sets its own
+connection deadlines through go-web-sdk's `Transfer`: the timeout plus the time the body takes at
+`transfer_rate` (`APP_SERVER_TRANSFER_RATE`, 65536 bytes per second), the slowest pace a client
+is allowed. The body's size counts up to the route's limit (10 MiB for a document, 1 MiB for a
+logo). An upload slower than that pace answers 408; a download slower than that ends short.
 
 The `sweep` block schedules the [sweep](#sweep): `interval` (`APP_SWEEP_INTERVAL`, `30s`), the
 backstop wake; `batch` (`APP_SWEEP_BATCH`, 100), the records one pass handles; and `stale_age`

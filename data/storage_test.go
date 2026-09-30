@@ -129,9 +129,7 @@ func TestObjects_ABodyCutShortIsTheRequests(t *testing.T) {
 }
 
 // A body read that times out is the client's, ErrBodyTimeout, a 408, even
-// when the store fails too: the route's transfer sized the read deadline
-// for a client at the slowest pace allowed, and a stalled store is cut off
-// by its far shorter per-try deadline first.
+// when the store fails too, as [data.Objects.PutObject] documents.
 func TestObjects_ABodyReadTimeoutIsTheClients(t *testing.T) {
 	for name, deadline := range map[string]error{
 		"os deadline":      os.ErrDeadlineExceeded,

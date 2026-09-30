@@ -81,8 +81,8 @@ type Seeder struct {
 // NewSeeder composes the seed operation from the domains' contributions,
 // the rows applied in the order given, then the files in the order given,
 // which the composition root makes the tables' dependency order. verifiers
-// are every store whose statements the service runs (each domain's, and
-// blobfs's), which [Seeder.Verify] checks: the list is separate from the
+// lists every store whose statements the service runs (each domain's, and
+// blobfs's), for [Seeder.Verify] to check; the list is separate from the
 // contributions, so a store that seeds nothing is still verified. Two
 // contributions under one key, or one that is neither a Seed nor a
 // FileSeed, or both, are wiring defects and panic.

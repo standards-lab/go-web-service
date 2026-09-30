@@ -102,7 +102,7 @@ func (c *fileContribution) Write(_ context.Context, raw json.RawMessage, fixture
 	return len(rows), c.err
 }
 
-// Every listed store is verified, a store that seeds nothing among them:
+// Every listed store is verified, including a store that seeds nothing:
 // the verifiers are the root's list, not the contributions'.
 func TestSeeder_VerifiesItsOwnAndEveryListedStore(t *testing.T) {
 	db, rec := newDatabase(t)

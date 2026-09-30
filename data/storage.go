@@ -95,10 +95,12 @@ func (o *Objects) ValidateKey(key string) error {
 // when the body's read deadline passed (os.ErrDeadlineExceeded, or any
 // net.Error whose Timeout is true), and ErrBodyRead when the body ended
 // short of its declared size or broke off (io.ErrUnexpectedEOF, a reset
-// connection, a malformed chunk). The provider's per-try deadline, far
-// shorter than the body's read deadline, cuts off a store that stalls
-// before the body's deadline can pass, so a stalled store stays the
-// store's fault.
+// connection, a malformed chunk). A store that stalls never makes the
+// body's deadline pass: azureblob reads up to block_size × concurrency of
+// the body ahead of the store, more than max_object_size, so the body is
+// read whole, or fails on its own, whatever the store does, and a stalled
+// store stays the store's fault. The base configuration's test holds
+// max_object_size within that read-ahead.
 func (o *Objects) PutObject(ctx context.Context, key string, body io.Reader, contentType string, size int64) (blobfs.Object, error) {
 	r := &bodyReader{r: body}
 	obj, err := o.store.Put(ctx, key, r, storage.PutOptions{ContentType: contentType, Size: size})

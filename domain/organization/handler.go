@@ -152,11 +152,11 @@ func (h *handler) putLogo(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := h.logos.WidenUpload(w, r); err != nil {
-		return err
-	}
 	upload, err := web.ReadUpload(w, r, h.logos.Limit())
 	if err != nil {
+		return err
+	}
+	if err := h.logos.WidenUpload(w, r); err != nil {
 		return err
 	}
 	ident, err := h.service.PutLogo(r.Context(), id, upload)

@@ -192,11 +192,11 @@ func (h *handler) uploadFile(w http.ResponseWriter, r *http.Request) error {
 	if name == "" {
 		return fmt.Errorf("%w: the name query parameter is required", ErrValidation)
 	}
-	if err := h.files.WidenUpload(w, r); err != nil {
-		return err
-	}
 	upload, err := web.ReadUpload(w, r, h.files.Limit())
 	if err != nil {
+		return err
+	}
+	if err := h.files.WidenUpload(w, r); err != nil {
 		return err
 	}
 	ident, err := h.service.UploadFile(r.Context(), org, id, name, upload)

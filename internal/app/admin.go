@@ -34,10 +34,8 @@ type Admin struct {
 // switches from cfg. It declares the database admin service on lc at
 // stageSchema, with the service as its own readiness check. The service
 // administers the data package's content: the migration sets, the
-// catalog, the statements registry, and the seeder, which verifies every
-// store the service runs and composes dom's
-// seed contributions in the tables' dependency order (the organizations'
-// rows, then the logos and document trees that name them). gate is the
+// catalog, the statements registry, and the seeder newSeeder composes over
+// infra and dom. gate is the
 // quiesce gate the database admin routes hold around a schema change;
 // startup's own correction takes none, since it runs before the sweep's
 // stage starts.
@@ -53,10 +51,8 @@ func newAdmin(
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	db := admin.New(infra.DB, infra.SQL.DB, migrator, infra.SQL.Catalog, admin.Options{
-		Seed: cfg.Admin.SeedState(),
-		Seeder: data.NewSeeder(infra.SQL,
-			[]query.Verifier{dom.Organization.Verifier(), dom.Document.Verifier(), infra.Storage.FS},
-			dom.Organization.Seed(), dom.Organization.LogoSeed(), dom.Document.Seed()),
+		Seed:     cfg.Admin.SeedState(),
+		Seeder:   newSeeder(infra, dom),
 		Registry: infra.SQL,
 		Logger:   infra.Logger,
 	})
@@ -67,6 +63,15 @@ func newAdmin(
 		Check: db,
 	})
 	return &Admin{Database: db, Storage: infra.ObjectStore, Gate: gate}, nil
+}
+
+// newSeeder composes the seeder: the stores it verifies, every store whose
+// statements the service runs (each domain's and blobfs's), and dom's seed
+// contributions in the tables' dependency order.
+func newSeeder(infra *Infrastructure, dom *Domain) *data.Seeder {
+	return data.NewSeeder(infra.SQL,
+		[]query.Verifier{dom.Organization.Verifier(), dom.Document.Verifier(), infra.Storage.FS},
+		dom.Organization.Seed(), dom.Organization.LogoSeed(), dom.Document.Seed())
 }
 
 // mountAdmin builds the admin mount, /admin, with each admin domain's route

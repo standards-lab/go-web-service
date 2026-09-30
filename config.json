@@ -25,7 +25,7 @@
     "request_timeout": "3s",
     "read_idle_timeout": "30s",
     "options": {
-      "try_timeout": "10s"
+      "try_timeout": "5s"
     }
   },
   "observability": {

@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -180,5 +181,45 @@ func TestConfig_ShippedFilesLoad(t *testing.T) {
 	// resumes once before the store is cut off.
 	if try, err := time.ParseDuration(cfg.Storage.Options["try_timeout"]); err != nil || try >= cfg.Storage.ReadIdleTimeout.Duration() {
 		t.Errorf("try_timeout = %q (%v), want it below read_idle_timeout, %s", cfg.Storage.Options["try_timeout"], err, cfg.Storage.ReadIdleTimeout.Duration())
+	}
+}
+
+// The base file's storage bounds fit the server's: a store that stalls on
+// every try is refused within write_timeout, so the 503 is written before
+// the connection's deadline passes, and azureblob reads a whole upload
+// ahead of the store (block_size × concurrency), so a store that stalls
+// never stops the body's reads and is never charged to the client as a
+// 408. The retry budget is try_timeout per try, max_retries + 1 tries, and
+// the SDK's backoff, 800ms doubled after each try.
+func TestConfig_BaseStorageBoundsFitTheServer(t *testing.T) {
+	cfg, err := libconfig.Load[config.Config](libconfig.Options{Dir: "../..", SecretsName: "secrets.example.json"})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	option := func(key string, def int64) int64 {
+		v, ok := cfg.Storage.Options[key]
+		if !ok {
+			return def
+		}
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			t.Fatalf("option %s = %q: %v", key, v, err)
+		}
+		return n
+	}
+	try, err := time.ParseDuration(cfg.Storage.Options["try_timeout"])
+	if err != nil {
+		t.Fatalf("try_timeout: %v", err)
+	}
+	retries := option("max_retries", 3)
+	budget := time.Duration(retries+1) * try
+	for i, delay := int64(0), 800*time.Millisecond; i < retries; i, delay = i+1, delay*2 {
+		budget += delay
+	}
+	if write := cfg.Server.WriteTimeout.Duration(); budget >= write {
+		t.Errorf("a stalled store holds a call for %s (%d tries of %s with backoff); want it under write_timeout, %s", budget, retries+1, try, write)
+	}
+	if ahead := option("block_size", 4<<20) * option("concurrency", 4); cfg.Storage.MaxObjectSize > ahead {
+		t.Errorf("max_object_size %d exceeds what azureblob reads ahead, %d", cfg.Storage.MaxObjectSize, ahead)
 	}
 }

@@ -122,9 +122,9 @@ accumulate under [Unreleased] until the first cut.
 
 ### Changed
 
-- The storage suite's closing releases, validated together: go-core v0.5.0, go-web-sdk v0.13.0
-  with middleware/rate-limit v0.2.0, go-database v0.7.0 with postgres/v0.4.0, go-storage v0.3.0
-  with azureblob/v0.3.0, and blobfs v0.5.0 with postgres/v0.3.0:
+- The storage suite's closing releases, validated together: go-core v0.5.0, go-web-sdk v0.14.0
+  with middleware/rate-limit v0.2.0, go-database v0.7.0 with postgres/v0.4.0, go-storage v0.4.0
+  with azureblob/v0.4.0, and blobfs v0.5.0 with postgres/v0.3.0:
   - go-web-sdk's `PathUUID` refuses a malformed path id (`sdk.PathID`, promoted).
   - `middleware.Recoverer` answers a handler's panic with a logged 500.
   - A listing omits `total` only when it did not count. Before its first write, a document
@@ -142,11 +142,11 @@ accumulate under [Unreleased] until the first cut.
 - Timeouts follow the Go convention. The server's read and write timeouts are `30s`. An upload
   or a download sets its own connection deadlines from its body's size and
   `server.transfer_rate` (64 KiB/s), the slowest pace a client is allowed: a slower upload
-  answers 408 (`data.ErrBodyTimeout`), and a slower download ends short. `try_timeout` is `10s`
+  answers 408 (`data.ErrBodyTimeout`), and a slower download ends short. `try_timeout` is `5s`
   and bounds one operation: a download's body resumes past it, and `storage.read_idle_timeout`
-  (`30s`) cuts off a store that stops sending. `max_retries: 1` moves from `config.json` to the
+  (`30s`) cuts off a store that stops sending. A store that stalls on every try is refused with
+  a 503 after about 26s, inside `write_timeout`. `max_retries: 1` moves from `config.json` to the
   `local` overlay and the integration harness.
-- The service pins go-storage v0.4.0 with azureblob/v0.4.0, and go-web-sdk v0.14.0.
 - The seeder verifies every store the composition root lists, including a store that seeds
   nothing; `Contribution.Verifiers` is removed.
 - Before its first write, a document root's alias refuses a bad sort, filter, or cursor with 400,
@@ -181,9 +181,9 @@ accumulate under [Unreleased] until the first cut.
   key, null meaning the root.
 - The composition root is one file per layer under `internal/app`, as go-web-sdk-template
   v0.6.0 ships it.
-- Pins: go-core v0.5.0, go-database v0.7.0 with postgres/v0.4.0, go-web-sdk v0.13.0 with
-  middleware/rate-limit v0.2.0, sqlate v0.4.1 with postgres/v0.4.0, go-storage v0.3.0 with
-  azureblob/v0.3.0, and blobfs v0.5.0 with postgres/v0.3.0.
+- Pins: go-core v0.5.0, go-database v0.7.0 with postgres/v0.4.0, go-web-sdk v0.14.0 with
+  middleware/rate-limit v0.2.0, sqlate v0.4.1 with postgres/v0.4.0, go-storage v0.4.0 with
+  azureblob/v0.4.0, and blobfs v0.5.0 with postgres/v0.3.0.
 - The database admin verbs act on migration sets by name: `down`, `steps`, and `force` name
   the set in their body (400 when it is missing or undeclared), and the schema status reports
   each set. The state reset requires `"confirm": true`.

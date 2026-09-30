@@ -207,7 +207,8 @@ refuse a bad sort, filter, or cursor with 400:
   the abandon's object delete, the file is left deleting, hidden from the listings, and keeps
   its name until the sweep's stale reclaim (`sweep.stale_age`); an upload of that name
   meanwhile answers 409 "the file is being deleted". An upload whose body ends before its
-  declared length answers 400, since the request is at fault, never 503.
+  declared length answers 400, and one whose body arrives slower than `server.transfer_rate`
+  allows answers 408, since the request is at fault, never 503.
 - The moves and the deletes take the row's version in `If-Match`: 428 when it is missing, 412
   when it is stale.
 - A recursive delete marks the branch deleting and answers 202 with the directory's read as its
@@ -425,13 +426,16 @@ The `storage` block is go-storage's, each setting with its override:
 
 azureblob's `try_timeout` bounds each try of one object operation, never a whole transfer: a
 `Put` block's upload, or the part of a `Get`'s body read within the try. A download's body
-resumes past a try's deadline, so it runs as long as its client reads. `config.json` sets it to
-`10s`, below `read_idle_timeout`, so a stalled try resumes once before the store is cut off; a
-stalled store holds an upload for at most one try per attempt. `max_retries` sets how many times
-a failed try is retried, and how many times a download's body resumes per read. `config.json`
-keeps the SDK's 3, with exponential backoff from 800 ms; the `local` overlay and the integration
-harness set `1`, so a store that is down is refused in about a second. `block_size` and
-`concurrency` size a `Put`'s staged blocks.
+resumes past a try's deadline, so it runs as long as its client reads. `max_retries` sets how
+many times a failed try is retried, and how many times a download's body resumes per read.
+`config.json` keeps the SDK's 3, with exponential backoff from 800 ms, and sets `try_timeout` to
+`5s`, below `read_idle_timeout`, so a stalled try resumes once before the store is cut off. A
+store that stalls on every try is refused after about 26s (four tries and the backoff), inside
+the server's 30s `write_timeout`, so the 503 reaches the client; the base configuration's test
+holds that budget. The `local` overlay and the integration harness set `max_retries` to `1`, so
+a store that is down is refused in about a second. `block_size` and `concurrency` size a
+`Put`'s staged blocks; their product, the body azureblob reads ahead of the store, must be at
+least `max_object_size`, so a store that stalls never slows the body's reads into a 408.
 
 The server's `read_timeout` and `write_timeout` are `30s` (`config.json`, go-web-sdk's
 defaults), sized for a request that moves no large body. An upload or a download sets its own

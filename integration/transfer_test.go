@@ -39,7 +39,9 @@ func (p *pacedBody) Read(b []byte) (int, error) {
 }
 
 // pacedPost uploads 8 KiB to path at one chunk of 512 bytes per pause and
-// returns the response's status and how long the request took.
+// returns the response's status and how long the request took. The
+// transport's write buffer is one chunk, so each chunk reaches the server
+// when it is sent rather than 4 KiB at a time.
 func pacedPost(t *testing.T, s *integration.Service, path string, pause time.Duration) (int, time.Duration) {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, s.URL()+path, &pacedBody{left: 8 << 10, size: 512, pause: pause})
@@ -49,7 +51,8 @@ func pacedPost(t *testing.T, s *integration.Service, path string, pause time.Dur
 	req.ContentLength = 8 << 10
 	req.Header.Set("Content-Type", "text/plain")
 	start := time.Now()
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	client := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{WriteBufferSize: 512}}
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("POST %s: %v", path, err)
 	}
@@ -62,16 +65,17 @@ func pacedPost(t *testing.T, s *integration.Service, path string, pause time.Dur
 // transfer rate of 4 KiB/s, an 8 KiB upload is allowed three seconds. A
 // client within the rate uploads for longer than the read timeout; a
 // client slower than the rate is refused with a 408 once its three seconds
-// pass.
+// pass. The reset runs on a service at the default timeouts, since
+// reverting and reseeding every set is no one-second request.
 func TestTransferDeadlines(t *testing.T) {
+	setup := integration.Start(t, integration.Options{Seed: integration.Default}).Client()
+	integration.Reset(t, setup, integration.Default)
+	docs := "/api/documents/" + tree(t, setup)[docsOrg].ID
 	s := integration.Start(t, integration.Options{Seed: integration.Default, Env: []string{
 		"APP_SERVER_READ_TIMEOUT=1s",
 		"APP_SERVER_WRITE_TIMEOUT=1s",
 		"APP_SERVER_TRANSFER_RATE=4096",
 	}})
-	c := s.Client()
-	integration.Reset(t, c, integration.Default)
-	docs := "/api/documents/" + tree(t, c)[docsOrg].ID
 
 	status, took := pacedPost(t, s, docs+"/directories/root/files?name=steady.txt", 100*time.Millisecond)
 	if status != http.StatusCreated || took < 1500*time.Millisecond {
@@ -92,7 +96,7 @@ type stallRelay struct {
 
 	mu      sync.Mutex
 	cond    *sync.Cond
-	budget  int64 // bytes still allowed downstream once stalled; -1 is unlimited
+	budget  int64 // bytes still allowed downstream once stalled, across every connection; -1 is unlimited
 	stalled bool
 }
 

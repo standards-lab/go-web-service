@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -36,9 +38,10 @@ func TestStatus(t *testing.T) {
 		{"foreign key violation", fmt.Errorf("store: %w", sqlate.ErrForeignKeyViolation), 409, true},
 		{"version mismatch", query.ErrVersionMismatch, 412, true},
 		{"not ready", database.ErrNotReady, 503, true},
-		{"pool connection failed", fmt.Errorf("%w: refused", database.ErrConnectionFailed), 503, true},
 		{"session connection failed", fmt.Errorf("%w: refused", sqlate.ErrConnectionFailed), 503, true},
 		{"connection lost mid-read", fmt.Errorf("query: %w", io.ErrUnexpectedEOF), 503, true},
+		{"upload body cut short", fmt.Errorf("write file: %w", fmt.Errorf("%w: %w", data.ErrBodyRead, io.ErrUnexpectedEOF)), 400, true},
+		{"upload body too slow", fmt.Errorf("write file: %w", fmt.Errorf("%w: %w", data.ErrBodyTimeout, os.ErrDeadlineExceeded)), 408, true},
 		{"blobfs invalid name", &blobfs.NameError{Name: "a/b", Reason: "contains a slash"}, 400, true},
 		{"blobfs root", blobfs.ErrRootDirectory, 400, true},
 		{"blobfs not found", fmt.Errorf("find: %w", blobfs.ErrNotFound), 404, true},
@@ -49,13 +52,14 @@ func TestStatus(t *testing.T) {
 		{"blobfs cycle", blobfs.ErrCycle, 409, true},
 		{"blobfs id taken", blobfs.ErrIDTaken, 409, true},
 		{"blobfs deleting", blobfs.ErrDeleting, 409, true},
-		{"file deleting", fmt.Errorf("%w: %w", data.ErrFileDeleting, blobfs.ErrDeleting), 409, true},
+		{"file deleting", &blobfs.DeletingError{ID: "f"}, 409, true},
+		{"directory deleting", &blobfs.DeletingError{Directory: true, ID: "d"}, 409, true},
 		{"blobfs not deleting", blobfs.ErrNotDeleting, 409, true},
 		{"blobfs invalid transition", &blobfs.TransitionError{From: blobfs.StatusAvailable, To: blobfs.StatusPending}, 409, true},
 		{"object too large", storage.ErrTooLarge, 413, true},
 		{"store not ready", storage.ErrNotReady, 503, true},
 		{"store unavailable", fmt.Errorf("%w: refused", storage.ErrUnavailable), 503, true},
-		{"container gone", fmt.Errorf("%w: %w", data.ErrContainerGone, storage.ErrNotFound), 503, true},
+		{"container not found", fmt.Errorf("get: %w", storage.ErrContainerNotFound), 503, true},
 		{"check violation is unmatched", &sqlate.ConstraintError{Constraint: "cc", Class: sqlate.ErrCheckViolation, Err: errors.New("cc")}, 0, false},
 		{"not-null violation is unmatched", sqlate.ErrNotNullViolation, 0, false},
 		{"other", errors.New("boom"), 0, false},
@@ -66,8 +70,8 @@ func TestStatus(t *testing.T) {
 			if got.Status != tc.want || ok != tc.ok {
 				t.Fatalf("Status(%v) = %d, %t; want %d, %t", tc.err, got.Status, ok, tc.want, tc.ok)
 			}
-			if tc.want != http.StatusConflict && got.Detail != "" {
-				t.Errorf("Status(%v) detail = %q; only a conflict carries one", tc.err, got.Detail)
+			if tc.want != http.StatusConflict && tc.want != http.StatusBadRequest && tc.want != http.StatusRequestTimeout && got.Detail != "" {
+				t.Errorf("Status(%v) detail = %q; only a conflict or a request's refusal or timeout carries one", tc.err, got.Detail)
 			}
 		})
 	}
@@ -92,7 +96,9 @@ func TestStatus_ConflictsCarryACuratedDetail(t *testing.T) {
 		{"id taken", fmt.Errorf("data: create file in %s: %w", dir, violation(blobfs.ErrIDTaken, "blobfs_pk_file", sqlate.ErrUniqueViolation)), "an entry with that name already exists"},
 		{"not empty", fmt.Errorf("data: delete directory %s: %w", dir, violation(blobfs.ErrNotEmpty, "blobfs_fk_directory_parent", sqlate.ErrForeignKeyViolation)), "the directory is not empty"},
 		{"deleting", fmt.Errorf("data: create directory under %s: the directory %s is deleting: %w", dir, dir, blobfs.ErrDeleting), "the directory is being deleted"},
-		{"file deleting", fmt.Errorf("move file %s: %w: %w", dir, data.ErrFileDeleting, fmt.Errorf("data: move file %s into %s: the row is deleting: %w", dir, dir, blobfs.ErrDeleting)), "the file is being deleted"},
+		{"file deleting", fmt.Errorf("data: move file %s: %w", dir, &blobfs.DeletingError{ID: dir}), "the file is being deleted"},
+		{"file deleting with its cause", fmt.Errorf("data: write file %s: %w", dir, &blobfs.DeletingError{ID: dir, Err: &blobfs.TransitionError{From: blobfs.StatusDeleting, To: blobfs.StatusAvailable}}), "the file is being deleted"},
+		{"file in a deleting directory", fmt.Errorf("data: move file %s: %w", dir, &blobfs.DeletingError{Directory: true, ID: dir}), "the directory is being deleted"},
 		{"referenced", fmt.Errorf("data: delete directory %s: %w", dir, violation(blobfs.ErrReferenced, "organization_directory_fk_directory", sqlate.ErrForeignKeyViolation)), "the file is referenced"},
 		{"not deleting", fmt.Errorf("data: purge file %s: %w", dir, blobfs.ErrNotDeleting), "the request conflicts with the current state"},
 		{"invalid transition", fmt.Errorf("data: complete file %s: %w", dir, &blobfs.TransitionError{From: blobfs.StatusAvailable, To: blobfs.StatusAvailable}), "the request conflicts with the current state"},
@@ -100,7 +106,7 @@ func TestStatus_ConflictsCarryACuratedDetail(t *testing.T) {
 		{"unique violation", fmt.Errorf("create: %w", &sqlate.ConstraintError{Constraint: "organization_uq_parent_code", Class: sqlate.ErrUniqueViolation, Err: errors.New(`duplicate key value violates unique constraint "organization_uq_parent_code"`)}), "the request conflicts with the current state"},
 		{"foreign key violation", fmt.Errorf("create: %w", &sqlate.ConstraintError{Constraint: "organization_fk_parent", Class: sqlate.ErrForeignKeyViolation, Err: errors.New(`insert violates foreign key constraint "organization_fk_parent"`)}), "the request conflicts with the current state"},
 	}
-	ew := web.NewErrorWriter(data.Status)
+	ew := web.NewErrorWriter(slog.New(slog.DiscardHandler), data.Status)
 	ew.Detail(http.StatusConflict)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -129,5 +135,39 @@ func noRawText(t *testing.T, body string) {
 		if strings.Contains(body, leak) {
 			t.Errorf("body %s carries %q", body, leak)
 		}
+	}
+}
+
+// A 400's detail is the refusal alone: the input the request got wrong, in
+// the typed error's words without its library prefix, and none of the
+// operation chain that wrapped it, which names the service's own ids.
+func TestStatus_ARequestsRefusalCarriesOnlyItsInput(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"malformed cursor",
+			fmt.Errorf("data: continue files in 01a0ee49-0000-7000-8000-000000000001: %w", &query.CursorError{Reason: query.CursorMalformed}),
+			"cursor is malformed"},
+		{"foreign cursor",
+			fmt.Errorf("data: continue directories in 01a0ee49-0000-7000-8000-000000000001: %w", &query.CursorError{Reason: query.CursorMismatch}),
+			"cursor was issued for another base, ordering, or filters"},
+		{"unknown field", fmt.Errorf("data: list files in d: %w", &query.UnknownFieldError{Field: "nope", Use: query.FieldUseSort}),
+			`unknown sort field "nope"`},
+		{"invalid name", fmt.Errorf("data: create file in d: %w", &blobfs.NameError{Name: "a/b", Reason: "contains a slash"}),
+			`invalid name "a/b": contains a slash`},
+		{"upload body cut short", fmt.Errorf("data: write file 01a0ee49-0000-7000-8000-000000000001: %w", fmt.Errorf("%w: %w", data.ErrBodyRead, io.ErrUnexpectedEOF)),
+			"the request body could not be read"},
+		{"root", fmt.Errorf("data: delete directory 00000000-0000-0000-0000-000000000000: %w", blobfs.ErrRootDirectory),
+			strings.TrimPrefix(blobfs.ErrRootDirectory.Error(), "blobfs: ")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := data.Status(tc.err)
+			if !ok || got.Status != http.StatusBadRequest || got.Detail != tc.want {
+				t.Errorf("Status = %d %q, %t; want 400 %q", got.Status, got.Detail, ok, tc.want)
+			}
+		})
 	}
 }

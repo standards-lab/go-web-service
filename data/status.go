@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/standards-lab/blobfs"
 	"github.com/standards-lab/go-database"
@@ -18,74 +19,59 @@ import (
 // 409's detail is always one of these and never the error's own text,
 // which names the library's operation, its ids, and its constraints.
 const (
-	DetailNameTaken    = "an entry with that name already exists"
-	DetailNotEmpty     = "the directory is not empty"
-	DetailDeleting     = "the directory is being deleted"
+	// DetailNameTaken is a taken name or id.
+	DetailNameTaken = "an entry with that name already exists"
+	// DetailNotEmpty is a delete of a directory with contents.
+	DetailNotEmpty = "the directory is not empty"
+	// DetailDeleting is a change a deleting directory refused: the row's
+	// own branch is marked, or the change reaches into one.
+	DetailDeleting = "the directory is being deleted"
+	// DetailFileDeleting is a change refused by the file's own delete (a
+	// blobfs.DeletingError whose Directory is false).
 	DetailFileDeleting = "the file is being deleted"
-	DetailReferenced   = "the file is referenced"
+	// DetailReferenced is a delete of a file a row still references.
+	DetailReferenced = "the file is referenced"
 	// DetailConflict is every other conflict's: a constraint violation, a
 	// move into its own subtree, a transition the file's status does not
-	// allow, and a domain's own conflicts, which its matcher reports with
-	// this text too.
+	// allow, and a domain's own conflicts.
 	DetailConflict = "the request conflicts with the current state"
 )
 
-// ErrFileDeleting is a change refused because the file itself is
-// deleting, its own delete begun, rather than a directory it reaches.
-// blobfs reports both as blobfs.ErrDeleting, so a domain that must tell
-// them apart reads the file's row and wraps the refusal in this error,
-// which keeps blobfs.ErrDeleting in its chain. blobfs will type the two
-// apart itself; this error then gives way to its own.
-var ErrFileDeleting = errors.New("data: the file is being deleted")
-
-// Status is the web.ProblemMatcher over the vocabulary every domain's store
-// returns:
+// Status is the web.ProblemMatcher over the errors every domain's store
+// returns. It matches blobfs's and go-storage's errors before the
+// database's, since a blobfs violation also unwraps to the constraint
+// error beneath it, and maps them to:
 //
-//   - a rejected directive is the request's fault
-//   - an absent row is not found
-//   - a unique or foreign-key violation is a conflict with the current state
-//   - a stale version is a failed precondition
-//   - a database that is not ready or cannot be reached is a temporary outage,
-//     a pooled connection lost in the middle of a read included: sqlate's
-//     engine leaves that unexpected EOF unclassified, so it is matched here
+//   - 400: a rejected directive, a malformed name, path, key, or id, an
+//     operation on the root, or ErrBodyRead; the detail is the refusal
+//     alone, never the operation chain that wrapped it
+//   - 404: an absent row, entry, or object
+//   - 408: ErrBodyTimeout, an upload's body slower than the rate allows
+//   - 409: a taken name or id, a non-empty directory, a referenced file, a
+//     deleting file or directory, a cycle, a transition the status does not
+//     allow, or a unique or foreign-key violation, each with its Detail
+//     constant and never the error's own text
+//   - 412: a stale version
+//   - 413: an object over the store's size bound
+//   - 503: a database or store not ready or unreachable, a missing
+//     container, and a pooled connection lost mid-read (an unexpected EOF
+//     sqlate leaves unclassified)
 //
-// and the storage vocabulary, blobfs's sentinels and go-storage's, which
-// comes first because a blobfs violation also unwraps to the constraint
-// error beneath it:
-//
-//   - a malformed name, path, key, or id, or an operation on the root, is
-//     the request's fault
-//   - an absent entry or object is not found
-//   - a taken name or id, a non-empty directory, a referenced file, a
-//     deleting file or directory, a move into its own subtree, or a
-//     transition the file's status does not allow is a conflict (a
-//     domain's listing reports a deleting directory as not found before
-//     its error reaches this matcher)
-//   - a file the domain found deleting itself, ErrFileDeleting, is a
-//     conflict too, told apart from the directory's
-//   - an object over the store's size bound is too large
-//   - a store that is not ready, unreachable, or missing its container is a
-//     temporary outage
-//
-// Every conflict carries a curated detail, the Detail constant for its
-// kind, so a writer that opts 409 into error text still sends none of it:
-// a taken name or id is DetailNameTaken, a non-empty directory
-// DetailNotEmpty, a file deleting itself (ErrFileDeleting)
-// DetailFileDeleting, any other blobfs.ErrDeleting, a deleting directory,
-// DetailDeleting, a referenced file DetailReferenced, and every other
-// conflict DetailConflict.
-//
-// A handler composes it after its own matcher so the domain's errors take
-// precedence. Check and not-null violations stay unmatched on purpose: a
-// command's validation owns those rules, so a breach is an invariant
-// failure, reported as a server fault.
+// A handler composes it after its own matcher. Check and not-null
+// violations stay unmatched: a command's validation owns those rules, so a
+// breach is a server fault.
 func Status(err error) (web.Problem, bool) {
+	var deleting *blobfs.DeletingError
 	switch {
+	case errors.Is(err, ErrBodyRead):
+		return web.Problem{Status: http.StatusBadRequest, Detail: ErrBodyRead.Error()}, true
+	case errors.Is(err, ErrBodyTimeout):
+		return web.Problem{Status: http.StatusRequestTimeout, Detail: ErrBodyTimeout.Error()}, true
 	case errors.Is(err, blobfs.ErrInvalidName), errors.Is(err, blobfs.ErrInvalidPath),
 		errors.Is(err, blobfs.ErrInvalidKey), errors.Is(err, blobfs.ErrInvalidID),
 		errors.Is(err, blobfs.ErrRootDirectory):
-		return web.Problem{Status: http.StatusBadRequest}, true
-	case errors.Is(err, blobfs.ErrNotFound), errors.Is(err, storage.ErrNotFound) && !errors.Is(err, ErrContainerGone):
+		return web.Problem{Status: http.StatusBadRequest, Detail: requestDetail(err)}, true
+	case errors.Is(err, blobfs.ErrNotFound), errors.Is(err, storage.ErrNotFound):
 		return web.Problem{Status: http.StatusNotFound}, true
 	case errors.Is(err, blobfs.ErrNameTaken), errors.Is(err, blobfs.ErrIDTaken):
 		return Conflict(DetailNameTaken), true
@@ -93,7 +79,7 @@ func Status(err error) (web.Problem, bool) {
 		return Conflict(DetailNotEmpty), true
 	case errors.Is(err, blobfs.ErrReferenced):
 		return Conflict(DetailReferenced), true
-	case errors.Is(err, ErrFileDeleting):
+	case errors.As(err, &deleting) && !deleting.Directory:
 		return Conflict(DetailFileDeleting), true
 	case errors.Is(err, blobfs.ErrDeleting):
 		return Conflict(DetailDeleting), true
@@ -102,10 +88,10 @@ func Status(err error) (web.Problem, bool) {
 		return Conflict(DetailConflict), true
 	case errors.Is(err, storage.ErrTooLarge):
 		return web.Problem{Status: http.StatusRequestEntityTooLarge}, true
-	case errors.Is(err, ErrContainerGone), errors.Is(err, storage.ErrNotReady), errors.Is(err, storage.ErrUnavailable):
+	case errors.Is(err, storage.ErrContainerNotFound), errors.Is(err, storage.ErrNotReady), errors.Is(err, storage.ErrUnavailable):
 		return web.Problem{Status: http.StatusServiceUnavailable}, true
 	case errors.Is(err, query.ErrDirectives):
-		return web.Problem{Status: http.StatusBadRequest}, true
+		return web.Problem{Status: http.StatusBadRequest, Detail: requestDetail(err)}, true
 	case errors.Is(err, sql.ErrNoRows):
 		return web.Problem{Status: http.StatusNotFound}, true
 	case errors.Is(err, sqlate.ErrUniqueViolation), errors.Is(err, sqlate.ErrForeignKeyViolation):
@@ -113,12 +99,52 @@ func Status(err error) (web.Problem, bool) {
 	case errors.Is(err, query.ErrVersionMismatch):
 		return web.Problem{Status: http.StatusPreconditionFailed}, true
 	case errors.Is(err, database.ErrNotReady),
-		errors.Is(err, database.ErrConnectionFailed),
 		errors.Is(err, sqlate.ErrConnectionFailed),
 		errors.Is(err, io.ErrUnexpectedEOF):
 		return web.Problem{Status: http.StatusServiceUnavailable}, true
 	}
 	return web.Problem{}, false
+}
+
+// requestDetail is the detail of a 400: the text of the typed refusal the
+// libraries report, the one that names the request's own input (a name,
+// an id, a sort or filter field, a filter value, a cursor), without its
+// library prefix or the operation chain that wrapped it. A refusal with no
+// typed error is its sentinel's text.
+func requestDetail(err error) string {
+	var (
+		name     *blobfs.NameError
+		id       *blobfs.IDError
+		cursor   *query.CursorError
+		field    *query.UnknownFieldError
+		operator *query.UnknownOperatorError
+		value    *query.InvalidValueError
+	)
+	var text string
+	switch {
+	case errors.As(err, &cursor):
+		text = cursor.Error()
+	case errors.As(err, &field):
+		text = field.Error()
+	case errors.As(err, &operator):
+		text = operator.Error()
+	case errors.As(err, &value):
+		text = value.Error()
+	case errors.As(err, &name):
+		text = name.Error()
+	case errors.As(err, &id):
+		text = id.Error()
+	default:
+		for _, sentinel := range []error{blobfs.ErrInvalidName, blobfs.ErrInvalidPath, blobfs.ErrInvalidKey,
+			blobfs.ErrInvalidID, blobfs.ErrRootDirectory, query.ErrDirectives} {
+			if errors.Is(err, sentinel) {
+				text = sentinel.Error()
+				break
+			}
+		}
+	}
+	text = strings.TrimPrefix(text, "blobfs: ")
+	return strings.TrimPrefix(text, "query: ")
 }
 
 // Conflict is the 409 problem carrying detail, one of the Detail

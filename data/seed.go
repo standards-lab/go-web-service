@@ -15,6 +15,7 @@ import (
 
 	"github.com/standards-lab/go-database/admin"
 	"github.com/standards-lab/sqlate"
+	"github.com/standards-lab/sqlate/query"
 )
 
 //go:embed seeds/*.json seeds/fixtures
@@ -31,9 +32,6 @@ type Contribution interface {
 	// Key names the contribution's rows in a state file and its count in
 	// the seed's result.
 	Key() string
-	// Verify prepares the statements the contribution runs against the
-	// live schema.
-	Verify(ctx context.Context) error
 }
 
 // Seed is a contribution of rows alone, applied by the domain's own
@@ -56,7 +54,7 @@ type Seed interface {
 type FileSeed interface {
 	Contribution
 	// Write stores the files rows declare, the state's JSON under Key,
-	// each through the shared write protocol (Storage.Ensure), and
+	// each through blobfs's retry-safe write (Storage.FS.EnsureFile), and
 	// returns how many it stored. A file already there is left as it is,
 	// and every row carries its id, so a rerun finds each file and a
 	// reset writes it again under the same key. fixtures holds the bytes
@@ -72,24 +70,28 @@ type FileSeed interface {
 // owns the policy of which set applies and when; Seeder owns how. Seeder
 // is the admin service's Seeder.
 type Seeder struct {
-	db       *Database
-	all      []Contribution
-	rows     []Seed
-	files    []FileSeed
-	fixtures fs.FS
+	db        *Database
+	verifiers []query.Verifier
+	all       []Contribution
+	rows      []Seed
+	files     []FileSeed
+	fixtures  fs.FS
 }
 
 // NewSeeder composes the seed operation from the domains' contributions,
 // the rows applied in the order given, then the files in the order given,
-// which the composition root makes the tables' dependency order. Two
+// which the composition root makes the tables' dependency order. verifiers
+// lists every store whose statements the service runs (each domain's, and
+// blobfs's), for [Seeder.Verify] to check; the list is separate from the
+// contributions, so a store that seeds nothing is still verified. Two
 // contributions under one key, or one that is neither a Seed nor a
 // FileSeed, or both, are wiring defects and panic.
-func NewSeeder(db *Database, contributions ...Contribution) *Seeder {
+func NewSeeder(db *Database, verifiers []query.Verifier, contributions ...Contribution) *Seeder {
 	fixtures, err := fs.Sub(seedFiles, "seeds/fixtures")
 	if err != nil {
 		panic(fmt.Sprintf("seeds: %v", err)) // the directory is embedded
 	}
-	s := &Seeder{db: db, all: contributions, fixtures: fixtures}
+	s := &Seeder{db: db, verifiers: verifiers, all: contributions, fixtures: fixtures}
 	keys := make(map[string]bool, len(contributions))
 	for _, c := range contributions {
 		if keys[c.Key()] {
@@ -112,14 +114,12 @@ func NewSeeder(db *Database, contributions ...Contribution) *Seeder {
 	return s
 }
 
-// Verify prepares the package's statements and every contribution's
-// against the live schema.
+// Verify checks the package's statements and every verifier NewSeeder was
+// given against the live schema. The admin service runs it at startup,
+// before it seeds, and on a verify request; it is the service's only
+// statement check.
 func (s *Seeder) Verify(ctx context.Context) error {
-	errs := []error{s.db.Verify(ctx)}
-	for _, c := range s.all {
-		errs = append(errs, c.Verify(ctx))
-	}
-	return errors.Join(errs...)
+	return query.Verify(ctx, s.db.DB, append([]query.Verifier{s.db.stmts}, s.verifiers...)...)
 }
 
 // States lists the embedded state files by name, sorted; the fixtures
@@ -141,23 +141,16 @@ func (s *Seeder) States() []string {
 
 // Seed applies the named state: every Seed's rows in one transaction, in
 // the order the contributions were given, then, once it commits, every
-// FileSeed's files, each through the storage protocols. It is idempotent,
-// leaving an existing row or file as it is, and it runs at every start of
-// an environment that names a state, not only the first, and on demand
-// from the admin mount. Each run writes again whatever the state names
-// that is missing, so a seeded organization, logo, or file a client
-// deleted is restored at the next start. Of the checked-in
-// configurations, only the local overlay names a state. The
-// counts are what this run inserted, rows or files, for every
-// contribution; one the state does not carry, or a seeded database,
-// reports zero. A key no contribution reads is a defect in the file,
-// refused before any I/O; the refusal names the first such key by name.
+// FileSeed's files. It is idempotent, leaving an existing row or file as
+// it is and writing again whatever the state names that is missing. The
+// counts are what this run stored per contribution, zero for one the
+// state does not carry. A key no contribution reads is a defect in the
+// file, refused before any I/O.
 //
-// A failure in the transaction rolls every row back, and no file is
-// written. A failure writing files leaves the committed rows and the
-// files stored before it, each file's write abandoned by the protocol when
-// it fails partway, so a rerun converges; the counts returned beside the
-// error are what the run stored before it stopped.
+// A failure in the transaction rolls every row back and writes no file. A
+// failure writing files leaves the committed rows and the files stored
+// before it, so a rerun converges; the counts beside the error are what
+// the run stored before it stopped.
 func (s *Seeder) Seed(ctx context.Context, name string) (admin.Seeded, error) {
 	var st map[string]json.RawMessage
 	if err := readSeed(name, &st); err != nil {

@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-// The gate tenant, bound for go-core beside the reactor: a quiesce gate a
+// The gate, bound for go-core beside the reactor: a quiesce gate a
 // process's background work holds shared and an operation that must run
 // with that work paused holds exclusively. It is a readers-writer lock
 // whose acquisitions honor a context, so a caller that gives up stops

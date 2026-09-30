@@ -57,21 +57,18 @@ func (c *Config) Merge(src *Config) {
 }
 
 // Finalize applies the root default, reads the root's own environment
-// override when a prefix is given, validates, and finalizes each block under
-// the same prefix. It satisfies the config package's Load contract; an empty
-// prefix disables every environment override — the hermetic form tests use.
+// override, validates, and finalizes each block under the same prefix. It
+// satisfies the config package's Load contract; an empty prefix composes no
+// variable name, so it disables every environment override — the hermetic
+// form tests use.
 func (c *Config) Finalize(envPrefix string) error {
 	if c.ShutdownTimeout == 0 {
 		c.ShutdownTimeout = libconfig.Duration(defaultShutdownTimeout)
 	}
 
-	if envPrefix != "" {
-		name := libconfig.EnvName(envPrefix, "shutdown_timeout")
-		if v := os.Getenv(name); v != "" {
-			if err := c.ShutdownTimeout.Set(v); err != nil {
-				return fmt.Errorf("%s: %w", name, err)
-			}
-		}
+	name := libconfig.EnvName(envPrefix, "shutdown_timeout")
+	if err := c.ShutdownTimeout.Set(os.Getenv(name)); err != nil {
+		return fmt.Errorf("%s: %w", name, err)
 	}
 
 	if c.ShutdownTimeout <= 0 {

@@ -1,7 +1,6 @@
 package data
 
 import (
-	"context"
 	"embed"
 	"sort"
 	"sync"
@@ -44,12 +43,6 @@ func New(db *sqlate.DB, catalog *query.Catalog) *Database {
 	d.lock = d.stmts.Statement("lock")
 	d.Register("data", d.stmts)
 	return d
-}
-
-// Verify prepares the package's own statements against the live schema;
-// the seeder's Verify runs it at the schema stage.
-func (d *Database) Verify(ctx context.Context) error {
-	return query.Verify(ctx, d.DB, d.stmts)
 }
 
 // Register records stmts under name, a domain's, at wiring; registering a

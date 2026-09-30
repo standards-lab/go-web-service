@@ -5,27 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 
 	"github.com/standards-lab/blobfs"
 	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/go-storage"
+	"github.com/standards-lab/go-web-sdk"
 )
 
-// ErrContainerGone is an object operation that found the configured
-// container missing: the target itself is gone, so the object may well
-// exist somewhere else, and the step is refused rather than read as done.
-var ErrContainerGone = errors.New("data: the object store's container is missing")
-
-// Storage is the object storage infrastructure as the domains see it:
-// blobfs's store, whose tables hold a row for every stored file and a tree
-// of directories over them, run through the same session as [Database],
-// and the object store the rows' keys name. The composition root installs
-// the engine and starts the object store. The file protocols that span the
-// two, the write, the delete, and the read of an available file, are
-// Storage's own methods (protocol.go); a domain runs them from its storage
-// translation file with its scope checks and its own rows as their
-// callbacks, and sequences the rest, the moves and its directories, over
-// blobfs's steps directly.
+// Storage is the object storage as the domains see it: blobfs's store,
+// whose rows run through the same session as [Database], and Objects, the
+// object store the rows' keys name. A domain runs blobfs's file protocols
+// (FS.WriteFile, FS.EnsureFile, FS.RemoveFile, FS.RemoveFileID,
+// FS.PurgeFile) over Objects, with its scope checks and its own rows in
+// their callbacks, and runs blobfs's steps directly for the rest. Serve
+// reads an available file in the web SDK's terms.
 type Storage struct {
 	FS      *bfdata.Store
 	Objects *Objects
@@ -37,16 +31,52 @@ func NewStorage(fs *bfdata.Store, objects *storage.Store) *Storage {
 	return &Storage{FS: fs, Objects: &Objects{store: objects}}
 }
 
-// Objects is the adapter between blobfs's protocol steps and a started
-// store, the one place the domains' file operations reach the object-store
-// library, so no domain imports it. It is the key validator blobfs's
-// writes take as their first step's argument, the put, open, and delete
-// the steps between them run, and the object deleter blobfs's sweep calls.
+// Download is an available file as a download serves it: the object's
+// description, which answers a revalidation alone, and the open that
+// streams its bytes, run only when they are sent.
+type Download struct {
+	Object web.Object
+	Open   func() (io.ReadCloser, error)
+}
+
+// Serve describes an available file as a download, its open streaming
+// under ctx. Any other file is blobfs.ErrNotFound, as an absent one is, so
+// a pending upload or a file whose delete has begun is never served.
+func (s *Storage) Serve(ctx context.Context, file blobfs.File) (Download, error) {
+	if file.Status != blobfs.StatusAvailable || file.Size == nil || file.ETag == nil {
+		return Download{}, fmt.Errorf("file %s is %s: %w", file.ID, file.Status, blobfs.ErrNotFound)
+	}
+	return Download{
+		Object: web.Object{ContentType: file.ContentType, Size: *file.Size, ETag: *file.ETag, ModifiedAt: file.UpdatedAt},
+		Open:   func() (io.ReadCloser, error) { return s.Objects.Open(ctx, file.Key) },
+	}, nil
+}
+
+// ErrBodyRead reports an upload whose request body failed while its object
+// was stored: a client that sent fewer bytes than it declared, or hung up.
+// Status answers it 400, so a truncated upload is never read as the
+// database's lost connection, which fails with the same io.ErrUnexpectedEOF.
+var ErrBodyRead = errors.New("the request body could not be read")
+
+// ErrBodyTimeout reports an upload whose client was too slow: its request
+// body did not arrive before the connection's read deadline, which the
+// route's transfer sets from the body's size and the slowest pace a client
+// is allowed. Status answers it 408.
+var ErrBodyTimeout = errors.New("the request body did not arrive in time")
+
+// Objects adapts a started store to blobfs's ObjectStore and supplies the
+// open Serve streams through. It is the one place the domains' file
+// operations reach the object-store library, so no domain imports it.
+//
+// A missing container is go-storage's storage.ErrContainerNotFound on
+// every operation, which never matches storage.ErrNotFound, so a put, an
+// open, or a delete against it is refused as the store's fault rather
+// than read as an absent object; blobfs leaves the row for a later pass.
 type Objects struct {
 	store *storage.Store
 }
 
-var _ bfdata.ObjectDeleter = (*Objects)(nil)
+var _ bfdata.ObjectStore = (*Objects)(nil)
 
 // ValidateKey checks key against the store's own key rule, as blobfs's
 // write asks before it inserts a row.
@@ -54,13 +84,34 @@ func (o *Objects) ValidateKey(key string) error {
 	return o.store.Capabilities().ValidateKey(key)
 }
 
-// Put stores body under key, all or nothing, and reports the object as
-// blobfs's complete step takes it. The content type is the one the caller
-// declared, since a store's own report of it may differ once written.
-func (o *Objects) Put(ctx context.Context, key string, body io.Reader, contentType string, size int64) (blobfs.Object, error) {
-	obj, err := o.store.Put(ctx, key, body, storage.PutOptions{ContentType: contentType, Size: size})
+// PutObject stores body under key, all or nothing, and reports the object
+// as blobfs's completion records it. The content type is the one the
+// caller declared, since a store's own report of it may differ once
+// written.
+//
+// A put that fails because its body failed is the client's fault, and the
+// body's error takes precedence over whatever the provider reported, since
+// a provider fails a put whose body fails. The put returns ErrBodyTimeout
+// when the body's read deadline passed (os.ErrDeadlineExceeded, or any
+// net.Error whose Timeout is true), and ErrBodyRead when the body ended
+// short of its declared size or broke off (io.ErrUnexpectedEOF, a reset
+// connection, a malformed chunk). A store that stalls never makes the
+// body's deadline pass: azureblob reads up to block_size × concurrency of
+// the body ahead of the store, more than max_object_size, so the body is
+// read whole, or fails on its own, whatever the store does, and a stalled
+// store stays the store's fault. The base configuration's test holds
+// max_object_size within that read-ahead.
+func (o *Objects) PutObject(ctx context.Context, key string, body io.Reader, contentType string, size int64) (blobfs.Object, error) {
+	r := &bodyReader{r: body}
+	obj, err := o.store.Put(ctx, key, r, storage.PutOptions{ContentType: contentType, Size: size})
 	if err != nil {
-		return blobfs.Object{}, o.classify(err)
+		switch {
+		case r.err != nil && timedOut(r.err):
+			return blobfs.Object{}, fmt.Errorf("%w: %w", ErrBodyTimeout, r.err)
+		case r.err != nil:
+			return blobfs.Object{}, fmt.Errorf("%w: %w", ErrBodyRead, r.err)
+		}
+		return blobfs.Object{}, err
 	}
 	return blobfs.Object{Size: obj.Size, ContentType: contentType, ETag: obj.ETag}, nil
 }
@@ -74,28 +125,33 @@ func (o *Objects) Open(ctx context.Context, key string) (io.ReadCloser, error) {
 	return blob.Body, nil
 }
 
-// Delete removes the object under key, the delete protocol's middle step.
-// A missing object is success, as blobfs's own delete step treats it; a
-// missing container is ErrContainerGone.
-func (o *Objects) Delete(ctx context.Context, key string) error {
-	return o.classify(o.store.Delete(ctx, key))
-}
-
-// DeleteObject is Delete under the name blobfs's sweep calls it by, so the
-// adapter is the sweep's bfdata.ObjectDeleter. It is idempotent as the
-// sweep requires: go-storage's Delete of a missing key succeeds, on every
-// provider. A missing container is ErrContainerGone, which the sweep
-// takes as a refusal, leaving the file deleting for a later pass.
+// DeleteObject removes the object under key, the step blobfs's delete, its
+// write's abandon, and its sweep run between their transactions. It is
+// idempotent as blobfs requires: go-storage's Delete of a missing key
+// succeeds, on every provider.
 func (o *Objects) DeleteObject(ctx context.Context, key string) error {
-	return o.Delete(ctx, key)
+	return o.store.Delete(ctx, key)
 }
 
-// classify separates a missing container from the store's other errors. A
-// write or delete that reports storage.ErrNotFound cannot have missed the
-// object, so the container is what is gone.
-func (o *Objects) classify(err error) error {
-	if errors.Is(err, storage.ErrNotFound) {
-		return fmt.Errorf("%w: %w", ErrContainerGone, err)
+// timedOut reports whether err is a deadline passing rather than a
+// failure of its own: os.ErrDeadlineExceeded and context.DeadlineExceeded
+// both report Timeout, as a net.Error.
+func timedOut(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
+}
+
+// bodyReader records the first error its reader returns other than
+// io.EOF, so a failed put can tell the body's failure from the store's.
+type bodyReader struct {
+	r   io.Reader
+	err error
+}
+
+func (b *bodyReader) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	if err != nil && err != io.EOF && b.err == nil {
+		b.err = err
 	}
-	return err
+	return n, err
 }

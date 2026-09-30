@@ -45,7 +45,7 @@ func TestAdmin_EnvOverride(t *testing.T) {
 	if err := cfg.Finalize("app"); err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	if cfg.Admin.SeedState() != "empty" || cfg.Admin.Env.Seed != "APP_ADMIN_SEED" {
-		t.Errorf("seed state = %q, env = %q", cfg.Admin.SeedState(), cfg.Admin.Env.Seed)
+	if cfg.Admin.SeedState() != "empty" {
+		t.Errorf("seed state = %q, want the override's", cfg.Admin.SeedState())
 	}
 }

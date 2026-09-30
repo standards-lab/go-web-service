@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/standards-lab/blobfs"
 	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
@@ -72,9 +71,14 @@ func TestDirectives(t *testing.T) {
 func TestPaging_CarriesTheCollectionsReport(t *testing.T) {
 	c := query.Collection[string]{Items: []string{"a"}, Total: query.NoTotal, More: true, Next: "c2"}
 
-	want := web.Paging{Total: web.NoTotal, More: true, Next: "c2"}
+	want := web.Paging{More: true, Next: "c2"}
 	if got := data.Paging(c); got != want {
-		t.Fatalf("got %+v, want %+v", got, want)
+		t.Fatalf("uncounted: got %+v, want %+v", got, want)
+	}
+
+	c.Total = 0
+	if got := data.Paging(c); got.Total == nil || *got.Total != 0 {
+		t.Fatalf("counted: total = %v, want 0", got.Total)
 	}
 }
 
@@ -100,11 +104,7 @@ func (f *fakeListing) Continue(_ context.Context, _ sqlate.Session, id string, d
 	return query.Collection[string]{Items: []string{"b"}, Total: query.NoTotal, More: true, Next: "c3"}, f.err
 }
 
-// blobfs's listings are Listings as they are.
-var (
-	_ data.Listing[blobfs.Directory] = (*bfdata.Directories)(nil)
-	_ data.Listing[blobfs.File]      = (*bfdata.Files)(nil)
-)
+var _ bfdata.Listing[string] = (*fakeListing)(nil)
 
 func TestReadListing_PagesByNumberOrContinuesPastACursor(t *testing.T) {
 	sort := []web.Sort{{Field: "name", Descending: true}}

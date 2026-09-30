@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/standards-lab/blobfs"
+	"github.com/standards-lab/blobfs/data/datatest"
 	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate/sqltest"
@@ -31,7 +33,7 @@ func module(t *testing.T, responses ...sqltest.Response) http.Handler {
 // routes mounts the layer's route group over svc as its own module.
 func routes(svc *document.Service) http.Handler {
 	r := web.NewRouter()
-	r.Mount(web.NewModule(document.Routes(svc, web.Limits{DefaultSize: 20, MaxSize: 100, Cursor: true})))
+	r.Mount(web.NewModule(document.Routes(svc, web.Limits{DefaultSize: 20, MaxSize: 100, Cursor: true}, transfer, slog.New(slog.DiscardHandler))))
 	return r
 }
 
@@ -172,8 +174,8 @@ func TestUploadFile_RefusesBeforeAnyIO(t *testing.T) {
 // file's identity and its metadata as the Location.
 func TestUploadFile_AnswersCreatedWithLocation(t *testing.T) {
 	h := module(t,
-		root(rootID), within(true), fileRows(file(fileID, dirID, blobfs.StatusPending, 1)),
-		fileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)),
+		root(rootID), within(true), datatest.FileRows(file(fileID, dirID, blobfs.StatusPending, 1)),
+		datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)),
 	)
 	rec := upload(t, h, base+"/directories/"+dirID+"/files?name=page.html", "text/html", "<p>hi</p>", 9)
 	if rec.Code != 201 || rec.Header().Get("Location") != base+"/files/"+fileID || !strings.Contains(rec.Body.String(), `"id":"`+fileID+`","version":2`) {
@@ -182,7 +184,7 @@ func TestUploadFile_AnswersCreatedWithLocation(t *testing.T) {
 }
 
 func TestCreateDirectory_AnswersCreatedWithLocation(t *testing.T) {
-	h := module(t, root(rootID), root(rootID), dirRows(directory(dirID, rootID, "reports", 1)))
+	h := module(t, root(rootID), root(rootID), datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)))
 	rec := send(t, h, "POST", base+"/directories", "", `{"parent_id":"root","name":"reports"}`)
 	if rec.Code != 201 || rec.Header().Get("Location") != base+"/directories/"+dirID {
 		t.Fatalf("status %d, Location %q, body %s", rec.Code, rec.Header().Get("Location"), rec.Body)
@@ -207,11 +209,11 @@ func TestRoutes_OutsideTheRootIs404(t *testing.T) {
 			[]sqltest.Response{root(rootID), within(false)},
 			"POST", base + "/directories/" + otherID + "/move", `"1"`, `{"parent_id":"root","name":"a"}`,
 		},
-		"file read":     {[]sqltest.Response{root(rootID), fileRows(file(fileID, otherID, blobfs.StatusAvailable, 2)), within(false)}, "GET", base + "/files/" + fileID, "", ""},
-		"file content":  {[]sqltest.Response{root(rootID), fileRows(file(fileID, otherID, blobfs.StatusAvailable, 2)), within(false)}, "GET", base + "/files/" + fileID + "/content", "", ""},
-		"file delete":   {[]sqltest.Response{root(rootID), fileRows(file(fileID, otherID, blobfs.StatusAvailable, 2)), within(false)}, "DELETE", base + "/files/" + fileID, `"2"`, ""},
+		"file read":     {[]sqltest.Response{root(rootID), datatest.FileRows(file(fileID, otherID, blobfs.StatusAvailable, 2)), within(false)}, "GET", base + "/files/" + fileID, "", ""},
+		"file content":  {[]sqltest.Response{root(rootID), datatest.FileRows(file(fileID, otherID, blobfs.StatusAvailable, 2)), within(false)}, "GET", base + "/files/" + fileID + "/content", "", ""},
+		"file delete":   {[]sqltest.Response{root(rootID), datatest.FileRows(file(fileID, otherID, blobfs.StatusAvailable, 2)), within(false)}, "DELETE", base + "/files/" + fileID, `"2"`, ""},
 		"upload":        {[]sqltest.Response{root(rootID), within(false)}, "POST", base + "/directories/" + otherID + "/files?name=a.txt", "", ""},
-		"absent file":   {[]sqltest.Response{root(rootID), fileRows()}, "GET", base + "/files/" + fileID, "", ""},
+		"absent file":   {[]sqltest.Response{root(rootID), datatest.FileRows()}, "GET", base + "/files/" + fileID, "", ""},
 		"no root":       {[]sqltest.Response{root()}, "GET", base + "/directories/" + dirID, "", ""},
 		"no root, list": {[]sqltest.Response{root()}, "GET", base + "/directories/" + dirID + "/directories", "", ""},
 	}
@@ -227,12 +229,15 @@ func TestRoutes_OutsideTheRootIs404(t *testing.T) {
 	}
 }
 
-// An organization without a root yet lists an empty page at its alias.
+// An organization without a root yet lists an empty page at its alias,
+// and refuses a sort its listing does not know, as a real root's does.
 func TestListFiles_BeforeTheRootIsAnEmptyPage(t *testing.T) {
-	rec := send(t, module(t, root(), organization()), "GET", base+"/directories/root/files", "", "")
+	h := module(t, root(), organization(), sqltest.WithTotal(datatest.FileRows(), 0), datatest.DirectoryRows())
+	rec := send(t, h, "GET", base+"/directories/root/files", "", "")
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"items":[]`) {
 		t.Fatalf("status %d, body %s", rec.Code, rec.Body)
 	}
+	problem(t, send(t, module(t, root(), organization()), "GET", base+"/directories/root/files?sort=nope", "", ""), 400)
 }
 
 // The alias's listings of an organization that does not exist are 404, as
@@ -257,9 +262,9 @@ func TestReads_AnUnknownStatusIs500(t *testing.T) {
 		responses []sqltest.Response
 		path      string
 	}{
-		"file read":   {[]sqltest.Response{root(rootID), fileRows(archived), within(true)}, base + "/files/" + fileID},
-		"file list":   {[]sqltest.Response{root(rootID), within(true), sqltest.WithTotal(fileRows(archived), 1), dirRows(directory(dirID, rootID, "reports", 1))}, base + "/directories/" + dirID + "/files"},
-		"directories": {[]sqltest.Response{root(rootID), sqltest.WithTotal(dirRows(dir), 1), dirRows(directory(rootID, blobfs.RootID, orgID, 1))}, base + "/directories/root/directories"},
+		"file read":   {[]sqltest.Response{root(rootID), datatest.FileRows(archived), within(true)}, base + "/files/" + fileID},
+		"file list":   {[]sqltest.Response{root(rootID), within(true), sqltest.WithTotal(datatest.FileRows(archived), 1), datatest.DirectoryRows(directory(dirID, rootID, "reports", 1))}, base + "/directories/" + dirID + "/files"},
+		"directories": {[]sqltest.Response{root(rootID), sqltest.WithTotal(datatest.DirectoryRows(dir), 1), datatest.DirectoryRows(directory(rootID, blobfs.RootID, orgID, 1))}, base + "/directories/root/directories"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -273,19 +278,21 @@ func TestReads_AnUnknownStatusIs500(t *testing.T) {
 }
 
 // The download is an attachment, never rendered inline, whatever the
-// stored type: the filename quoted, and a name outside ASCII carried
-// exactly in filename*.
+// stored type: the filename quoted, and a name outside printable ASCII,
+// or one holding a %, which some browsers percent-decode in a plain
+// filename, carried exactly in filename*.
 func TestContent_IsAnAttachment(t *testing.T) {
 	cases := map[string]struct{ name, disposition string }{
 		"plain":     {"report.txt", `attachment; filename="report.txt"`},
 		"quoted":    {`a "b"\c.html`, `attachment; filename="a \"b\"\\c.html"`},
 		"non-ascii": {"résumé 1.pdf", `attachment; filename="r_sum_ 1.pdf"; filename*=UTF-8''r%C3%A9sum%C3%A9%201.pdf`},
+		"percent":   {"q3 %41.txt", `attachment; filename="q3 _41.txt"; filename*=UTF-8''q3%20%2541.txt`},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			f := file(fileID, dirID, blobfs.StatusAvailable, 2)
 			f.Name, f.ContentType = c.name, "text/html"
-			svc, _, fake := serviceOver(t, root(rootID), fileRows(f), within(true))
+			svc, _, fake := serviceOver(t, root(rootID), datatest.FileRows(f), within(true))
 			if _, err := fake.Put(context.Background(), f.Key, strings.NewReader("report"), storage.PutOptions{}); err != nil {
 				t.Fatal(err)
 			}
@@ -303,9 +310,35 @@ func TestContent_IsAnAttachment(t *testing.T) {
 	}
 }
 
+// A download whose object fails to open answers a problem that carries
+// none of the file's headers and is not cached in its place: no
+// attachment name, and no-store over the handler's private, no-cache. An
+// absent object is 404, a missing container 503.
+func TestContent_AnOpenFailureDropsTheFilesHeaders(t *testing.T) {
+	for name, c := range map[string]struct {
+		drop bool
+		want int
+	}{"absent object": {false, 404}, "missing container": {true, 503}} {
+		t.Run(name, func(t *testing.T) {
+			svc, _, fake := serviceOver(t, root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), within(true))
+			if c.drop {
+				fake.DropContainer()
+			}
+			rec := send(t, routes(svc), "GET", base+"/files/"+fileID+"/content", "", "")
+			problem(t, rec, c.want)
+			if got := rec.Header().Get("Content-Disposition"); got != "" {
+				t.Errorf("Content-Disposition = %q on the problem; want none", got)
+			}
+			if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+				t.Errorf("Cache-Control = %q on the problem; want no-store", got)
+			}
+		})
+	}
+}
+
 // A file whose write has not completed has no content to serve.
 func TestContent_OfAPendingFileIs404(t *testing.T) {
-	h := module(t, root(rootID), fileRows(file(fileID, dirID, blobfs.StatusPending, 1)), within(true))
+	h := module(t, root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusPending, 1)), within(true))
 	problem(t, send(t, h, "GET", base+"/files/"+fileID+"/content", "", ""), 404)
 }
 
@@ -325,7 +358,7 @@ func TestDirectory_CarriesItsStatus(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			h := module(t, root(rootID), within(true), dirRows(c.dir), ancestors)
+			h := module(t, root(rootID), within(true), datatest.DirectoryRows(c.dir), ancestors)
 			rec := send(t, h, "GET", base+"/directories/"+dirID, "", "")
 			if rec.Code != 200 || !strings.Contains(rec.Body.String(), c.want) {
 				t.Fatalf("status %d, body %s; want %s", rec.Code, rec.Body, c.want)
@@ -339,12 +372,12 @@ func TestDirectory_CarriesItsStatus(t *testing.T) {
 func TestListings_WithinADeletingBranchAre404(t *testing.T) {
 	marked := deleting(directory(dirID, rootID, "reports", 1))
 	cases := map[string]sqltest.Response{
-		"directories": sqltest.WithTotal(dirRows(), 0),
-		"files":       sqltest.WithTotal(fileRows(), 0),
+		"directories": sqltest.WithTotal(datatest.DirectoryRows(), 0),
+		"files":       sqltest.WithTotal(datatest.FileRows(), 0),
 	}
 	for listing, page := range cases {
 		t.Run(listing, func(t *testing.T) {
-			h := module(t, root(rootID), within(true), page, dirRows(marked))
+			h := module(t, root(rootID), within(true), page, datatest.DirectoryRows(marked))
 			problem(t, send(t, h, "GET", base+"/directories/"+dirID+"/"+listing, "", ""), 404)
 		})
 	}
@@ -379,7 +412,7 @@ func TestDeleteDirectory_RecursiveIs202(t *testing.T) {
 	}{
 		"a directory": {[]sqltest.Response{root(rootID), within(true), exec(1), exec(1)}, dirID, dirID},
 		"a retry": {
-			[]sqltest.Response{root(rootID), within(true), exec(0), dirRows(deleting(directory(dirID, rootID, "reports", 1))), exec(0)},
+			[]sqltest.Response{root(rootID), within(true), exec(0), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), exec(0)},
 			dirID, dirID,
 		},
 		"the root": {[]sqltest.Response{root(rootID), exec(1), exec(0)}, document.RootAlias, rootID},
@@ -403,15 +436,15 @@ func TestDeletes_GuardOnIfMatch(t *testing.T) {
 	}{
 		"empty directory": {[]sqltest.Response{root(rootID), within(true), exec(1)}, "/directories/" + dirID, `"1"`, 204},
 		"stale directory": {
-			[]sqltest.Response{root(rootID), within(true), exec(0), dirRows(directory(dirID, rootID, "reports", 2))},
+			[]sqltest.Response{root(rootID), within(true), exec(0), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2))},
 			"/directories/" + dirID, `"1"`, 412,
 		},
 		"stale branch": {
-			[]sqltest.Response{root(rootID), within(true), exec(0), dirRows(directory(dirID, rootID, "reports", 2))},
+			[]sqltest.Response{root(rootID), within(true), exec(0), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2))},
 			"/directories/" + dirID + "?recursive=true", `"1"`, 412,
 		},
 		"stale file": {
-			[]sqltest.Response{root(rootID), fileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), within(true), fileRows(), fileRows(file(fileID, dirID, blobfs.StatusAvailable, 3))},
+			[]sqltest.Response{root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), within(true), datatest.FileRows(), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3))},
 			"/files/" + fileID, `"2"`, 412,
 		},
 	}
@@ -446,27 +479,27 @@ func TestReads_WireShape(t *testing.T) {
 		want      string
 	}{
 		"active directory": {
-			[]sqltest.Response{root(rootID), within(true), dirRows(stamp(directory(dirID, rootID, "reports", 1))), ancestors},
+			[]sqltest.Response{root(rootID), within(true), datatest.DirectoryRows(stamp(directory(dirID, rootID, "reports", 1))), ancestors},
 			base + "/directories/" + dirID,
 			`{"id":"` + dirID + `","parent_id":"` + rootID + `","name":"reports","path":"/reports","status":"active","version":1,` + times + `}`,
 		},
 		"deleting directory": {
-			[]sqltest.Response{root(rootID), within(true), dirRows(stamp(deleting(directory(dirID, rootID, "reports", 1)))), ancestors},
+			[]sqltest.Response{root(rootID), within(true), datatest.DirectoryRows(stamp(deleting(directory(dirID, rootID, "reports", 1)))), ancestors},
 			base + "/directories/" + dirID,
 			`{"id":"` + dirID + `","parent_id":"` + rootID + `","name":"reports","path":"/reports","status":"deleting","version":2,` + times + `}`,
 		},
 		"pending file": {
-			[]sqltest.Response{root(rootID), fileRows(stampFile(file(fileID, dirID, blobfs.StatusPending, 1))), within(true)},
+			[]sqltest.Response{root(rootID), datatest.FileRows(stampFile(file(fileID, dirID, blobfs.StatusPending, 1))), within(true)},
 			base + "/files/" + fileID,
 			`{"id":"` + fileID + `","directory_id":"` + dirID + `","name":"report.txt","status":"pending","size":null,"content_type":"text/plain","version":1,` + times + `}`,
 		},
 		"available file": {
-			[]sqltest.Response{root(rootID), fileRows(stampFile(file(fileID, dirID, blobfs.StatusAvailable, 2))), within(true)},
+			[]sqltest.Response{root(rootID), datatest.FileRows(stampFile(file(fileID, dirID, blobfs.StatusAvailable, 2))), within(true)},
 			base + "/files/" + fileID,
 			`{"id":"` + fileID + `","directory_id":"` + dirID + `","name":"report.txt","status":"available","size":6,"content_type":"text/plain","version":2,` + times + `}`,
 		},
 		"deleting file": {
-			[]sqltest.Response{root(rootID), fileRows(stampFile(file(fileID, dirID, blobfs.StatusDeleting, 3))), within(true)},
+			[]sqltest.Response{root(rootID), datatest.FileRows(stampFile(file(fileID, dirID, blobfs.StatusDeleting, 3))), within(true)},
 			base + "/files/" + fileID,
 			`{"id":"` + fileID + `","directory_id":"` + dirID + `","name":"report.txt","status":"deleting","size":6,"content_type":"text/plain","version":3,` + times + `}`,
 		},
@@ -480,3 +513,7 @@ func TestReads_WireShape(t *testing.T) {
 		})
 	}
 }
+
+// transfer sizes the test routes' transfers at 1 MiB/s with a second's
+// grace; a recorder has no connection deadlines for it to set.
+func transfer(limit int64) web.Transfer { return web.NewTransfer(limit, 1<<20, time.Second) }

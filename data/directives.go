@@ -9,20 +9,14 @@ import (
 	"github.com/standards-lab/sqlate/query"
 )
 
-// Directives lowers a parsed request query to the library's read
-// directives. It lives here because go-web-sdk cannot import sqlate and
-// the lowering is too small for a package of its own. The sorts pass
-// through as given; the page or cursor the request addressed is
-// [Read]'s and [ReadListing]'s. A filter with no operator is equality when
-// the parameter carried one value and membership when it carried several;
-// a bracketed operator maps to the library's operator of the same name,
-// one filter per value, so repeated parameters conjoin, and the in
-// operator takes every value at once. Every value is the request's raw
-// text: the library casts it to the field's declared type, so a malformed
-// value is the request's error. The filters keep the SDK's order, field
-// then operator, so the composed predicate is deterministic. Whether a
-// field is readable or an operator is one the read model supports is the
-// library's check.
+// Directives lowers a parsed request query's sorts and filters to the
+// library's read directives; the page or cursor is [Read]'s and
+// [ReadListing]'s. A filter with no operator is equality for one value and
+// membership for several; a bracketed operator is the library's operator
+// of the same name, one filter per value (in takes every value at once).
+// Values stay the request's raw text, which the library casts to the
+// field's type, and the filters keep the SDK's order, so the predicate is
+// deterministic.
 func Directives(q web.Query) query.Directives {
 	var d query.Directives
 	for _, s := range q.Sort {
@@ -72,22 +66,13 @@ func Read[T any](ctx context.Context, s sqlate.Session, p query.Projection[T], q
 	return p.List(ctx, s, d, query.Page{Number: q.Page, Size: q.Size}, base...)
 }
 
-// Listing is a collection read anchored on one row's id, the shape of
-// blobfs's directory listings (bfdata.Directories and bfdata.Files, which
-// satisfy it as they are): List reads a page by number and Continue the
-// page past a cursor a previous page returned, both of the rows under the
-// directory with id.
-type Listing[T any] interface {
-	List(ctx context.Context, s sqlate.Session, id string, d query.Directives, page query.Page, opts ...bfdata.ListOption) (query.Collection[T], error)
-	Continue(ctx context.Context, s sqlate.Session, id string, d query.Directives, after query.Cursor, size int, opts ...bfdata.ListOption) (query.Collection[T], error)
-}
-
-// ReadListing is [Read] over a listing in place of a projection: the rows
-// under the directory with id, continued past a cursor when the query
-// names one and by page number otherwise. Every refusal of the directives
-// or the cursor is the request's error, as Read's is; what a refusal of
-// the anchor means is the caller's policy.
-func ReadListing[T any](ctx context.Context, s sqlate.Session, l Listing[T], id string, q web.Query) (query.Collection[T], error) {
+// ReadListing is [Read] over one of blobfs's directory listings
+// (bfdata.Directories and bfdata.Files, each a bfdata.Listing) in place of
+// a projection: the rows under the directory with id, continued past a
+// cursor when the query names one and by page number otherwise. Every
+// refusal of the directives or the cursor is the request's error, as
+// Read's is; what a refusal of the anchor means is the caller's policy.
+func ReadListing[T any](ctx context.Context, s sqlate.Session, l bfdata.Listing[T], id string, q web.Query) (query.Collection[T], error) {
 	d := Directives(q)
 	if q.Cursor != "" {
 		return l.Continue(ctx, s, id, d, query.Cursor(q.Cursor), q.Size)
@@ -96,8 +81,12 @@ func ReadListing[T any](ctx context.Context, s sqlate.Session, l Listing[T], id 
 }
 
 // Paging reports a collection read's outcome in the envelope's terms: the
-// total (query.NoTotal is the envelope's web.NoTotal), whether a further
-// page exists, and the cursor to it.
+// total (nil for query.NoTotal, a read that did not count), whether a
+// further page exists, and the cursor to it.
 func Paging[T any](c query.Collection[T]) web.Paging {
-	return web.Paging{Total: c.Total, More: c.More, Next: string(c.Next)}
+	p := web.Paging{More: c.More, Next: string(c.Next)}
+	if c.Total != query.NoTotal {
+		p.Total = new(c.Total)
+	}
+	return p
 }

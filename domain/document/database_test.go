@@ -10,6 +10,7 @@ import (
 
 	"github.com/standards-lab/blobfs"
 	bfdata "github.com/standards-lab/blobfs/data"
+	"github.com/standards-lab/blobfs/data/datatest"
 	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-storage/storagetest"
 	"github.com/standards-lab/sqlate"
@@ -113,15 +114,6 @@ func deleting(d blobfs.Directory) blobfs.Directory {
 	return d
 }
 
-// dirRows scripts a read of blobfs directory rows, one per directory given.
-func dirRows(dirs ...blobfs.Directory) sqltest.Response {
-	r := sqltest.Response{Columns: []string{"id", "parent_id", "name", "status", "version", "created_at", "updated_at"}}
-	for _, d := range dirs {
-		r.Rows = append(r.Rows, []driver.Value{d.ID, *d.ParentID, d.Name, string(d.Status), d.Version, d.CreatedAt, d.UpdatedAt})
-	}
-	return r
-}
-
 // file is a document's file row in dir at a status and version; one past
 // pending carries the size and the entity tag its completion recorded.
 func file(id, dir string, status blobfs.Status, version int64) blobfs.File {
@@ -134,22 +126,6 @@ func file(id, dir string, status blobfs.Status, version int64) blobfs.File {
 	return f
 }
 
-// fileRows scripts a read of blobfs file rows, one per file given.
-func fileRows(files ...blobfs.File) sqltest.Response {
-	r := sqltest.Response{Columns: []string{"id", "directory_id", "name", "status", "key", "size", "content_type", "etag", "version", "created_at", "updated_at"}}
-	for _, f := range files {
-		var size, etag driver.Value
-		if f.Size != nil {
-			size = *f.Size
-		}
-		if f.ETag != nil {
-			etag = *f.ETag
-		}
-		r.Rows = append(r.Rows, []driver.Value{f.ID, f.DirectoryID, f.Name, string(f.Status), f.Key, size, f.ContentType, etag, f.Version, f.CreatedAt, f.UpdatedAt})
-	}
-	return r
-}
-
 // The wiring test: every owner-row handle binds once with its arguments,
 // through the protocol that runs them all, so a key that does not
 // match its file's parameters or a scan out of step with the SELECT list
@@ -159,13 +135,13 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 	ctx := context.Background()
 	s, rec, _ := serviceOver(t,
 		// CreateDirectory under the alias, the organization's first write.
-		root(),         // no root yet
-		organization(), // ensure: the organization exists
-		dirRows(),      // ensure: no directory named for it
-		dirRows(directory(rootID, blobfs.RootID, orgID, 1)), // ensure: the root created
+		root(),                   // no root yet
+		organization(),           // ensure: the organization exists
+		datatest.DirectoryRows(), // ensure: no directory named for it
+		datatest.DirectoryRows(directory(rootID, blobfs.RootID, orgID, 1)), // ensure: the root created
 		exec(1),      // ensure: the owner row
 		root(rootID), // create: the scope check
-		dirRows(directory(dirID, rootID, "reports", 1)), // create
+		datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)), // create
 		// DeleteDirectory of the root, empty: its owner row goes with it
 		// through the cascading foreign key, so no statement names the row.
 		root(rootID),
@@ -204,7 +180,7 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 		sqltest.OpQuery,
 		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpExec, sqltest.OpCommit,
 		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpCommit,
-		sqltest.OpQuery, sqltest.OpExec,
+		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpExec, sqltest.OpCommit, // the delete, scoped in its transaction
 	}
 	if len(ops) != len(want) {
 		t.Fatalf("ops = %v\nwant %v", ops, want)
@@ -216,14 +192,26 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 	}
 }
 
-// Verify prepares the layer's four statements and nothing of blobfs's,
-// which the composition root verifies on its own.
-func TestStore_VerifyPreparesEveryStatement(t *testing.T) {
-	s, rec, _ := serviceOver(t)
-	if err := s.Verify(context.Background()); err != nil {
+// The seeder's Verify prepares the layer's four statements, blobfs's, and
+// the data package's lock, as the composition root lists the stores.
+func TestSeed_VerifiesTheListedStores(t *testing.T) {
+	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
+	fs, err := bfdata.New(catalog, sqltest.Dialect{})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if prepared := rec.SQL(sqltest.OpPrepare); len(prepared) != 4 {
-		t.Errorf("prepared %d statements, want 4: %q", len(prepared), prepared)
+	alone, blobfsRec := sqltest.Open(t)
+	if err := fs.Verify(context.Background(), sqlate.Wrap(alone, sqltest.Dialect{})); err != nil {
+		t.Fatal(err)
+	}
+	pool, rec := sqltest.Open(t)
+	db := data.New(sqlate.Wrap(pool, sqltest.Dialect{}), catalog)
+	svc := document.New(db, data.NewStorage(fs, nil), nil)
+	if err := data.NewSeeder(db, []query.Verifier{svc.Verifier(), fs}, svc.Seed()).Verify(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	want := 1 + 4 + len(blobfsRec.SQL(sqltest.OpPrepare))
+	if prepared := rec.SQL(sqltest.OpPrepare); len(prepared) != want {
+		t.Errorf("prepared %d statements, want %d: the lock, the layer's 4, and blobfs's", len(prepared), want)
 	}
 }

@@ -3,11 +3,14 @@ package organization_test
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/standards-lab/blobfs/data/datatest"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate/sqltest"
 
@@ -22,7 +25,7 @@ func module(t *testing.T, responses ...sqltest.Response) http.Handler {
 	t.Helper()
 	svc, _ := service(t, responses...)
 	r := web.NewRouter()
-	r.Mount(web.NewModule(organization.Routes(svc, web.Limits{DefaultSize: 20, MaxSize: 100})))
+	r.Mount(web.NewModule(organization.Routes(svc, web.Limits{DefaultSize: 20, MaxSize: 100}, transfer, slog.New(slog.DiscardHandler))))
 	return r
 }
 
@@ -183,7 +186,7 @@ func TestPutLogo_RefusesBeforeAnyIO(t *testing.T) {
 }
 
 func TestLogo_WithoutALogoIs404(t *testing.T) {
-	h := module(t, fileRows()) // the active logo read finds no row
+	h := module(t, datatest.FileRows()) // the active logo read finds no row
 	problem(t, send(t, h, "GET", "/organizations/"+validID+"/logo", "", ""), 404)
 }
 
@@ -199,7 +202,7 @@ func TestLookup_ReadsThePathFromTheQuery(t *testing.T) {
 }
 
 func TestDeleteLogo_WithoutALogoIs404(t *testing.T) {
-	h := module(t, fileRows()) // the active logo read finds no row
+	h := module(t, datatest.FileRows()) // the active logo read finds no row
 	problem(t, send(t, h, "DELETE", "/organizations/"+validID+"/logo", "", ""), 404)
 }
 
@@ -223,3 +226,7 @@ func TestRoutes_AConflictCarriesItsCuratedDetail(t *testing.T) {
 		}
 	}
 }
+
+// transfer sizes the test routes' transfers at 1 MiB/s with a second's
+// grace; a recorder has no connection deadlines for it to set.
+func transfer(limit int64) web.Transfer { return web.NewTransfer(limit, 1<<20, time.Second) }

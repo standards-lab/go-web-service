@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -74,53 +72,6 @@ func group(use, short string) *cobra.Command {
 	}
 }
 
-// readFlags is the read grammar both listings take, as org list takes it:
-// page or cursor, size, and sort as their own flags, and each --filter a
-// name=value pair passed through as written.
-type readFlags struct {
-	page, size   int
-	sort, cursor string
-	filters      []string
-}
-
-// bind registers the read flags on cmd, --page and --cursor mutually
-// exclusive.
-func (r *readFlags) bind(cmd *cobra.Command) {
-	cmd.Flags().IntVar(&r.page, "page", 0, "the 1-based page to return; the first when unset")
-	cmd.Flags().StringVar(&r.cursor, "cursor", "", "continue after the page whose next token this is, in place of --page")
-	cmd.Flags().IntVar(&r.size, "size", 0, fmt.Sprintf("the page size, up to the configured maximum; the service's default (%d) when unset", DefaultPageSize))
-	cmd.Flags().StringVar(&r.sort, "sort", "", "comma-separated field names, each with a leading - for descending")
-	cmd.Flags().StringArrayVar(&r.filters, "filter", nil, "a filter, field=value or field[op]=value; repeatable")
-	cmd.MarkFlagsMutuallyExclusive("page", "cursor")
-}
-
-// query is the listing's query pairs from the flags cmd was given, in flag
-// order: an unset flag sends nothing, and a filter without a name is
-// refused before the request fires.
-func (r *readFlags) query(cmd *cobra.Command) ([][2]string, error) {
-	var query [][2]string
-	if cmd.Flags().Changed("page") {
-		query = append(query, [2]string{"page", strconv.Itoa(r.page)})
-	}
-	if cmd.Flags().Changed("cursor") {
-		query = append(query, [2]string{"cursor", r.cursor})
-	}
-	if cmd.Flags().Changed("size") {
-		query = append(query, [2]string{"size", strconv.Itoa(r.size)})
-	}
-	if cmd.Flags().Changed("sort") {
-		query = append(query, [2]string{"sort", r.sort})
-	}
-	for _, f := range r.filters {
-		name, value, _ := strings.Cut(f, "=")
-		if name == "" {
-			return nil, fmt.Errorf("--filter %q: want field=value, or field[op]=value", f)
-		}
-		query = append(query, [2]string{name, value})
-	}
-	return query, nil
-}
-
 // dirsCreateCommand is POST Documents/{org}/directories. The body is --body
 // verbatim, or CreateDirectory built from --parent-id and --name.
 func (d deps) dirsCreateCommand() *cobra.Command {
@@ -182,13 +133,13 @@ func (d deps) dirsGetCommand() *cobra.Command {
 // dirsListCommand is GET Documents/{org}/directories/{id}/directories under
 // the read grammar: a directory's child directories, a page at a time.
 func (d deps) dirsListCommand() *cobra.Command {
-	var read readFlags
+	var read input.ReadFlags
 	cmd := &cobra.Command{
 		Use:   "list <org> <dir>",
 		Short: "List a directory's child directories, one page at a time",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			query, err := read.query(cmd)
+			query, err := read.Query(cmd)
 			if err != nil {
 				return err
 			}
@@ -203,7 +154,7 @@ func (d deps) dirsListCommand() *cobra.Command {
 			return nil
 		},
 	}
-	read.bind(cmd)
+	read.Bind(cmd)
 	return cmd
 }
 
@@ -354,13 +305,13 @@ func AwaitSweep(ctx context.Context, client *Client, location string, limit time
 // filesListCommand is GET Documents/{org}/directories/{id}/files under the
 // read grammar: the files in a directory, a page at a time.
 func (d deps) filesListCommand() *cobra.Command {
-	var read readFlags
+	var read input.ReadFlags
 	cmd := &cobra.Command{
 		Use:   "list <org> <dir>",
 		Short: "List the files in a directory, one page at a time",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			query, err := read.query(cmd)
+			query, err := read.Query(cmd)
 			if err != nil {
 				return err
 			}
@@ -375,7 +326,7 @@ func (d deps) filesListCommand() *cobra.Command {
 			return nil
 		},
 	}
-	read.bind(cmd)
+	read.Bind(cmd)
 	return cmd
 }
 

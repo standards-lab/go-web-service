@@ -24,7 +24,7 @@ import (
 // blobfs.ErrDeleting, which the layer reports as the missing directory
 // rather than a conflict, since a mark is never undone, so nothing a
 // client sends makes the directory listable again.
-func listing[T any](ctx context.Context, sess sqlate.Session, l data.Listing[T], id string, q web.Query) ([]T, web.Paging, error) {
+func listing[T any](ctx context.Context, sess sqlate.Session, l bfdata.Listing[T], id string, q web.Query) ([]T, web.Paging, error) {
 	c, err := data.ReadListing(ctx, sess, l, id, q)
 	if errors.Is(err, blobfs.ErrDeleting) {
 		return nil, web.Paging{}, fmt.Errorf("directory %s is being deleted: %w", id, blobfs.ErrNotFound)
@@ -134,37 +134,41 @@ func (s *store) createDirectory(ctx context.Context, organizationID string, c Cr
 	return Identity{ID: dir.ID, Version: dir.Version}, err
 }
 
-// directory reads the directory with its path from the root: blobfs's path
-// runs from its own root, and its first segment is the document root.
+// directory reads the directory with its path from the root. The scope
+// check, the directory, and its path run in one transaction, so the three
+// reads see one tree. blobfs's path runs from its own root, and its first
+// segment is the document root.
 func (s *store) directory(ctx context.Context, organizationID, id string) (Directory, error) {
 	fs := s.storage.FS
-	root, id, err := s.scope(ctx, s.db, organizationID, id)
-	if err != nil {
-		return Directory{}, err
-	}
-	d, err := fs.Directories.Find(ctx, s.db, id)
-	if err != nil {
-		return Directory{}, err
-	}
-	path, err := fs.Directories.Path(ctx, s.db, id)
-	if err != nil {
-		return Directory{}, err
-	}
-	out, err := directoryOf(d, root)
-	if err != nil {
-		return Directory{}, err
-	}
-	_, below, _ := strings.Cut(strings.TrimPrefix(path, "/"), "/")
-	out.Path = "/" + below
-	return out, nil
+	return s.db.Transact(ctx, func(tx *sqlate.Tx) (Directory, error) {
+		root, id, err := s.scope(ctx, tx, organizationID, id)
+		if err != nil {
+			return Directory{}, err
+		}
+		d, err := fs.Directories.Find(ctx, tx, id)
+		if err != nil {
+			return Directory{}, err
+		}
+		path, err := fs.Directories.Path(ctx, tx, id)
+		if err != nil {
+			return Directory{}, err
+		}
+		out, err := directoryOf(d, root)
+		if err != nil {
+			return Directory{}, err
+		}
+		_, below, _ := strings.Cut(strings.TrimPrefix(path, "/"), "/")
+		out.Path = "/" + below
+		return out, nil
+	})
 }
 
 // listDirectories reads one page of the directory's child directories. An
 // organization without a root lists nothing under the alias.
 func (s *store) listDirectories(ctx context.Context, organizationID, id string, q web.Query) ([]Directory, web.Paging, error) {
-	root, dir, err := s.scope(ctx, s.db, organizationID, id)
+	root, dir, err := s.listScope(ctx, organizationID, id)
 	if err != nil {
-		return rootless[Directory](ctx, s, organizationID, id, err)
+		return nil, web.Paging{}, err
 	}
 	items, paging, err := listing(ctx, s.db, s.storage.FS.Directories, dir, q)
 	if err != nil {
@@ -178,9 +182,9 @@ func (s *store) listDirectories(ctx context.Context, organizationID, id string, 
 // available; a file whose delete has begun is hidden, as every listing
 // hides deleting rows.
 func (s *store) listFiles(ctx context.Context, organizationID, id string, q web.Query) ([]File, web.Paging, error) {
-	_, dir, err := s.scope(ctx, s.db, organizationID, id)
+	_, dir, err := s.listScope(ctx, organizationID, id)
 	if err != nil {
-		return rootless[File](ctx, s, organizationID, id, err)
+		return nil, web.Paging{}, err
 	}
 	items, paging, err := listing(ctx, s.db, s.storage.FS.Files, dir, q)
 	if err != nil {
@@ -190,31 +194,39 @@ func (s *store) listFiles(ctx context.Context, organizationID, id string, q web.
 	return out, paging, err
 }
 
-// rootless answers a listing's scope failure: an organization without a
-// root yet has an empty hierarchy, so the alias lists as an empty, counted
-// page once the organization is read, while a nonexistent organization is
-// the missing row, as every other route answers it, and a specific id is
-// not found. Any other failure is the request's.
-func rootless[T any](ctx context.Context, s *store, organizationID, id string, err error) ([]T, web.Paging, error) {
+// listScope is scope for a listing. An organization without a root yet
+// has an empty hierarchy: once the organization is read, the alias
+// resolves to an id minted for the read, which no row holds, so blobfs
+// lists it as an empty directory. The alias thus runs the listing itself:
+// it refuses what a real root's listing refuses (a sort, filter, or cursor
+// the read does not accept) and reports the paging an empty root's would.
+// A nonexistent organization is the missing row, as every other route
+// answers it, and a specific id is not found.
+func (s *store) listScope(ctx context.Context, organizationID, id string) (root, dir string, err error) {
+	root, dir, err = s.scope(ctx, s.db, organizationID, id)
 	if id != RootAlias || !errors.Is(err, sql.ErrNoRows) {
-		return nil, web.Paging{}, err
+		return root, dir, err
 	}
 	if err := s.organizationExists(ctx, s.db, organizationID); err != nil {
-		return nil, web.Paging{}, fmt.Errorf("organization %s: %w", organizationID, err)
+		return "", "", fmt.Errorf("organization %s: %w", organizationID, err)
 	}
-	return nil, web.Paging{}, nil
+	none := blobfs.NewID()
+	return none, none, nil
 }
 
-// deleteDirectory removes the empty directory at version, its scope
-// checked first. Removing the root removes its owner row with it, through
-// the owner row's cascading foreign key, so the organization has no root
-// until its next write ensures a new one.
+// deleteDirectory removes the empty directory at version in one
+// transaction with its scope check. Removing the root removes its owner row
+// with it, through the owner row's cascading foreign key, so the
+// organization has no root until its next write ensures a new one.
 func (s *store) deleteDirectory(ctx context.Context, organizationID, id string, version int64) error {
-	_, id, err := s.scope(ctx, s.db, organizationID, id)
-	if err != nil {
-		return err
-	}
-	return s.storage.FS.Directories.Delete(ctx, s.db, id, bfdata.AtVersion(version))
+	_, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (struct{}, error) {
+		_, id, err := s.scope(ctx, tx, organizationID, id)
+		if err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, s.storage.FS.Directories.Delete(ctx, tx, id, bfdata.AtVersion(version))
+	})
+	return err
 }
 
 // markBranch begins the delete of the directory with everything beneath
@@ -255,59 +267,26 @@ func (s *store) moveDirectory(ctx context.Context, organizationID, id string, ve
 }
 
 // uploadFile stores the upload as a new file named name in the directory,
-// ensuring the root when the directory is its alias, by the data package's
-// write protocol: the scope check and the pending row commit together
-// before any byte is stored, the put runs outside any transaction, and the
-// completion runs on the pool. A put or a completion that fails retires the
-// pending row, so its name is free for a retry; one whose retire fails too
-// leaves the row for the sweep. A completion refused because the row's
-// delete began or the sweep removed it, the mark of a branch that raced the
-// write, deletes the object just put; the row is the sweep's. A completion
-// refused because the stale reclaim began the row's own delete is the
-// file deleting, told apart from the branch's mark as deletingFile tells
-// it.
+// ensuring the root when the directory is its alias, by blobfs's two-phase
+// write, whose first transaction runs the scope check with the pending
+// row's insert. A put or completion that fails abandons the row, and the
+// sweep finishes one whose abandon fails too. A completion refused as
+// deleting (a blobfs.DeletingError, which names whose delete it was)
+// deletes the object just put.
 func (s *store) uploadFile(ctx context.Context, organizationID, directoryID, name string, u web.Upload) (Identity, error) {
 	st := s.storage
 	directoryID, err := s.writable(ctx, organizationID, directoryID)
 	if err != nil {
 		return Identity{}, err
 	}
-	var created string
-	file, err := st.Write(ctx, s.db.DB, u.Body, u.Size, func(tx *sqlate.Tx) (blobfs.File, error) {
+	file, err := st.FS.WriteFile(ctx, s.db.DB, st.Objects, u.Body, u.Size, func(tx *sqlate.Tx) (blobfs.File, error) {
 		_, dir, err := s.scope(ctx, tx, organizationID, directoryID)
 		if err != nil {
 			return blobfs.File{}, err
 		}
-		file, err := st.FS.Files.Create(ctx, tx, st.Objects, dir, name, u.ContentType)
-		created = file.ID
-		return file, err
+		return st.FS.Files.Create(ctx, tx, st.Objects, dir, name, u.ContentType)
 	})
-	if err != nil && created != "" {
-		err = s.deletingFile(ctx, created, err)
-	}
 	return Identity{ID: file.ID, Version: file.Version}, err
-}
-
-// deletingFile tells a refusal blobfs reports as blobfs.ErrDeleting apart
-// by reading the file with id: a file whose own delete began, in a
-// directory that is not deleting, is data.ErrFileDeleting, while a file
-// deleting because its branch is marked, or one not found deleting, keeps
-// the refusal as the directory's. blobfs reports the file's own delete
-// and a directory's as one error; once it types them apart, this read
-// gives way to its own error. Any other error is returned as it is.
-func (s *store) deletingFile(ctx context.Context, id string, err error) error {
-	if !errors.Is(err, blobfs.ErrDeleting) {
-		return err
-	}
-	fs := s.storage.FS
-	file, ferr := fs.Files.Find(ctx, s.db, id)
-	if ferr != nil || file.Status != blobfs.StatusDeleting {
-		return err
-	}
-	if dir, derr := fs.Directories.Find(ctx, s.db, file.DirectoryID); derr != nil || dir.Status != blobfs.DirectoryStatusActive {
-		return err
-	}
-	return fmt.Errorf("file %s: %w: %w", id, data.ErrFileDeleting, err)
 }
 
 // file reads the file's metadata.
@@ -326,20 +305,21 @@ func (s *store) content(ctx context.Context, organizationID, id string) (Content
 	if err != nil {
 		return Content{}, err
 	}
-	obj, open, err := s.storage.Serve(ctx, file)
+	dl, err := s.storage.Serve(ctx, file)
 	if err != nil {
 		return Content{}, fmt.Errorf("content: %w", err)
 	}
-	return Content{Name: file.Name, Object: obj, Open: open}, nil
+	return Content{Name: file.Name, Object: dl.Object, Open: dl.Open}, nil
 }
 
-// deleteFile removes the file at version by the data package's delete
-// protocol, its scope checked in the transaction that begins the delete. No
-// row of the layer references a file, so no reference is removed before
-// the delete. A file deleting already is the delete's retry, which
-// converges at any version, so a delete is never refused as deleting.
+// deleteFile removes the file at version by blobfs's two-phase delete, its
+// scope checked in the transaction that begins the delete. No row of the
+// layer references a file, so no reference is removed before the delete.
+// A file deleting already is the delete's retry, which converges at any
+// version, so a delete is never refused as deleting.
 func (s *store) deleteFile(ctx context.Context, organizationID, id string, version int64) error {
-	return s.storage.Retire(ctx, s.db.DB, func(tx *sqlate.Tx) (string, error) {
+	st := s.storage
+	return st.FS.RemoveFile(ctx, s.db.DB, st.Objects, func(tx *sqlate.Tx) (string, error) {
 		_, file, err := s.fileScope(ctx, tx, organizationID, id)
 		return file.ID, err
 	}, bfdata.AtVersion(version))
@@ -347,9 +327,9 @@ func (s *store) deleteFile(ctx context.Context, organizationID, id string, versi
 
 // moveFile moves the file into a directory within the same root, guarded
 // by its version. The key is untouched, so no object moves. A move refused
-// because the file's own delete began is the file deleting, and one
-// refused because a directory it reaches is deleting is the directory's,
-// as deletingFile tells them apart.
+// as deleting is blobfs's blobfs.DeletingError, the file's own when its
+// delete began and the directory's when a directory it reaches is
+// deleting, which data.Status tells apart.
 func (s *store) moveFile(ctx context.Context, organizationID, id string, version int64, m MoveFile) (Identity, error) {
 	file, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (blobfs.File, error) {
 		root, _, err := s.fileScope(ctx, tx, organizationID, id)
@@ -362,10 +342,7 @@ func (s *store) moveFile(ctx context.Context, organizationID, id string, version
 		}
 		return s.storage.FS.Files.Move(ctx, tx, id, dir, m.Name, version)
 	})
-	if err != nil {
-		return Identity{}, s.deletingFile(ctx, id, err)
-	}
-	return Identity{ID: file.ID, Version: file.Version}, nil
+	return Identity{ID: file.ID, Version: file.Version}, err
 }
 
 // seed is the layer's seed contribution, a file seed, to the data
@@ -379,12 +356,6 @@ var _ data.FileSeed = seed{}
 
 // Key names the hierarchies in a state file and in the seed's counts.
 func (seed) Key() string { return "documents" }
-
-// Verify prepares the layer's statements, the seed's path walk among
-// them, and blobfs's, which the tree's writes run.
-func (s seed) Verify(ctx context.Context) error {
-	return errors.Join(s.store.Verify(ctx), s.store.storage.FS.Verify(ctx, s.store.db))
-}
 
 // Write seeds each hierarchy in file order and returns how many entries,
 // directories and files, it created. The files' bytes are inline, so the
@@ -434,18 +405,12 @@ func (s *store) seedEntries(ctx context.Context, parent string, entries []seedEn
 	return created, nil
 }
 
-// seedEntry ensures one entry by blobfs's insert-or-find under the entry's
-// id: a directory on the pool, then its entries, and a file by the write
-// protocol's retry-safe form, its content put and the row completed. An
-// entry already there by name is left as it is and keeps its own id, the
-// directory's contents still ensured beneath it: a file there under
-// another id, a client's upload pending or complete, is never written
-// over, since the write protocol reports it as a taken name. An entry
-// whose id a row
-// already carries under another name, one a client moved or renamed, is
-// left where the client put it, a directory with its contents. So is an
-// entry whose delete is under way, which the sweep finishes and the next
-// seed writes again.
+// seedEntry ensures one entry under the entry's id: a directory by blobfs's
+// insert-or-find, then its entries, and a file by blobfs's Store.EnsureFile.
+// An entry the seed does not own is left as it stands and counts nothing:
+// one there by name under another id (its directory's contents are still
+// ensured), one whose id a row carries under another name, and one whose
+// delete is under way.
 func (s *store) seedEntry(ctx context.Context, parent string, e seedEntry) (int, error) {
 	st := s.storage
 	isDir, err := e.directory()
@@ -454,12 +419,8 @@ func (s *store) seedEntry(ctx context.Context, parent string, e seedEntry) (int,
 	}
 	if isDir {
 		dir, created, err := st.FS.Directories.Ensure(ctx, s.db, parent, e.Name, bfdata.WithID(e.ID))
-		if errors.Is(err, blobfs.ErrIDTaken) {
-			// A concurrent seed committed the directory between the
-			// lookup and the insert; the lookup finds it now. An id a
-			// moved directory holds is taken again.
-			dir, created, err = st.FS.Directories.Ensure(ctx, s.db, parent, e.Name, bfdata.WithID(e.ID))
-		}
+		// blobfs recovers a concurrent seed's insert under the same id on
+		// the pool, so ErrIDTaken here is an id a moved directory holds.
 		if errors.Is(err, blobfs.ErrIDTaken) || errors.Is(err, blobfs.ErrDeleting) {
 			return 0, nil
 		}
@@ -472,7 +433,7 @@ func (s *store) seedEntry(ctx context.Context, parent string, e seedEntry) (int,
 		}
 		return n, err
 	}
-	_, stored, err := st.Ensure(ctx, s.db.DB, e.ID, strings.NewReader(e.Content), int64(len(e.Content)), func(tx *sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
+	_, stored, err := st.FS.EnsureFile(ctx, s.db.DB, st.Objects, e.ID, strings.NewReader(e.Content), int64(len(e.Content)), func(tx *sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
 		return st.FS.Files.Ensure(ctx, tx, st.Objects, parent, e.Name, e.ContentType, bfdata.WithID(e.ID))
 	})
 	switch {

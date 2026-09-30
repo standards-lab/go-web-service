@@ -31,6 +31,19 @@ jobs:
       - name: go test -race
         run: go test -race ./...
 
+      # slab is its own module under tools/, so each check runs there too.
+      - name: slab go vet
+        working-directory: tools/slab
+        run: go vet ./...
+
+      - name: slab go mod tidy -diff
+        working-directory: tools/slab
+        run: go mod tidy -diff
+
+      - name: slab go test -race
+        working-directory: tools/slab
+        run: go test -race ./...
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -44,6 +57,12 @@ jobs:
 
       - name: sqlint
         run: go tool sqlint
+
+      - name: slab golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13.2
+          working-directory: tools/slab
 
   # The integration tier: the composed service, black-box, against the same
   # compose definition a developer runs, as its own project. On merge to main

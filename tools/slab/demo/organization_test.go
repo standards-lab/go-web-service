@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
 	"github.com/standards-lab/go-web-service/tools/slab/env"
+	"github.com/standards-lab/go-web-service/tools/slab/input"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 
@@ -100,7 +102,7 @@ var seededTree = [][3]string{
 }
 
 func newFakeService() *fakeService {
-	f := &fakeService{trace: fakeTrace, problems: web.NewErrorWriter(fakeStatus)}
+	f := &fakeService{trace: fakeTrace, problems: web.NewErrorWriter(slog.New(slog.DiscardHandler), fakeStatus)}
 	f.reseed()
 	return f
 }
@@ -222,7 +224,7 @@ func (f *fakeService) route(w http.ResponseWriter, r *http.Request) error {
 }
 
 // pathID reads the {id} segment of r's path and parses it as a UUID, the
-// check sdk.PathID makes, with its wording.
+// check web.PathUUID makes, with its wording.
 func pathID(r *http.Request) (string, error) {
 	raw := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, organization.Organizations+"/"), "/transfer")
 	if _, err := uuid.Parse(raw); err != nil {
@@ -276,7 +278,7 @@ func (f *fakeService) guard(id string, version int64) (*organization.Organizatio
 // list parses the query as the handler does and pages the rows by it. The
 // filters are not applied: no test reads the queried list's items.
 func (f *fakeService) list(w http.ResponseWriter, r *http.Request) error {
-	q, err := web.ParseQuery(r.URL.Query(), web.Limits{DefaultSize: organization.DefaultPageSize, MaxSize: fakeMaxPageSize})
+	q, err := web.ParseQuery(r.URL.Query(), web.Limits{DefaultSize: input.DefaultPageSize, MaxSize: fakeMaxPageSize})
 	if err != nil {
 		return err
 	}
@@ -286,7 +288,7 @@ func (f *fakeService) list(w http.ResponseWriter, r *http.Request) error {
 	}
 	start := min((q.Page-1)*q.Size, len(items))
 	end := min(start+q.Size, len(items))
-	writeJSON(w, http.StatusOK, web.NewPage(items[start:end], q, web.Paging{Total: len(f.rows), More: end < len(items)}))
+	writeJSON(w, http.StatusOK, web.NewPage(items[start:end], q, web.Paging{Total: new(len(f.rows)), More: end < len(items)}))
 	return nil
 }
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/standards-lab/blobfs"
 	bfdata "github.com/standards-lab/blobfs/data"
+	"github.com/standards-lab/blobfs/data/datatest"
 	"github.com/standards-lab/sqlate/sqltest"
 
 	"github.com/standards-lab/go-web-service/data"
@@ -85,16 +86,14 @@ func (g *gate) acquisitions() int {
 var sweepOpts = []bfdata.SweepOption{bfdata.Batch(1), bfdata.StaleOlderThan(time.Hour)}
 
 // noRoots scripts a read of the deleting branches' roots that finds none.
-func noRoots() sqltest.Response {
-	return sqltest.Response{Columns: []string{"id", "parent_id", "name", "status", "version", "created_at", "updated_at"}}
-}
+func noRoots() sqltest.Response { return datatest.DirectoryRows() }
 
 // stale is a deleting file row past the stale age, one per id.
 func stale(id string) sqltest.Response {
 	f := file(blobfs.StatusDeleting, 3)
 	f.ID, f.Key = id, id+"/report.txt"
 	f.UpdatedAt = f.UpdatedAt.Add(-2 * time.Hour)
-	return fileRows(f)
+	return datatest.FileRows(f)
 }
 
 const (
@@ -112,11 +111,11 @@ func morePass(id, next string) []sqltest.Response {
 // lastPass scripts a pass that reclaims the stale row with id and finds
 // nothing beyond it: Stale 1, no More.
 func lastPass(id string) []sqltest.Response {
-	return []sqltest.Response{noRoots(), stale(id), exec(1), noRoots(), fileRows()}
+	return []sqltest.Response{noRoots(), stale(id), exec(1), noRoots(), datatest.FileRows()}
 }
 
 // idlePass scripts a pass with nothing to do.
-func idlePass() []sqltest.Response { return []sqltest.Response{noRoots(), fileRows()} }
+func idlePass() []sqltest.Response { return []sqltest.Response{noRoots(), datatest.FileRows()} }
 
 var (
 	moreOps = []sqltest.Op{q, q, x, q, q}
@@ -182,7 +181,7 @@ func TestSweepWorker_RefusalsAreLoggedNotFailed(t *testing.T) {
 		// third beyond the batch.
 		noRoots(), stale(stale1), refused, stale(stale2), exec(1), noRoots(), stale(stale3),
 		// A pass without: the third row refused, nothing beyond it.
-		noRoots(), stale(stale3), refused, fileRows(),
+		noRoots(), stale(stale3), refused, datatest.FileRows(),
 	)
 	logger, out := logged()
 	g := &gate{}

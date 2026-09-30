@@ -129,13 +129,7 @@ func (s *Service) Ready(t testing.TB) *Service {
 // whole configuration. The database address is the override when given,
 // else the parent's APP_DATABASE_* variables, else the compose defaults.
 func environment(opts Options, addr, dbHost, dbPort string) []string {
-	host, port := defaultDatabaseHost, defaultDatabasePort
-	if v := os.Getenv("APP_DATABASE_HOST"); v != "" {
-		host = v
-	}
-	if v := os.Getenv("APP_DATABASE_PORT"); v != "" {
-		port = v
-	}
+	host, port := databaseHostPort()
 	if opts.Database != "" {
 		host, port = dbHost, dbPort
 	}
@@ -165,6 +159,9 @@ func environment(opts Options, addr, dbHost, dbPort string) []string {
 		"APP_STORAGE_ENDPOINT=" + storageEndpoint.String(),
 		"APP_STORAGE_ACCOUNT=" + getenv("APP_STORAGE_ACCOUNT", defaultStorageAccount),
 		"APP_STORAGE_KEY=" + getenv("APP_STORAGE_KEY", defaultStorageKey),
+		// One retry, as the local overlay sets, so a severed store's refusal
+		// answers in about a second rather than the SDK's backoff.
+		"APP_STORAGE_OPTIONS_MAX_RETRIES=1",
 		"APP_OBSERVABILITY_ENDPOINT=" + endpoint,
 		"APP_ADMIN_SEED=" + opts.Seed,
 		"APP_RATE_LIMIT_REQUESTS=" + defaultRateLimitRequests,
@@ -181,6 +178,16 @@ func (s *Service) URL() string { return "http://" + s.addr }
 // Client returns the client bound to the service, one per process so its
 // connection is reused across calls.
 func (s *Service) Client() *webtest.Client { return s.client }
+
+// databaseHostPort is the compose database's host and port, the parent's
+// APP_DATABASE_HOST and APP_DATABASE_PORT or the defaults.
+func databaseHostPort() (host, port string) {
+	return getenv("APP_DATABASE_HOST", defaultDatabaseHost), getenv("APP_DATABASE_PORT", defaultDatabasePort)
+}
+
+// DatabaseAddr is the compose database's address, host:port, the target a
+// test forwards the service's database through.
+func DatabaseAddr() string { return net.JoinHostPort(databaseHostPort()) }
 
 // storageURL is the compose store's endpoint, the parent's
 // APP_STORAGE_ENDPOINT or the default. A value that does not parse is the

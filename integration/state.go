@@ -57,11 +57,12 @@ func (s SchemaStatus) Set(name string) SetStatus {
 	return SetStatus{}
 }
 
-// Seeded is the seed operation's result: the rows each table gained.
+// Seeded is the seed operation's result: what it stored by seed
+// contribution, the rows it inserted or the files it wrote.
 type Seeded map[string]int
 
 // Transition is the state operation's result: the state reached, the
-// schema after it, and the rows its set inserted.
+// schema after it, and what its seed stored.
 type Transition struct {
 	State  string       `json:"state"`
 	Schema SchemaStatus `json:"schema"`

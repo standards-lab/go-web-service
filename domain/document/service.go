@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/standards-lab/go-web-sdk"
+	"github.com/standards-lab/sqlate/query"
 
 	"github.com/standards-lab/go-web-service/data"
 )
@@ -37,13 +38,14 @@ func New(db *data.Database, st *data.Storage, sweep Sweeper) *Service {
 	return &Service{store: newStore(db, st), sweep: sweep}
 }
 
-// Verify prepares every statement against the migrated schema; the
-// composition root runs it at startup, once the schema is corrected.
-func (s *Service) Verify(ctx context.Context) error { return s.store.Verify(ctx) }
+// Verifier returns the layer's store, which the composition root hands the
+// seeder to verify the store's statements, the seed's among them, against
+// the live schema.
+func (s *Service) Verifier() query.Verifier { return s.store }
 
 // Seed is the layer's seed contribution, a file seed, to the named states
 // the data package's seeder applies: the document hierarchies a state
-// carries, each file written by the shared write protocol once the seed's
+// carries, each file written by blobfs's two-phase write once the seed's
 // rows commit. The composition root hands it to the seeder after the
 // organizations' contributions.
 func (s *Service) Seed() data.FileSeed { return seed{store: s.store} }

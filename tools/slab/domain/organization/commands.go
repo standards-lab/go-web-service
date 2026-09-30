@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -60,35 +58,15 @@ func Commands(newClient func() *Client, out *output.Output) *cobra.Command {
 // (code[like]=%o%) is the caller's to spell. --cursor is the next token a
 // previous page printed, sent with the same sort and filters.
 func (d deps) listCommand() *cobra.Command {
-	var (
-		page, size   int
-		sort, cursor string
-		filters      []string
-	)
+	var read input.ReadFlags
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List organizations, one page at a time",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			var query [][2]string
-			if cmd.Flags().Changed("page") {
-				query = append(query, [2]string{"page", strconv.Itoa(page)})
-			}
-			if cmd.Flags().Changed("cursor") {
-				query = append(query, [2]string{"cursor", cursor})
-			}
-			if cmd.Flags().Changed("size") {
-				query = append(query, [2]string{"size", strconv.Itoa(size)})
-			}
-			if cmd.Flags().Changed("sort") {
-				query = append(query, [2]string{"sort", sort})
-			}
-			for _, f := range filters {
-				name, value, _ := strings.Cut(f, "=")
-				if name == "" {
-					return fmt.Errorf("--filter %q: want field=value, or field[op]=value", f)
-				}
-				query = append(query, [2]string{name, value})
+			query, err := read.Query(cmd)
+			if err != nil {
+				return err
 			}
 			res, err := d.newClient().List(cmd.Context(), query...)
 			if err != nil {
@@ -101,12 +79,7 @@ func (d deps) listCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().IntVar(&page, "page", 0, "the 1-based page to return; the first when unset")
-	cmd.Flags().StringVar(&cursor, "cursor", "", "continue after the page whose next token this is, in place of --page")
-	cmd.Flags().IntVar(&size, "size", 0, fmt.Sprintf("the page size, up to the configured maximum; the service's default (%d) when unset", DefaultPageSize))
-	cmd.Flags().StringVar(&sort, "sort", "", "comma-separated field names, each with a leading - for descending")
-	cmd.Flags().StringArrayVar(&filters, "filter", nil, "a filter, field=value or field[op]=value; repeatable")
-	cmd.MarkFlagsMutuallyExclusive("page", "cursor")
+	read.Bind(cmd)
 	return cmd
 }
 

@@ -3,10 +3,17 @@
 package integration_test
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/standards-lab/go-core/process/processtest"
+	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-web-sdk/webtest"
 
 	"github.com/standards-lab/go-web-service/integration"
@@ -30,9 +37,10 @@ type directory struct {
 }
 
 type file struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Status string `json:"status"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Version int64  `json:"version"`
 }
 
 type directoryPage struct {
@@ -45,6 +53,35 @@ type filePage struct {
 	Total *int   `json:"total"`
 }
 
+// entryPage is either listing's page as the paging case reads it: each
+// entry's name and the envelope's paging fields.
+type entryPage struct {
+	Items []struct {
+		Name string `json:"name"`
+	} `json:"items"`
+	Page  int    `json:"page"`
+	Total *int   `json:"total"`
+	More  bool   `json:"more"`
+	Next  string `json:"next"`
+}
+
+// names is the page's entries' names in order.
+func (p entryPage) names() []string {
+	out := make([]string, len(p.Items))
+	for i, e := range p.Items {
+		out[i] = e.Name
+	}
+	return out
+}
+
+// total is the page's counted total, or -1 when the page omitted it.
+func (p entryPage) total() int {
+	if p.Total == nil {
+		return -1
+	}
+	return *p.Total
+}
+
 // The document API's contract, the deleting state included. The object
 // store is relayed through a forwarder, so a case that asserts a marked
 // branch holds it: with the store severed, the sweep the delete nudges is
@@ -54,9 +91,21 @@ func TestDocument(t *testing.T) {
 	f := processtest.Forward(t, integration.StorageAddr())
 	s := integration.Start(t, integration.Options{Seed: integration.Default, Storage: f.Addr()})
 	c := s.Client()
-	hold := func(t *testing.T) {
+	objects := integration.Objects(t)
+	// hold severs the store for the rest of the case, or until the case
+	// calls the restore it returns.
+	hold := func(t *testing.T) (restore func()) {
 		f.Sever()
-		t.Cleanup(func() { f.Restore(t) })
+		restored := false
+		t.Cleanup(func() {
+			if !restored {
+				f.Restore(t)
+			}
+		})
+		return func() {
+			f.Restore(t)
+			restored = true
+		}
 	}
 
 	run := func(name string, fn func(t *testing.T, docs string)) {
@@ -80,6 +129,69 @@ func TestDocument(t *testing.T) {
 		if len(p.Items) != 1 || p.Items[0].Status != "active" {
 			t.Errorf("root's directories = %+v; want reports, active", p.Items)
 		}
+	})
+
+	// Both listings page by number and by cursor: each walk, in pages of
+	// two, reads every entry once in the default sort, by name, so the
+	// pages are disjoint and together complete. A cursor continues only
+	// the listing, sort, and paging mode that minted it.
+	run("the listings page by number and by cursor", func(t *testing.T, docs string) {
+		files := []string{"f0.txt", "f1.txt", "f2.txt", "f3.txt", "f4.txt"}
+		dirs := []string{"d0", "d1", "d2"}
+		for _, name := range files {
+			c.Post(t, docs+"/directories/root/files?name="+name, webtest.Raw{ContentType: "text/plain", Body: []byte(name)}).Expect(t, http.StatusCreated)
+		}
+		for _, name := range dirs {
+			c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": name}).Expect(t, http.StatusCreated)
+		}
+
+		cursors := map[string]string{}
+		for listing, want := range map[string][]string{docs + "/directories/root/files": files, docs + "/directories/root/directories": dirs} {
+			var numbered []string
+			for n := 1; ; n++ {
+				p := webtest.Decode[entryPage](t, c.Get(t, fmt.Sprintf("%s?size=2&page=%d", listing, n)), http.StatusOK)
+				if p.Page != n || p.total() != len(want) || len(p.Items) > 2 {
+					t.Errorf("%s page %d = %+v; want page %d of %d entries, at most two", listing, n, p, n, len(want))
+				}
+				numbered = append(numbered, p.names()...)
+				if !p.More {
+					break
+				}
+				if n > len(want) {
+					t.Fatalf("%s reports more past page %d", listing, n)
+				}
+			}
+
+			p := webtest.Decode[entryPage](t, c.Get(t, listing+"?size=2"), http.StatusOK)
+			first := p
+			walked := p.names()
+			for p.More {
+				if p.Next == "" {
+					t.Fatalf("%s: a page with more carried no next: %+v", listing, p)
+				}
+				p = webtest.Decode[entryPage](t, c.Get(t, listing+"?size=2&cursor="+url.QueryEscape(p.Next)), http.StatusOK)
+				if p.Page != 0 || p.total() != len(want) {
+					t.Errorf("%s: a continued page = %+v; want no page number and the total", listing, p)
+				}
+				walked = append(walked, p.names()...)
+			}
+			if !equal(numbered, want) || !equal(walked, want) {
+				t.Errorf("%s by number = %v, by cursor = %v; want %v", listing, numbered, walked, want)
+			}
+			cursors[listing] = first.Next
+
+			// A page past the last is empty, not an error.
+			if p := webtest.Decode[entryPage](t, c.Get(t, listing+"?size=2&page=9"), http.StatusOK); len(p.Items) != 0 || p.More {
+				t.Errorf("%s page 9 = %+v; want an empty page", listing, p)
+			}
+			// A cursor with a page, one sent under another sort, and one
+			// that is not a cursor at all are each the request's error.
+			_ = c.Get(t, listing+"?page=2&cursor="+url.QueryEscape(first.Next)).Problem(t, http.StatusBadRequest)
+			_ = c.Get(t, listing+"?size=2&sort=-name&cursor="+url.QueryEscape(first.Next)).Problem(t, http.StatusBadRequest)
+			_ = c.Get(t, listing+"?cursor=not-a-cursor").Problem(t, http.StatusBadRequest)
+		}
+		// Nor does one listing's cursor continue the other's.
+		_ = c.Get(t, docs+"/directories/root/directories?size=2&cursor="+url.QueryEscape(cursors[docs+"/directories/root/files"])).Problem(t, http.StatusBadRequest)
 	})
 
 	run("the deletes guard on If-Match", func(t *testing.T, docs string) {
@@ -204,6 +316,38 @@ func TestDocument(t *testing.T) {
 		conflict(t, c.Post(t, docs+"/files/"+q2.ID+"/move", map[string]string{"directory_id": "root", "name": "q2.txt"}, webtest.IfMatch(q2.Version+1)), "the directory is being deleted")
 	})
 
+	// A file delete the severed store refuses has begun: the row is
+	// deleting, a version on, and hidden from its directory's listing,
+	// and the object is still stored. Once the store is back, the retry
+	// at the version the client read is the same delete, which finishes:
+	// the file reads 404 and its object is gone.
+	run("a refused file delete is left deleting, and its retry finishes it", func(t *testing.T, docs string) {
+		q3 := webtest.Decode[identity](t, c.Post(t, docs+"/directories/root/files?name=q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}), http.StatusCreated)
+		key := q3.ID + "/q3.txt"
+		restore := hold(t)
+
+		_ = c.Delete(t, docs+"/files/"+q3.ID, webtest.IfMatch(q3.Version)).Problem(t, http.StatusServiceUnavailable)
+		if f := webtest.Decode[file](t, c.Get(t, docs+"/files/"+q3.ID), http.StatusOK); f.Status != "deleting" || f.Version != q3.Version+1 {
+			t.Fatalf("q3 after the refused delete = %+v; want it deleting, a version on", f)
+		}
+		if p := webtest.Decode[filePage](t, c.Get(t, docs+"/directories/root/files"), http.StatusOK); len(p.Items) != 0 {
+			t.Errorf("root's files = %+v; want the deleting file hidden", p.Items)
+		}
+		_ = c.Get(t, docs+"/files/"+q3.ID+"/content").Problem(t, http.StatusNotFound)
+
+		restore()
+		if _, err := objects.Stat(context.Background(), key); err != nil {
+			t.Fatalf("stat %s after the refused delete: %v; want the object still stored", key, err)
+		}
+		c.Delete(t, docs+"/files/"+q3.ID, webtest.IfMatch(q3.Version)).Expect(t, http.StatusNoContent)
+		_ = c.Get(t, docs+"/files/"+q3.ID).Problem(t, http.StatusNotFound)
+		if _, err := objects.Stat(context.Background(), key); !errors.Is(err, storage.ErrNotFound) {
+			t.Errorf("stat %s after the retried delete = %v; want not found", key, err)
+		}
+		// The name is free again.
+		c.Post(t, docs+"/directories/root/files?name=q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}).Expect(t, http.StatusCreated)
+	})
+
 	run("an upload is a POST, answered with its metadata's Location", func(t *testing.T, docs string) {
 		r := c.Post(t, docs+"/directories/root/files?name=q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}).Expect(t, http.StatusCreated)
 		created := webtest.Decode[identity](t, r, http.StatusCreated)
@@ -225,6 +369,11 @@ func TestDocument(t *testing.T) {
 		// A real organization without a root still lists an empty page.
 		if p := webtest.Decode[filePage](t, c.Get(t, docs+"/directories/root/files"), http.StatusOK); len(p.Items) != 0 || p.Total == nil || *p.Total != 0 {
 			t.Errorf("the rootless organization's files = %+v; want an empty page", p)
+		}
+		// Its listing refuses what a real root's refuses.
+		for _, bad := range []string{"?sort=nope", "?nope=1", "?cursor=past"} {
+			_ = c.Get(t, docs+"/directories/root/files"+bad).Problem(t, http.StatusBadRequest)
+			_ = c.Get(t, docs+"/directories/root/directories"+bad).Problem(t, http.StatusBadRequest)
 		}
 	})
 
@@ -371,4 +520,83 @@ func markBranch(t *testing.T, c *webtest.Client, docs, id string) string {
 		t.Fatalf("202 Location %q, body %q; want the directory's read and no body", loc, r.Body)
 	}
 	return loc
+}
+
+// A document upload the severed store refuses is abandoned, and its
+// abandon is refused too: the put fails, then so does the abandon's
+// object delete, so the pending row is left deleting, not removed. The
+// deleting row is hidden from the listing, as every listing hides one,
+// yet it still holds its name, so the same upload answers 409, until the
+// sweep's stale reclaim finishes the row once the store is back. The
+// service runs a short interval and a one-second stale age, so the
+// reclaim follows within the wait; the retry then stores the file.
+func TestDocumentRefusedUpload(t *testing.T) {
+	f := processtest.Forward(t, integration.StorageAddr())
+	s := integration.Start(t, integration.Options{
+		Seed:    integration.Default,
+		Storage: f.Addr(),
+		Env:     []string{"APP_SWEEP_INTERVAL=200ms", "APP_SWEEP_STALE_AGE=1s"},
+	})
+	c := s.Client()
+	integration.Reset(t, c, integration.Default)
+	docs := "/api/documents/" + tree(t, c)[docsOrg].ID
+	q3 := webtest.Raw{ContentType: "text/plain", Body: []byte("report")}
+	c.Post(t, docs+"/directories/root/files?name=kept.txt", q3).Expect(t, http.StatusCreated)
+	objects := integration.Objects(t)
+	before, err := objects.List(context.Background(), storage.ListOptions{})
+	if err != nil {
+		t.Fatalf("list the store: %v", err)
+	}
+
+	f.Sever()
+	restored := false
+	t.Cleanup(func() {
+		if !restored {
+			f.Restore(t)
+		}
+	})
+	_ = slowPost(t, s, docs+"/directories/root/files?name=q3.txt", q3).Problem(t, http.StatusServiceUnavailable)
+	if p := webtest.Decode[filePage](t, c.Get(t, docs+"/directories/root/files"), http.StatusOK); len(p.Items) != 1 || p.Items[0].Name != "kept.txt" {
+		t.Errorf("root's files after the refused upload = %+v; want kept.txt alone", p.Items)
+	}
+	if after, err := objects.List(context.Background(), storage.ListOptions{}); err != nil || len(after.Objects) != len(before.Objects) {
+		t.Errorf("the store after the refused upload holds %d objects (%v); want the %d before it", len(after.Objects), err, len(before.Objects))
+	}
+
+	// The hidden row holds the name, and blobfs refuses it as the deleting
+	// row it is, not as a taken name the client cannot list: the retry is
+	// refused in the begin's transaction, before any put, so it answers at
+	// once.
+	conflict(t, c.Post(t, docs+"/directories/root/files?name=q3.txt", q3), "the file is being deleted")
+
+	f.Restore(t)
+	restored = true
+	s.Await(t, "the abandoned upload's row reclaimed", func() bool { return reclaimRecord.MatchString(s.Output()) })
+	created := webtest.Decode[identity](t, c.Post(t, docs+"/directories/root/files?name=q3.txt", q3), http.StatusCreated)
+	if r := c.Get(t, docs+"/files/"+created.ID+"/content").Expect(t, http.StatusOK); string(r.Body) != "report" {
+		t.Errorf("the retried upload's download = %q", r.Body)
+	}
+}
+
+// slowPost uploads body to path on a client of its own: with the store
+// severed, the put fails once the provider's retries are spent, and the
+// abandon's object delete after it, which together outlast the harness
+// client's failsafe.
+func slowPost(t *testing.T, s *integration.Service, path string, body webtest.Raw) *webtest.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, s.URL()+path, bytes.NewReader(body.Body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", body.ContentType)
+	resp, err := (&http.Client{Timeout: 4 * processtest.Failsafe}).Do(req)
+	if err != nil {
+		t.Fatalf("POST %s: %v", path, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("POST %s: read body: %v", path, err)
+	}
+	return &webtest.Response{Status: resp.StatusCode, Header: resp.Header, Body: raw}
 }

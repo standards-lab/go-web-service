@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -64,9 +65,9 @@ func gatedModule(t *testing.T, gate database.SchemaGate, seed string, responses 
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := admin.New(pdb, sdb, m, catalog, admin.Options{Seed: seed, Seeder: data.NewSeeder(d, organizations{}, files{"logos"}, files{"documents"}), Registry: d})
+	svc := admin.New(pdb, sdb, m, catalog, admin.Options{Seed: seed, Seeder: data.NewSeeder(d, nil, organizations{}, files{"logos"}, files{"documents"}), Registry: d})
 	r := web.NewRouter()
-	r.Mount(web.NewModule(database.Routes(svc, gate)))
+	r.Mount(web.NewModule(database.Routes(svc, gate, slog.New(slog.DiscardHandler))))
 	return r, rec
 }
 
@@ -170,8 +171,7 @@ func TestSeed_IsForbiddenWithNoSet(t *testing.T) {
 // statement, since the domain's own tests prove its seed.
 type organizations struct{}
 
-func (organizations) Key() string                  { return "organizations" }
-func (organizations) Verify(context.Context) error { return nil }
+func (organizations) Key() string { return "organizations" }
 func (organizations) Apply(_ context.Context, _ *sqlate.Tx, raw json.RawMessage) (int, error) {
 	rows, err := data.SeedRows[json.RawMessage](raw)
 	return len(rows), err
@@ -181,8 +181,7 @@ func (organizations) Apply(_ context.Context, _ *sqlate.Tx, raw json.RawMessage)
 // it reads the state's rows and reports each as stored, writing nothing.
 type files struct{ key string }
 
-func (f files) Key() string                { return f.key }
-func (files) Verify(context.Context) error { return nil }
+func (f files) Key() string { return f.key }
 func (files) Write(_ context.Context, raw json.RawMessage, _ fs.FS) (int, error) {
 	rows, err := data.SeedRows[json.RawMessage](raw)
 	return len(rows), err
@@ -209,23 +208,24 @@ func TestVerbs_RejectBadArgumentsBeforeIO(t *testing.T) {
 	cases := map[string]struct {
 		path, body, detail string
 	}{
-		"steps: zero":          {"/database/schema/steps", `{"set":"app","steps":0}`, "non-zero"},
-		"steps: unknown key":   {"/database/schema/steps", `{"set":"app","step":1}`, "unknown field"},
-		"steps: empty body":    {"/database/schema/steps", " ", "empty body"},
-		"steps: no set":        {"/database/schema/steps", `{"steps":1}`, "set"},
-		"steps: unknown set":   {"/database/schema/steps", `{"set":"nope","steps":1}`, "nope"},
-		"down: negative":       {"/database/schema/down", `{"set":"app","steps":-1}`, "positive"},
-		"down: missing body":   {"/database/schema/down", "", "empty body"},
-		"down: unknown set":    {"/database/schema/down", `{"set":"nope"}`, "nope"},
-		"force: negative":      {"/database/schema/force", `{"set":"app","version":-1}`, "negative"},
-		"force: missing body":  {"/database/schema/force", "", "empty body"},
-		"force: unknown set":   {"/database/schema/force", `{"set":"nope","version":1}`, "nope"},
-		"seed: unknown state":  {"/database/seed", `{"state":"nope"}`, `unknown state: "nope"`},
-		"state: unknown":       {"/database/state", `{"state":"nope","confirm":true}`, `unknown state: "nope"`},
-		"state: unconfirmed":   {"/database/state", `{"state":"default"}`, `"confirm": true`},
-		"state: confirm false": {"/database/state", `{"state":"default","confirm":false}`, `"confirm": true`},
-		"state: missing body":  {"/database/state", "", "empty body"},
-		"state: unknown key":   {"/database/state", `{"name":"empty","confirm":true}`, "unknown field"},
+		"steps: zero":           {"/database/schema/steps", `{"set":"app","steps":0}`, "non-zero"},
+		"steps: unknown key":    {"/database/schema/steps", `{"set":"app","step":1}`, "unknown field"},
+		"steps: empty body":     {"/database/schema/steps", " ", "empty body"},
+		"steps: no set":         {"/database/schema/steps", `{"steps":1}`, "set"},
+		"steps: unknown set":    {"/database/schema/steps", `{"set":"nope","steps":1}`, "nope"},
+		"down: negative":        {"/database/schema/down", `{"set":"app","steps":-1}`, "positive"},
+		"down: missing body":    {"/database/schema/down", "", "empty body"},
+		"down: unknown set":     {"/database/schema/down", `{"set":"nope"}`, "nope"},
+		"force: negative":       {"/database/schema/force", `{"set":"app","version":-1}`, "is not in set"},
+		"force: not in the set": {"/database/schema/force", `{"set":"app","version":999}`, "version 999 is not in set"},
+		"force: missing body":   {"/database/schema/force", "", "empty body"},
+		"force: unknown set":    {"/database/schema/force", `{"set":"nope","version":1}`, "nope"},
+		"seed: unknown state":   {"/database/seed", `{"state":"nope"}`, `unknown state: "nope"`},
+		"state: unknown":        {"/database/state", `{"state":"nope","confirm":true}`, `unknown state: "nope"`},
+		"state: unconfirmed":    {"/database/state", `{"state":"default"}`, `"confirm": true`},
+		"state: confirm false":  {"/database/state", `{"state":"default","confirm":false}`, `"confirm": true`},
+		"state: missing body":   {"/database/state", "", "empty body"},
+		"state: unknown key":    {"/database/state", `{"name":"empty","confirm":true}`, "unknown field"},
 	}
 	h, rec := module(t, "default")
 	for name, c := range cases {

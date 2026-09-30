@@ -9,16 +9,13 @@ import (
 	"time"
 )
 
-// The reactor tenant, bound for go-core as its own package beside
-// lifecycle: the spike-messaging reactor (Source, Func, New with Grace,
-// Start, Shutdown, Ready, Err, and Every), staged here with two additions,
-// the Wake source and the drain signal, Draining. A reactor joins one
-// source of occurrences to one function for the process lifetime. It is a
-// lifecycle component with the Start, Shutdown, and Ready methods other
-// infrastructure exposes, plus Err for a failure while running; it knows
-// nothing of the coordinator, and the composition root registers it with
-// lifecycle.Coordinator.Add at the stage it chooses and passes its Err to
-// Coordinator.Monitor.
+// The reactor, bound for go-core as its own package beside lifecycle,
+// joins one source of occurrences to one function for the process
+// lifetime. It is a lifecycle component with the Start, Shutdown, and Ready
+// methods other infrastructure exposes, plus Err for a failure while
+// running. It knows nothing of the coordinator: the composition root
+// registers it with lifecycle.Coordinator.Add at the stage it chooses and
+// passes its Err to Coordinator.Monitor.
 //
 // Start detaches the reactor from the context it is given, so cancelling
 // the run context at a signal does not interrupt handling before the

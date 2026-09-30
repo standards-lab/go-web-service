@@ -3,6 +3,7 @@ package organization
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -21,31 +22,26 @@ const maxCommandBody = 1 << 16
 const maxLogoBody = 1 << 20
 
 // handler binds the layer's endpoints to its service under the injected
-// paging policy. Every handler returns its error; the group's writer maps
-// it to a problem.
+// paging policy and logo transfer. Every handler returns its error; the
+// group's writer maps it to a problem.
 type handler struct {
 	service *Service
 	limits  web.Limits
+	logos   web.Transfer
 }
 
-// Routes builds the layer's route group, rooted at /organizations. The
-// reads: the paginated list, the id read, and the path read, a lookup that
-// takes the path as its query (/lookup?path=/acme/engineering) so no
-// wildcard route overlaps a sub-resource of /{id}. The commands: create
-// (POST), edit (PUT /{id}), transfer (POST /{id}/transfer), and delete
-// (DELETE /{id}); the guarded three take their version precondition from
-// If-Match. The logo is a sub-resource at /{id}/logo: PUT stores the raw
-// body as the active logo, replacing any; GET proxies its bytes,
-// revalidated by ETag; and DELETE retires it. Every rejection is an RFC
-// 9457 problem through the group's error writer: the SDK maps its own
-// request errors, the layer's matcher its own vocabulary, and the data
-// package's matcher the library's. The composition root mounts the group
-// into the API module and supplies limits from the service's reads
-// configuration.
-func Routes(service *Service, limits web.Limits) *web.Group {
-	h := &handler{service: service, limits: limits}
+// Routes builds the layer's route group, /organizations: the list, the
+// read by id, the lookup by path (/lookup?path=/acme/engineering, a query
+// so no wildcard overlaps a sub-resource of /{id}), the four commands, and
+// the logo at /{id}/logo; the README's API section lists them. limits is
+// the list's paging policy; transfer sizes the deadlines of a logo's upload
+// and download from the layer's limit, maxLogoBody; and logger records the
+// cause of every 5xx the group's error writer sends.
+func Routes(service *Service, limits web.Limits, transfer func(limit int64) web.Transfer, logger *slog.Logger) *web.Group {
+	h := &handler{service: service, limits: limits, logos: transfer(maxLogoBody)}
+	ew := web.NewErrorWriter(logger, status, data.Status)
 	g := web.NewGroup("/organizations")
-	g.SetErrorWriter(web.NewErrorWriter(status, data.Status))
+	g.SetErrorWriter(ew)
 	g.HandleErr("GET", "", h.list)
 	g.HandleErr("GET", "/{id}", h.find)
 	g.HandleErr("GET", "/lookup", h.lookup)
@@ -72,7 +68,7 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (h *handler) find(w http.ResponseWriter, r *http.Request) error {
-	id, err := sdk.PathID(r, "id")
+	id, err := web.PathUUID(r, "id")
 	if err != nil {
 		return err
 	}
@@ -136,7 +132,7 @@ func (h *handler) transfer(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (h *handler) delete(w http.ResponseWriter, r *http.Request) error {
-	id, err := sdk.PathID(r, "id")
+	id, err := web.PathUUID(r, "id")
 	if err != nil {
 		return err
 	}
@@ -152,12 +148,15 @@ func (h *handler) delete(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (h *handler) putLogo(w http.ResponseWriter, r *http.Request) error {
-	id, err := sdk.PathID(r, "id")
+	id, err := web.PathUUID(r, "id")
 	if err != nil {
 		return err
 	}
-	upload, err := web.ReadUpload(w, r, maxLogoBody)
+	upload, err := web.ReadUpload(w, r, h.logos.Limit())
 	if err != nil {
+		return err
+	}
+	if err := h.logos.WidenUpload(w, r); err != nil {
 		return err
 	}
 	ident, err := h.service.PutLogo(r.Context(), id, upload)
@@ -172,7 +171,7 @@ func (h *handler) putLogo(w http.ResponseWriter, r *http.Request) error {
 // by ETag on every use, since a replacement changes the logo under the same
 // URL.
 func (h *handler) logo(w http.ResponseWriter, r *http.Request) error {
-	id, err := sdk.PathID(r, "id")
+	id, err := web.PathUUID(r, "id")
 	if err != nil {
 		return err
 	}
@@ -180,12 +179,15 @@ func (h *handler) logo(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if err := h.logos.WidenDownload(w, logo.Object.Size); err != nil {
+		return err
+	}
 	w.Header().Set("Cache-Control", "no-cache")
 	return web.WriteObject(w, r, logo.Object, logo.Open)
 }
 
 func (h *handler) deleteLogo(w http.ResponseWriter, r *http.Request) error {
-	id, err := sdk.PathID(r, "id")
+	id, err := web.PathUUID(r, "id")
 	if err != nil {
 		return err
 	}
@@ -197,16 +199,12 @@ func (h *handler) deleteLogo(w http.ResponseWriter, r *http.Request) error {
 }
 
 // status is the layer's own error vocabulary as one web.ProblemMatcher: a
-// validation rejection or a malformed path id (400) and the cycle (409),
-// which carries data.DetailConflict, as does every conflict data.Status
-// reports without a text of its own. The SDK's request errors map themselves,
-// and the library's vocabulary (directives, the missing row, constraint
-// violations, the stale version, the outage) is data.Status, composed after
-// this one.
+// validation rejection (400) and the cycle (409, data.DetailConflict). The
+// SDK maps its own request errors, a malformed path id among them, and the
+// library's vocabulary is data.Status, composed after this one.
 func status(err error) (web.Problem, bool) {
-	var path *sdk.PathError
 	switch {
-	case errors.Is(err, ErrValidation), errors.As(err, &path):
+	case errors.Is(err, ErrValidation):
 		return web.Problem{Status: http.StatusBadRequest}, true
 	case errors.Is(err, ErrCycle):
 		return data.Conflict(data.DetailConflict), true

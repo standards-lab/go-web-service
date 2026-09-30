@@ -166,9 +166,9 @@ func (s *store) directory(ctx context.Context, organizationID, id string) (Direc
 // listDirectories reads one page of the directory's child directories. An
 // organization without a root lists nothing under the alias.
 func (s *store) listDirectories(ctx context.Context, organizationID, id string, q web.Query) ([]Directory, web.Paging, error) {
-	root, dir, err := s.scope(ctx, s.db, organizationID, id)
+	root, dir, err := s.listScope(ctx, organizationID, id)
 	if err != nil {
-		return rootless[Directory](ctx, s, organizationID, id, q, err)
+		return nil, web.Paging{}, err
 	}
 	items, paging, err := listing(ctx, s.db, s.storage.FS.Directories, dir, q)
 	if err != nil {
@@ -182,9 +182,9 @@ func (s *store) listDirectories(ctx context.Context, organizationID, id string, 
 // available; a file whose delete has begun is hidden, as every listing
 // hides deleting rows.
 func (s *store) listFiles(ctx context.Context, organizationID, id string, q web.Query) ([]File, web.Paging, error) {
-	_, dir, err := s.scope(ctx, s.db, organizationID, id)
+	_, dir, err := s.listScope(ctx, organizationID, id)
 	if err != nil {
-		return rootless[File](ctx, s, organizationID, id, q, err)
+		return nil, web.Paging{}, err
 	}
 	items, paging, err := listing(ctx, s.db, s.storage.FS.Files, dir, q)
 	if err != nil {
@@ -194,26 +194,25 @@ func (s *store) listFiles(ctx context.Context, organizationID, id string, q web.
 	return out, paging, err
 }
 
-// rootless answers a listing's scope failure. An organization without a
-// root yet has an empty hierarchy, so once the organization is read the
-// alias lists as an empty page. A nonexistent organization is the missing
-// row, as every other route answers it, and a specific id is not found. Any
-// other failure is the request's.
-//
-// The empty page reports what an empty root's listing would: a total of 0
-// on the first page, and none on a later page or a cursor's, which only
-// say the read is past the end.
-func rootless[T any](ctx context.Context, s *store, organizationID, id string, q web.Query, err error) ([]T, web.Paging, error) {
+// listScope is scope for a listing. An organization without a root yet
+// has an empty hierarchy, so once the organization is read the alias
+// resolves to an id minted for the read, which no directory has, since no
+// row holds an id not yet minted, and which blobfs lists as an empty
+// directory: the alias runs the listing itself, so it refuses what a
+// real root's listing refuses (a sort, filter, or cursor the read does not
+// accept) and reports the paging an empty root's would. A nonexistent
+// organization is the missing row, as every other route answers it, and a
+// specific id is not found.
+func (s *store) listScope(ctx context.Context, organizationID, id string) (root, dir string, err error) {
+	root, dir, err = s.scope(ctx, s.db, organizationID, id)
 	if id != RootAlias || !errors.Is(err, sql.ErrNoRows) {
-		return nil, web.Paging{}, err
+		return root, dir, err
 	}
 	if err := s.organizationExists(ctx, s.db, organizationID); err != nil {
-		return nil, web.Paging{}, fmt.Errorf("organization %s: %w", organizationID, err)
+		return "", "", fmt.Errorf("organization %s: %w", organizationID, err)
 	}
-	if q.Cursor != "" || q.Page > 1 {
-		return nil, web.Paging{}, nil
-	}
-	return nil, web.Paging{Total: new(0)}, nil
+	none := blobfs.NewID()
+	return none, none, nil
 }
 
 // deleteDirectory removes the empty directory at version in one

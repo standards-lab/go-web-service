@@ -182,7 +182,8 @@ curl 'localhost:8080/api/organizations/lookup?path=/acme/engineering'  # lookup 
 The document domain is mounted under `/api/documents/{org}`, each organization's hierarchy of
 directories and files over blobfs and the object store. A directory id may be `root`, the
 organization's document root, which its first write creates; until then, `root`'s listings
-answer an empty page, and for an organization that does not exist, 404:
+answer an empty page, refusing a bad sort, filter, or cursor with 400 as any listing does, and
+for an organization that does not exist, 404:
 
 | Method | Path | What it does |
 |--------|------|--------------|

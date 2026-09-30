@@ -370,6 +370,11 @@ func TestDocument(t *testing.T) {
 		if p := webtest.Decode[filePage](t, c.Get(t, docs+"/directories/root/files"), http.StatusOK); len(p.Items) != 0 || p.Total == nil || *p.Total != 0 {
 			t.Errorf("the rootless organization's files = %+v; want an empty page", p)
 		}
+		// Its listing refuses what a real root's refuses.
+		for _, bad := range []string{"?sort=nope", "?nope=1", "?cursor=past"} {
+			_ = c.Get(t, docs+"/directories/root/files"+bad).Problem(t, http.StatusBadRequest)
+			_ = c.Get(t, docs+"/directories/root/directories"+bad).Problem(t, http.StatusBadRequest)
+		}
 	})
 
 	run("a download round-trips its bytes and revalidates", func(t *testing.T, docs string) {

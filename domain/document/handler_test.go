@@ -229,12 +229,15 @@ func TestRoutes_OutsideTheRootIs404(t *testing.T) {
 	}
 }
 
-// An organization without a root yet lists an empty page at its alias.
+// An organization without a root yet lists an empty page at its alias,
+// and refuses a sort its listing does not know, as a real root's does.
 func TestListFiles_BeforeTheRootIsAnEmptyPage(t *testing.T) {
-	rec := send(t, module(t, root(), organization()), "GET", base+"/directories/root/files", "", "")
+	h := module(t, root(), organization(), sqltest.WithTotal(datatest.FileRows(), 0), datatest.DirectoryRows())
+	rec := send(t, h, "GET", base+"/directories/root/files", "", "")
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"items":[]`) {
 		t.Fatalf("status %d, body %s", rec.Code, rec.Body)
 	}
+	problem(t, send(t, module(t, root(), organization()), "GET", base+"/directories/root/files?sort=nope", "", ""), 400)
 }
 
 // The alias's listings of an organization that does not exist are 404, as

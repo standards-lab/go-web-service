@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -244,28 +245,47 @@ func TestStore_ADeletingDirectory(t *testing.T) {
 }
 
 // An organization without a root lists nothing under the alias, once the
-// organization is read, and a specific id is not found. The empty page
-// reports what an empty root's would: a total of 0 on the first page, and
-// none on a later page or a cursor's.
+// organization is read, and a specific id is not found. The alias runs
+// the listing itself over an id minted for the read, so its empty page
+// reports what an empty root's would (a total of 0 on the first page, none
+// on a later page) and it refuses what a real root refuses: a sort field
+// the read does not know, or a cursor it did not issue.
 func TestStore_ReadsBeforeTheRoot(t *testing.T) {
 	ctx := context.Background()
-	s, _, _ := serviceOver(t, root(), organization(), root(), organization(), root(), organization(), root())
-	limits := web.Limits{DefaultSize: 20, MaxSize: 100, Cursor: true}
-	q, _ := web.ParseQuery(url.Values{}, limits)
-	items, paging, err := s.ListFiles(ctx, orgID, document.RootAlias, q)
-	if err != nil || len(items) != 0 || (paging.Total == nil || *paging.Total != 0) {
-		t.Fatalf("ListFiles(root) = %v, %+v, %v; want an empty page", items, paging, err)
+	empty := func() []sqltest.Response {
+		return []sqltest.Response{root(), organization(), sqltest.WithTotal(datatest.FileRows(), 0), datatest.DirectoryRows()}
 	}
-	for _, v := range []url.Values{{"page": {"2"}}, {"cursor": {"past"}}} {
-		later, err := web.ParseQuery(v, limits)
+	responses := append(empty(), empty()...)
+	responses = append(responses, root(), organization(), root(), organization(), root())
+	s, rec, _ := serviceOver(t, responses...)
+	limits := web.Limits{DefaultSize: 20, MaxSize: 100, Cursor: true}
+	parse := func(v url.Values) web.Query {
+		t.Helper()
+		q, err := web.ParseQuery(v, limits)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if items, paging, err := s.ListFiles(ctx, orgID, document.RootAlias, later); err != nil || len(items) != 0 || paging.Total != nil {
-			t.Errorf("ListFiles(root, %v) = %v, %+v, %v; want an empty page with no total", v, items, paging, err)
-		}
+		return q
 	}
-	if _, _, err := s.ListFiles(ctx, orgID, dirID, q); err == nil {
+	items, paging, err := s.ListFiles(ctx, orgID, document.RootAlias, parse(url.Values{}))
+	if err != nil || len(items) != 0 || (paging.Total == nil || *paging.Total != 0) {
+		t.Fatalf("ListFiles(root) = %v, %+v, %v; want an empty page", items, paging, err)
+	}
+	if list := rec.Calls()[2]; slices.Contains(list.Args, any(blobfs.RootID)) {
+		t.Errorf("the alias's listing = %q %v; want it anchored on a fresh id, never blobfs's root", list.SQL, list.Args)
+	}
+	items, paging, err = s.ListFiles(ctx, orgID, document.RootAlias, parse(url.Values{"page": {"2"}}))
+	if err != nil || len(items) != 0 || paging.Total != nil {
+		t.Errorf("ListFiles(root, page 2) = %v, %+v, %v; want an empty page with no total", items, paging, err)
+	}
+	if _, _, err := s.ListFiles(ctx, orgID, document.RootAlias, parse(url.Values{"sort": {"nope"}})); !errors.Is(err, query.ErrDirectives) {
+		t.Errorf("ListFiles(root, sort=nope) = %v; want the directives refused", err)
+	}
+	var cursor *query.CursorError
+	if _, _, err := s.ListFiles(ctx, orgID, document.RootAlias, parse(url.Values{"cursor": {"past"}})); !errors.As(err, &cursor) {
+		t.Errorf("ListFiles(root, cursor=past) = %v; want the cursor refused", err)
+	}
+	if _, _, err := s.ListFiles(ctx, orgID, dirID, parse(url.Values{})); err == nil {
 		t.Fatal("ListFiles(id) before the root found a directory")
 	}
 }

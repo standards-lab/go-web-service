@@ -619,11 +619,48 @@ func TestLogoSeed_ALostActivationToAnotherLogoRetiresTheSeededFile(t *testing.T)
 	sameOps(t, rec, q, q, q, begin, q, q, commit, q, begin, x, q, x, sqltest.OpRollback, q, begin, q, commit, x)
 }
 
-// Once the change commits, a purge that fails is logged and the request
-// succeeds: a replacement's replaced file and a delete's file are left
-// deleting for the stale reclaim.
+// A re-read of the active logo that fails after the activation was lost
+// leaves the winner unknown: the seeded file may be the active one, so it
+// is not retired, and the failure is the seed's.
+func TestLogoSeed_AFailedReReadAfterALostActivationRetiresNothing(t *testing.T) {
+	ctx := context.Background()
+	fixtures, _ := seedFixtures(t)
+	lost := errors.New("connection lost")
+	s, rec, fake := serviceOver(t, sqltest.ReturningDialect{},
+		row(), datatest.FileRows(), datatest.DirectoryRows(imagesDirectory()),
+		datatest.FileRows(), datatest.FileRows(file(seededLogoID, blobfs.StatusPending, 1)),
+		datatest.FileRows(file(seededLogoID, blobfs.StatusAvailable, 2)),
+		exec(1), datatest.FileRows(), // the hold, no logo yet
+		sqltest.Response{Err: &sqlate.ConstraintError{Constraint: "ux_organization_image_active", Class: sqlate.ErrUniqueViolation, Err: errors.New("unique")}},
+		sqltest.Response{Err: lost}, // the active logo read again
+	)
+	if n, err := s.LogoSeed().Write(ctx, logoRows, fixtures); !errors.Is(err, lost) || n != 0 {
+		t.Fatalf("Write = %d, %v; want the re-read's failure", n, err)
+	}
+	if _, err := fake.Get(ctx, file(seededLogoID, blobfs.StatusPending, 1).Key, storage.GetOptions{}); err != nil {
+		t.Errorf("the seeded file's object was removed: %v", err)
+	}
+	sameOps(t, rec, q, q, q, begin, q, q, commit, q, begin, x, q, x, sqltest.OpRollback, q)
+}
+
+// requestIDHandler adds the request id its record's context carries, as
+// the service's trace handler adds the trace whose id is the request's, so
+// a test sees whether a record was logged under the request's context.
+type requestIDHandler struct{ slog.Handler }
+
+func (h requestIDHandler) Handle(ctx context.Context, r slog.Record) error {
+	if id, ok := web.RequestIDFrom(ctx); ok {
+		r.AddAttrs(slog.String("request_id", id))
+	}
+	return h.Handler.Handle(ctx, r)
+}
+
+// Once the change commits, a purge that fails is logged, under the
+// request's context, and the request succeeds: a replacement's replaced
+// file and a delete's file are left deleting for the stale reclaim.
 func TestStore_AFailedPurgeAfterTheCommitIsLogged(t *testing.T) {
 	lost := sqltest.Response{Err: errors.New("connection lost")}
+	ctx := web.WithRequestID(context.Background(), "req-purge")
 	cases := map[string]struct {
 		responses []sqltest.Response
 		run       func(*organization.Service) error
@@ -635,27 +672,27 @@ func TestStore_AFailedPurgeAfterTheCommitIsLogged(t *testing.T) {
 			datatest.FileRows(file(oldFileID, blobfs.StatusDeleting, 3)), exec(1),
 			lost, // the replaced file's purge
 		}, func(s *organization.Service) error {
-			_, err := s.PutLogo(context.Background(), validID, logoUpload(t))
+			_, err := s.PutLogo(ctx, validID, logoUpload(t))
 			return err
 		}},
 		"delete": {[]sqltest.Response{
 			datatest.FileRows(file(oldFileID, blobfs.StatusAvailable, 2)), exec(1),
 			datatest.FileRows(file(oldFileID, blobfs.StatusDeleting, 3)),
 			lost, // the purge
-		}, func(s *organization.Service) error { return s.DeleteLogo(context.Background(), validID) }},
+		}, func(s *organization.Service) error { return s.DeleteLogo(ctx, validID) }},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			var logs bytes.Buffer
-			s, rec, _ := serviceLogging(t, slog.New(slog.NewTextHandler(&logs, nil)), sqltest.ReturningDialect{}, c.responses...)
+			s, rec, _ := serviceLogging(t, slog.New(requestIDHandler{slog.NewTextHandler(&logs, nil)}), sqltest.ReturningDialect{}, c.responses...)
 			if err := c.run(s); err != nil {
 				t.Fatalf("= %v; want success once the change committed", err)
 			}
 			if rec.Pending() != 0 {
 				t.Errorf("pending = %d", rec.Pending())
 			}
-			if out := logs.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, oldFileID) {
-				t.Errorf("log = %q; want a warning naming the file", out)
+			if out := logs.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, oldFileID) || !strings.Contains(out, "request_id=req-purge") {
+				t.Errorf("log = %q; want a warning naming the file, under the request's id", out)
 			}
 		})
 	}

@@ -169,7 +169,7 @@ func (s *store) directory(ctx context.Context, organizationID, id string) (Direc
 func (s *store) listDirectories(ctx context.Context, organizationID, id string, q web.Query) ([]Directory, web.Paging, error) {
 	root, dir, err := s.scope(ctx, s.db, organizationID, id)
 	if err != nil {
-		return rootless[Directory](ctx, s, organizationID, id, err)
+		return rootless[Directory](ctx, s, organizationID, id, q, err)
 	}
 	items, paging, err := listing(ctx, s.db, s.storage.FS.Directories, dir, q)
 	if err != nil {
@@ -185,7 +185,7 @@ func (s *store) listDirectories(ctx context.Context, organizationID, id string, 
 func (s *store) listFiles(ctx context.Context, organizationID, id string, q web.Query) ([]File, web.Paging, error) {
 	_, dir, err := s.scope(ctx, s.db, organizationID, id)
 	if err != nil {
-		return rootless[File](ctx, s, organizationID, id, err)
+		return rootless[File](ctx, s, organizationID, id, q, err)
 	}
 	items, paging, err := listing(ctx, s.db, s.storage.FS.Files, dir, q)
 	if err != nil {
@@ -196,16 +196,23 @@ func (s *store) listFiles(ctx context.Context, organizationID, id string, q web.
 }
 
 // rootless answers a listing's scope failure: an organization without a
-// root yet has an empty hierarchy, so the alias lists as an empty, counted
-// page once the organization is read, while a nonexistent organization is
-// the missing row, as every other route answers it, and a specific id is
-// not found. Any other failure is the request's.
-func rootless[T any](ctx context.Context, s *store, organizationID, id string, err error) ([]T, web.Paging, error) {
+// root yet has an empty hierarchy, so the alias lists as an empty page once
+// the organization is read, while a nonexistent organization is the missing
+// row, as every other route answers it, and a specific id is not found. Any
+// other failure is the request's.
+//
+// The empty page reports what an empty root's listing would: a total of 0
+// on the first page, and none on a later page or a cursor's, which only
+// say the read is past the end.
+func rootless[T any](ctx context.Context, s *store, organizationID, id string, q web.Query, err error) ([]T, web.Paging, error) {
 	if id != RootAlias || !errors.Is(err, sql.ErrNoRows) {
 		return nil, web.Paging{}, err
 	}
 	if err := s.organizationExists(ctx, s.db, organizationID); err != nil {
 		return nil, web.Paging{}, fmt.Errorf("organization %s: %w", organizationID, err)
+	}
+	if q.Cursor != "" || q.Page > 1 {
+		return nil, web.Paging{}, nil
 	}
 	return nil, web.Paging{Total: new(0)}, nil
 }

@@ -244,14 +244,26 @@ func TestStore_ADeletingDirectory(t *testing.T) {
 }
 
 // An organization without a root lists nothing under the alias, once the
-// organization is read, and a specific id is not found.
+// organization is read, and a specific id is not found. The empty page
+// reports what an empty root's would: a total of 0 on the first page, and
+// none on a later page or a cursor's.
 func TestStore_ReadsBeforeTheRoot(t *testing.T) {
 	ctx := context.Background()
-	s, _, _ := serviceOver(t, root(), organization(), root())
-	q, _ := web.ParseQuery(url.Values{}, web.Limits{DefaultSize: 20, MaxSize: 100})
+	s, _, _ := serviceOver(t, root(), organization(), root(), organization(), root(), organization(), root())
+	limits := web.Limits{DefaultSize: 20, MaxSize: 100, Cursor: true}
+	q, _ := web.ParseQuery(url.Values{}, limits)
 	items, paging, err := s.ListFiles(ctx, orgID, document.RootAlias, q)
 	if err != nil || len(items) != 0 || (paging.Total == nil || *paging.Total != 0) {
 		t.Fatalf("ListFiles(root) = %v, %+v, %v; want an empty page", items, paging, err)
+	}
+	for _, v := range []url.Values{{"page": {"2"}}, {"cursor": {"past"}}} {
+		later, err := web.ParseQuery(v, limits)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if items, paging, err := s.ListFiles(ctx, orgID, document.RootAlias, later); err != nil || len(items) != 0 || paging.Total != nil {
+			t.Errorf("ListFiles(root, %v) = %v, %+v, %v; want an empty page with no total", v, items, paging, err)
+		}
 	}
 	if _, _, err := s.ListFiles(ctx, orgID, dirID, q); err == nil {
 		t.Fatal("ListFiles(id) before the root found a directory")

@@ -127,10 +127,12 @@ func (s *store) deleteLogo(ctx context.Context, organizationID string) error {
 // purge removes a released logo's object and row, the delete's second
 // phase, after the change that released it committed. A failure is logged,
 // not returned: the change stands, and the stale reclaim finishes the
-// deleting row.
+// deleting row. The record is logged under ctx, which keeps the request's
+// values past its cancellation, so it carries the request's trace, whose
+// id is the request's id.
 func (s *store) purge(ctx context.Context, organizationID string, file blobfs.File) {
 	if err := s.storage.FS.PurgeFile(ctx, s.db.DB, s.storage.Objects, file); err != nil {
-		s.logger.Warn("logo purge failed; the sweep's stale reclaim finishes it",
+		s.logger.WarnContext(ctx, "logo purge failed; the sweep's stale reclaim finishes it",
 			"organization", organizationID, "file", file.ID, "error", err)
 	}
 }
@@ -264,8 +266,15 @@ func (s *store) seedLogo(ctx context.Context, l logoSeedRow, fixtures fs.FS) (bo
 			// Another logo won the activation since the check. A
 			// concurrent seed that activated this same file is done;
 			// any other logo is left alone, as the check's own finding
-			// is, and the file this run stored is retired below.
-			if current, rerr := s.activeLogo(ctx, s.db, org.ID); rerr == nil && current.ID == file.ID {
+			// is, and the file this run stored is retired below. A
+			// re-read that fails finds neither, and the file may be the
+			// active one, so nothing is retired and the failure is the
+			// seed's.
+			current, rerr := s.activeLogo(ctx, s.db, org.ID)
+			if rerr != nil {
+				return false, fmt.Errorf("the active logo, after losing the activation: %w", rerr)
+			}
+			if current.ID == file.ID {
 				return false, nil
 			}
 			err = nil

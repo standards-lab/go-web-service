@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -123,6 +125,47 @@ func TestObjects_ABodyCutShortIsTheRequests(t *testing.T) {
 	}
 	if p, ok := data.Status(err); !ok || p.Status != http.StatusBadRequest {
 		t.Errorf("Status = %+v, %t; want 400", p, ok)
+	}
+}
+
+// A body read that times out is ambiguous: a store that stalled stops
+// reading the body until the server's read deadline passes. The store's
+// own error stands, a 503 for a store that is down, never the request's
+// 400.
+func TestObjects_ABodyReadTimeoutLeavesTheStoresError(t *testing.T) {
+	for name, deadline := range map[string]error{
+		"os deadline":      os.ErrDeadlineExceeded,
+		"net timeout":      &net.OpError{Op: "read", Net: "tcp", Err: os.ErrDeadlineExceeded},
+		"context deadline": context.DeadlineExceeded,
+	} {
+		t.Run(name, func(t *testing.T) {
+			fake := storagetest.NewFake()
+			o := objects(t, fake)
+			fake.SetDown(true)
+
+			body := io.MultiReader(strings.NewReader("pn"), iotest.ErrReader(deadline))
+			_, err := o.PutObject(context.Background(), "1/logo.png", body, "image/png", 3)
+			if errors.Is(err, data.ErrBodyRead) || !errors.Is(err, storage.ErrUnavailable) {
+				t.Fatalf("PutObject = %v, want the store's storage.ErrUnavailable", err)
+			}
+			if p, ok := data.Status(err); !ok || p.Status != http.StatusServiceUnavailable {
+				t.Errorf("Status = %+v, %t; want 503", p, ok)
+			}
+		})
+	}
+}
+
+// A body cut short is the request's even when the store fails too: the
+// client's failure takes precedence over the provider's report of it.
+func TestObjects_ABodyCutShortOutranksTheStoresError(t *testing.T) {
+	fake := storagetest.NewFake()
+	o := objects(t, fake)
+	fake.SetDown(true)
+
+	body := io.MultiReader(strings.NewReader("pn"), iotest.ErrReader(io.ErrUnexpectedEOF))
+	_, err := o.PutObject(context.Background(), "1/logo.png", body, "image/png", 3)
+	if p, ok := data.Status(err); !errors.Is(err, data.ErrBodyRead) || !ok || p.Status != http.StatusBadRequest {
+		t.Errorf("PutObject = %v, Status = %+v; want ErrBodyRead, 400", err, p)
 	}
 }
 

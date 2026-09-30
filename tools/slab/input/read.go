@@ -33,9 +33,10 @@ func (r *ReadFlags) Bind(cmd *cobra.Command) {
 	cmd.MarkFlagsMutuallyExclusive("page", "cursor")
 }
 
-// Query is the read's query pairs from the flags cmd was given, in flag
-// order: an unset flag sends nothing, and a filter without a name is
-// refused before the request fires.
+// Query is the read's query pairs from the flags cmd was given, in a fixed
+// order (page, cursor, size, sort, then each filter as given): an unset
+// flag sends nothing, and a filter without a name is refused before the
+// request fires.
 func (r *ReadFlags) Query(cmd *cobra.Command) ([][2]string, error) {
 	var query [][2]string
 	if cmd.Flags().Changed("page") {

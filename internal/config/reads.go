@@ -39,9 +39,10 @@ func (c *ReadsConfig) Merge(src *ReadsConfig) {
 }
 
 // Finalize applies the defaults, reads the block's environment overrides
-// (APP_READS_DEFAULT_SIZE, APP_READS_MAX_SIZE), and validates: DefaultSize at least 1 and MaxSize
-// at least DefaultSize — the same invariant [web.ParseQuery] panics on,
-// caught here as configuration rather than at the first request.
+// (APP_READS_DEFAULT_SIZE, APP_READS_MAX_SIZE), and validates: DefaultSize
+// at least 1 and MaxSize at least DefaultSize — the same invariant
+// [web.ParseQuery] panics on, caught here as configuration rather than at
+// the first request.
 func (c *ReadsConfig) Finalize(envPrefix string) error {
 	if c.DefaultSize == nil {
 		c.DefaultSize = new(defaultReadsDefaultSize)

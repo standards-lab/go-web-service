@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 
 	"github.com/standards-lab/blobfs"
 	bfdata "github.com/standards-lab/blobfs/data"
@@ -55,6 +56,7 @@ func (s *Storage) Serve(ctx context.Context, file blobfs.File) (Download, error)
 // was stored: a client that sent fewer bytes than it declared, or hung up.
 // Status answers it 400, so a truncated upload is never read as the
 // database's lost connection, which fails with the same io.ErrUnexpectedEOF.
+// A body read that timed out is not one: see [Objects.PutObject].
 var ErrBodyRead = errors.New("the request body could not be read")
 
 // Objects is the adapter between blobfs and a started store, the one place
@@ -81,13 +83,21 @@ func (o *Objects) ValidateKey(key string) error {
 // as blobfs's completion records it. The content type is the one the
 // caller declared, since a store's own report of it may differ once
 // written.
-// A put that failed because body did is ErrBodyRead, wrapping the read's
-// error, whatever the provider reported.
+//
+// A failed put is ErrBodyRead, wrapping the read's error, only when the
+// body failed in a way that points to the client: it ended short of its
+// declared size or broke off (io.ErrUnexpectedEOF, a reset connection, a
+// malformed chunk). That takes precedence over whatever the provider
+// reported, since a provider fails a put whose body fails. A body read
+// that timed out (a deadline, os.ErrDeadlineExceeded or any net.Error
+// whose Timeout is true) is ambiguous: a store that stalled stops reading
+// the body until the server's read deadline passes, so the provider's own
+// error stands, and a stalled store stays the store's fault.
 func (o *Objects) PutObject(ctx context.Context, key string, body io.Reader, contentType string, size int64) (blobfs.Object, error) {
 	r := &bodyReader{r: body}
 	obj, err := o.store.Put(ctx, key, r, storage.PutOptions{ContentType: contentType, Size: size})
 	if err != nil {
-		if r.err != nil {
+		if r.err != nil && !timedOut(r.err) {
 			return blobfs.Object{}, fmt.Errorf("%w: %w", ErrBodyRead, r.err)
 		}
 		return blobfs.Object{}, err
@@ -110,6 +120,14 @@ func (o *Objects) Open(ctx context.Context, key string) (io.ReadCloser, error) {
 // succeeds, on every provider.
 func (o *Objects) DeleteObject(ctx context.Context, key string) error {
 	return o.store.Delete(ctx, key)
+}
+
+// timedOut reports whether err is a deadline passing rather than a
+// failure of its own: os.ErrDeadlineExceeded and context.DeadlineExceeded
+// both report Timeout, as a net.Error.
+func timedOut(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }
 
 // bodyReader records the first error its reader returns other than

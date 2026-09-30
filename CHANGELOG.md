@@ -127,7 +127,7 @@ accumulate under [Unreleased] until the first cut.
   - A malformed path id is go-web-sdk's `PathUUID` refusal (`sdk.PathID`, promoted), and a
     handler's panic answers a logged 500 through `middleware.Recoverer`.
   - A listing omits `total` only when it did not count; a document root's alias before its first
-    write lists a counted empty page.
+    write lists an empty page, counted on the first page as an empty root's is.
   - A download whose object fails to open answers `no-store`, with none of the file's headers.
   - `POST /admin/database/state` with an empty state resets to the configured seed.
   - Every configuration file decodes strictly: an unknown key fails the load.
@@ -137,8 +137,9 @@ accumulate under [Unreleased] until the first cut.
   at warn; the stale reclaim finishes the file. A logo seed that loses its activation to another
   logo leaves that logo and retires its own file, with no error.
 - An upload whose body fails is 400, no longer the 503 of a lost database connection.
-- Storage options: `try_timeout` (`60s`) bounds each object operation's try; `max_retries: 1`
-  moves from `config.json` to the `local` overlay and the integration harness.
+- Storage options: `try_timeout` (`15m`, set with `server.write_timeout`, since a download's
+  body is read within one try) bounds each object operation's try; `max_retries: 1` moves from
+  `config.json` to the `local` overlay and the integration harness.
 - A directory read and an empty directory's delete run their scope check in their own
   transaction; the logo's organization check is a key lookup.
 - CI runs slab's vet, `go mod tidy -diff`, tests, and golangci-lint.

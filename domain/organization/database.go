@@ -163,9 +163,6 @@ var _ data.Seed = seed{}
 // Key names the organizations in a state file and in the seed's counts.
 func (seed) Key() string { return "organizations" }
 
-// Verifiers is the domain's store, whose statements include the seed's.
-func (s seed) Verifiers() []query.Verifier { return []query.Verifier{s.store} }
-
 // Apply inserts the tree in file order, each parent before its children,
 // resolving the file's parent codes to ids as it goes, and returns how
 // many rows it inserted.

@@ -13,7 +13,6 @@ import (
 	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
-	"github.com/standards-lab/sqlate/query"
 
 	"github.com/standards-lab/go-web-service/data"
 )
@@ -359,12 +358,6 @@ var _ data.FileSeed = seed{}
 
 // Key names the hierarchies in a state file and in the seed's counts.
 func (seed) Key() string { return "documents" }
-
-// Verifiers are the layer's store and blobfs's, which the tree's writes
-// run.
-func (s seed) Verifiers() []query.Verifier {
-	return []query.Verifier{s.store, s.store.storage.FS}
-}
 
 // Write seeds each hierarchy in file order and returns how many entries,
 // directories and files, it created. The files' bytes are inline, so the

@@ -32,11 +32,6 @@ type Contribution interface {
 	// Key names the contribution's rows in a state file and its count in
 	// the seed's result.
 	Key() string
-	// Verifiers returns the verifiers of the statements the contribution
-	// runs (the domain's store, blobfs's), which the seeder checks against
-	// the live schema. Each is a comparable pointer, so one that several
-	// contributions share is verified once.
-	Verifiers() []query.Verifier
 }
 
 // Seed is a contribution of rows alone, applied by the domain's own
@@ -75,24 +70,28 @@ type FileSeed interface {
 // owns the policy of which set applies and when; Seeder owns how. Seeder
 // is the admin service's Seeder.
 type Seeder struct {
-	db       *Database
-	all      []Contribution
-	rows     []Seed
-	files    []FileSeed
-	fixtures fs.FS
+	db        *Database
+	verifiers []query.Verifier
+	all       []Contribution
+	rows      []Seed
+	files     []FileSeed
+	fixtures  fs.FS
 }
 
 // NewSeeder composes the seed operation from the domains' contributions,
 // the rows applied in the order given, then the files in the order given,
-// which the composition root makes the tables' dependency order. Two
+// which the composition root makes the tables' dependency order. verifiers
+// are every store whose statements the service runs (each domain's, and
+// blobfs's), which [Seeder.Verify] checks: the list is separate from the
+// contributions, so a store that seeds nothing is still verified. Two
 // contributions under one key, or one that is neither a Seed nor a
 // FileSeed, or both, are wiring defects and panic.
-func NewSeeder(db *Database, contributions ...Contribution) *Seeder {
+func NewSeeder(db *Database, verifiers []query.Verifier, contributions ...Contribution) *Seeder {
 	fixtures, err := fs.Sub(seedFiles, "seeds/fixtures")
 	if err != nil {
 		panic(fmt.Sprintf("seeds: %v", err)) // the directory is embedded
 	}
-	s := &Seeder{db: db, all: contributions, fixtures: fixtures}
+	s := &Seeder{db: db, verifiers: verifiers, all: contributions, fixtures: fixtures}
 	keys := make(map[string]bool, len(contributions))
 	for _, c := range contributions {
 		if keys[c.Key()] {
@@ -115,22 +114,12 @@ func NewSeeder(db *Database, contributions ...Contribution) *Seeder {
 	return s
 }
 
-// Verify checks the package's statements and every contribution's
-// verifiers against the live schema, each verifier once. The admin service
-// runs it at startup, before it seeds, and on a verify request; it is the
-// service's only statement check.
+// Verify checks the package's statements and every verifier NewSeeder was
+// given against the live schema. The admin service runs it at startup,
+// before it seeds, and on a verify request; it is the service's only
+// statement check.
 func (s *Seeder) Verify(ctx context.Context) error {
-	vs := []query.Verifier{s.db.stmts}
-	seen := map[query.Verifier]bool{}
-	for _, c := range s.all {
-		for _, v := range c.Verifiers() {
-			if !seen[v] {
-				seen[v] = true
-				vs = append(vs, v)
-			}
-		}
-	}
-	return query.Verify(ctx, s.db.DB, vs...)
+	return query.Verify(ctx, s.db.DB, append([]query.Verifier{s.db.stmts}, s.verifiers...)...)
 }
 
 // States lists the embedded state files by name, sorted; the fixtures

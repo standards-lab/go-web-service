@@ -84,15 +84,14 @@ func seeder(t *testing.T, responses ...sqltest.Response) (*data.Seeder, *sqltest
 	}
 	db := data.New(sqlate.Wrap(pool, sqltest.Dialect{}), catalog)
 	svc := organization.New(db, data.NewStorage(fs, nil), slog.New(slog.DiscardHandler))
-	return data.NewSeeder(db, svc.Seed(), noFiles("logos"), noFiles("documents")), rec
+	return data.NewSeeder(db, []query.Verifier{svc.Verifier()}, svc.Seed(), noFiles("logos"), noFiles("documents")), rec
 }
 
 // noFiles stands in for a contribution of stored files under its key,
 // storing nothing.
 type noFiles string
 
-func (k noFiles) Key() string               { return string(k) }
-func (noFiles) Verifiers() []query.Verifier { return nil }
+func (k noFiles) Key() string { return string(k) }
 func (noFiles) Write(context.Context, json.RawMessage, fs.FS) (int, error) {
 	return 0, nil
 }
@@ -352,8 +351,8 @@ func TestSeed_RollsBackOnFailure(t *testing.T) {
 	}
 }
 
-// The contribution verifies the layer's statements, the seed's among
-// them, at the schema stage the seeder's Verify runs at.
+// The layer's verifier covers its statements, the seed's among them, at
+// the schema stage the seeder's Verify runs at.
 func TestSeed_VerifiesTheLayersStatements(t *testing.T) {
 	s, rec := seeder(t)
 	if err := s.Verify(context.Background()); err != nil {

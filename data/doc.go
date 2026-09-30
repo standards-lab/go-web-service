@@ -19,9 +19,9 @@
 //   - [Migrations] and [AppSet]: the migration sets, blobfs's beneath the
 //     service's own.
 //   - [Patterns] and [Namespace]: the application's pattern namespace.
-//   - [Seeder], built by [NewSeeder] from each domain's [Contribution], a
-//     [Seed] of rows or a [FileSeed] of stored files; [SeedRows] decodes a
-//     contribution's rows strictly.
+//   - [Seeder], built by [NewSeeder] from the stores it verifies and each
+//     domain's [Contribution], a [Seed] of rows or a [FileSeed] of stored
+//     files; [SeedRows] decodes a contribution's rows strictly.
 //   - [Directives], [Read], [ReadListing], and [Paging]: the lowering of a
 //     request's query onto the library's reads and back.
 //   - [Status]: the problem matcher over the libraries' errors. [Conflict]

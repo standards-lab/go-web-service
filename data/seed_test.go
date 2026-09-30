@@ -36,16 +36,13 @@ func newDatabase(t *testing.T, responses ...sqltest.Response) (*data.Database, *
 // reports each row inserted, running one statement per row so the
 // transaction's shape shows, unless err refuses the apply.
 type contribution struct {
-	key      string
-	order    *[]string
-	rows     []json.RawMessage
-	verifier *verifier
-	err      error
+	key   string
+	order *[]string
+	rows  []json.RawMessage
+	err   error
 }
 
 func (c *contribution) Key() string { return c.key }
-
-func (c *contribution) Verifiers() []query.Verifier { return c.verifier.list() }
 
 func (c *contribution) Apply(ctx context.Context, tx *sqlate.Tx, raw json.RawMessage) (int, error) {
 	*c.order = append(*c.order, c.key)
@@ -74,27 +71,16 @@ type fileContribution struct {
 	rows     []json.RawMessage
 	opsAtRun []sqltest.Op
 	fixture  []byte
-	verifier *verifier
 	err      error
 }
 
 func (c *fileContribution) Key() string { return c.key }
-
-func (c *fileContribution) Verifiers() []query.Verifier { return c.verifier.list() }
 
 // verifier counts its runs and fails with err, standing in for a domain's
 // store or blobfs's.
 type verifier struct {
 	runs int
 	err  error
-}
-
-// list is v as a contribution's verifiers, none when v is nil.
-func (v *verifier) list() []query.Verifier {
-	if v == nil {
-		return nil
-	}
-	return []query.Verifier{v}
 }
 
 func (v *verifier) Verify(context.Context, sqlate.Session) error {
@@ -116,29 +102,28 @@ func (c *fileContribution) Write(_ context.Context, raw json.RawMessage, fixture
 	return len(rows), c.err
 }
 
-func TestSeeder_VerifiesItsOwnAndEveryContributions(t *testing.T) {
+// Every listed store is verified, a store that seeds nothing among them:
+// the verifiers are the root's list, not the contributions'.
+func TestSeeder_VerifiesItsOwnAndEveryListedStore(t *testing.T) {
 	db, rec := newDatabase(t)
 	var order []string
-	store, shared := &verifier{}, &verifier{}
-	c := &contribution{key: "organizations", order: &order, verifier: shared}
-	f := &fileContribution{key: "logos", order: &order, rec: rec, verifier: store}
-	g := &fileContribution{key: "documents", order: &order, rec: rec, verifier: shared}
-	s := data.NewSeeder(db, c, f, g)
+	store, unseeded := &verifier{}, &verifier{}
+	c := &contribution{key: "organizations", order: &order}
+	s := data.NewSeeder(db, []query.Verifier{store, unseeded}, c)
 
 	reg := db.Registry()
 	if len(reg) != 1 || reg[0].Name != "data" || len(reg[0].Statements.Statements()) != 1 {
 		t.Fatalf("registry = %+v; want the lock alone under data", reg)
 	}
-	// A verifier two contributions share runs once.
-	if err := s.Verify(context.Background()); err != nil || store.runs != 1 || shared.runs != 1 {
-		t.Fatalf("Verify: %v, verifiers ran %d and %d times; want once each", err, store.runs, shared.runs)
+	if err := s.Verify(context.Background()); err != nil || store.runs != 1 || unseeded.runs != 1 {
+		t.Fatalf("Verify: %v, verifiers ran %d and %d times; want once each", err, store.runs, unseeded.runs)
 	}
 	if got := len(rec.SQL(sqltest.OpPrepare)); got != 1 {
 		t.Fatalf("prepared %d statements; want the lock", got)
 	}
-	shared.err = errBoom
+	unseeded.err = errBoom
 	if err := s.Verify(context.Background()); !errors.Is(err, errBoom) {
-		t.Fatalf("Verify = %v; want the contribution's failure", err)
+		t.Fatalf("Verify = %v; want the unseeded store's failure", err)
 	}
 }
 
@@ -151,7 +136,7 @@ func TestNewSeeder_PanicsOnADuplicateKey(t *testing.T) {
 		}
 	}()
 	var order []string
-	data.NewSeeder(db, &contribution{key: "a", order: &order}, &contribution{key: "a", order: &order})
+	data.NewSeeder(db, nil, &contribution{key: "a", order: &order}, &contribution{key: "a", order: &order})
 }
 
 // A contribution the seeder cannot run, neither a Seed nor a FileSeed or
@@ -169,15 +154,14 @@ func TestNewSeeder_PanicsOnAContributionOfNoOneKind(t *testing.T) {
 					t.Fatalf("NewSeeder recovered %v; want the panic to say %s", r, name)
 				}
 			}()
-			data.NewSeeder(db, c)
+			data.NewSeeder(db, nil, c)
 		})
 	}
 }
 
 type neither struct{}
 
-func (neither) Key() string                 { return "x" }
-func (neither) Verifiers() []query.Verifier { return nil }
+func (neither) Key() string { return "x" }
 
 type both struct{ neither }
 
@@ -187,7 +171,7 @@ func (both) Write(context.Context, json.RawMessage, fs.FS) (int, error)      { r
 // The states are the embedded files, by name, sorted.
 func TestSeeder_States_ListsTheFiles(t *testing.T) {
 	db, _ := newDatabase(t)
-	if got := data.NewSeeder(db).States(); !slices.Equal(got, []string{"default", "empty"}) {
+	if got := data.NewSeeder(db, nil).States(); !slices.Equal(got, []string{"default", "empty"}) {
 		t.Fatalf("States = %v; want default and empty", got)
 	}
 }
@@ -199,7 +183,7 @@ func TestSeeder_Seed_EmptyStateInsertsNothing(t *testing.T) {
 	var order []string
 	orgs := &contribution{key: "organizations", order: &order}
 	logos := &fileContribution{key: "logos", order: &order, rec: rec}
-	n, err := data.NewSeeder(db, orgs, logos).Seed(context.Background(), "empty")
+	n, err := data.NewSeeder(db, nil, orgs, logos).Seed(context.Background(), "empty")
 	if err != nil {
 		t.Fatalf("Seed: %v", err)
 	}
@@ -215,7 +199,7 @@ func TestSeeder_Seed_EmptyStateInsertsNothing(t *testing.T) {
 // any I/O.
 func TestSeeder_Seed_UnknownStateIsRefused(t *testing.T) {
 	db, rec := newDatabase(t)
-	_, err := data.NewSeeder(db).Seed(context.Background(), "nope")
+	_, err := data.NewSeeder(db, nil).Seed(context.Background(), "nope")
 	if !errors.Is(err, admin.ErrUnknownState) || !strings.Contains(err.Error(), `"nope"`) {
 		t.Fatalf("err = %v; want ErrUnknownState naming it", err)
 	}
@@ -229,7 +213,7 @@ func TestSeeder_Seed_UnknownStateIsRefused(t *testing.T) {
 // first by name named.
 func TestSeeder_Seed_AnUnreadKeyIsRefused(t *testing.T) {
 	db, rec := newDatabase(t)
-	_, err := data.NewSeeder(db).Seed(context.Background(), "default")
+	_, err := data.NewSeeder(db, nil).Seed(context.Background(), "default")
 	if err == nil || !strings.Contains(err.Error(), `"documents"`) {
 		t.Fatalf("err = %v; want the first unread key named", err)
 	}
@@ -256,7 +240,7 @@ func TestSeeder_Seed_AppliesRowsThenFilesInOrder(t *testing.T) {
 	orgs, logos, docs := defaultContributions(&order, rec)
 	absent := &contribution{key: "people", order: &order}
 	// The files are given before the rows, and still run after them.
-	n, err := data.NewSeeder(db, logos, docs, orgs, absent).Seed(context.Background(), "default")
+	n, err := data.NewSeeder(db, nil, logos, docs, orgs, absent).Seed(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("Seed: %v", err)
 	}
@@ -286,7 +270,7 @@ func TestSeeder_Seed_RollsBackOnFailure(t *testing.T) {
 	var order []string
 	orgs, logos, docs := defaultContributions(&order, rec)
 	orgs.err = errBoom
-	if _, err := data.NewSeeder(db, orgs, logos, docs).Seed(context.Background(), "default"); !errors.Is(err, errBoom) {
+	if _, err := data.NewSeeder(db, nil, orgs, logos, docs).Seed(context.Background(), "default"); !errors.Is(err, errBoom) {
 		t.Fatalf("err = %v; want the contribution's failure", err)
 	}
 	ops := rec.Ops()
@@ -302,7 +286,7 @@ func TestSeeder_Seed_AFailedFileWriteStopsAfterTheCommit(t *testing.T) {
 	var order []string
 	orgs, logos, docs := defaultContributions(&order, rec)
 	logos.err = errBoom
-	n, err := data.NewSeeder(db, orgs, logos, docs).Seed(context.Background(), "default")
+	n, err := data.NewSeeder(db, nil, orgs, logos, docs).Seed(context.Background(), "default")
 	if !errors.Is(err, errBoom) || !strings.Contains(err.Error(), "logos") {
 		t.Fatalf("err = %v; want the logos' failure, named", err)
 	}
@@ -322,7 +306,7 @@ func TestSeedFixtures_AreLogosTheUploadAccepts(t *testing.T) {
 	var order []string
 	orgs, _, docs := defaultContributions(&order, rec)
 	logos := &fixtureReader{}
-	if _, err := data.NewSeeder(db, orgs, logos, docs).Seed(context.Background(), "default"); err != nil {
+	if _, err := data.NewSeeder(db, nil, orgs, logos, docs).Seed(context.Background(), "default"); err != nil {
 		t.Fatal(err)
 	}
 	if len(logos.sizes) != seedRows {
@@ -339,8 +323,7 @@ func TestSeedFixtures_AreLogosTheUploadAccepts(t *testing.T) {
 // decodes each fixture a row names as a PNG and records its size.
 type fixtureReader struct{ sizes map[string]int }
 
-func (*fixtureReader) Key() string                 { return "logos" }
-func (*fixtureReader) Verifiers() []query.Verifier { return nil }
+func (*fixtureReader) Key() string { return "logos" }
 func (f *fixtureReader) Write(_ context.Context, raw json.RawMessage, fixtures fs.FS) (int, error) {
 	type row struct {
 		Organization string `json:"organization"`

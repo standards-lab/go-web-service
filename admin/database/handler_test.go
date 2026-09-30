@@ -65,7 +65,7 @@ func gatedModule(t *testing.T, gate database.SchemaGate, seed string, responses 
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := admin.New(pdb, sdb, m, catalog, admin.Options{Seed: seed, Seeder: data.NewSeeder(d, organizations{}, files{"logos"}, files{"documents"}), Registry: d})
+	svc := admin.New(pdb, sdb, m, catalog, admin.Options{Seed: seed, Seeder: data.NewSeeder(d, nil, organizations{}, files{"logos"}, files{"documents"}), Registry: d})
 	r := web.NewRouter()
 	r.Mount(web.NewModule(database.Routes(svc, gate, slog.New(slog.DiscardHandler))))
 	return r, rec
@@ -171,8 +171,7 @@ func TestSeed_IsForbiddenWithNoSet(t *testing.T) {
 // statement, since the domain's own tests prove its seed.
 type organizations struct{}
 
-func (organizations) Key() string                 { return "organizations" }
-func (organizations) Verifiers() []query.Verifier { return nil }
+func (organizations) Key() string { return "organizations" }
 func (organizations) Apply(_ context.Context, _ *sqlate.Tx, raw json.RawMessage) (int, error) {
 	rows, err := data.SeedRows[json.RawMessage](raw)
 	return len(rows), err
@@ -182,8 +181,7 @@ func (organizations) Apply(_ context.Context, _ *sqlate.Tx, raw json.RawMessage)
 // it reads the state's rows and reports each as stored, writing nothing.
 type files struct{ key string }
 
-func (f files) Key() string               { return f.key }
-func (files) Verifiers() []query.Verifier { return nil }
+func (f files) Key() string { return f.key }
 func (files) Write(_ context.Context, raw json.RawMessage, _ fs.FS) (int, error) {
 	rows, err := data.SeedRows[json.RawMessage](raw)
 	return len(rows), err

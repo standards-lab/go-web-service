@@ -14,7 +14,6 @@ import (
 	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
-	"github.com/standards-lab/sqlate/query"
 
 	"github.com/standards-lab/go-web-service/data"
 )
@@ -159,12 +158,6 @@ var _ data.FileSeed = logoSeed{}
 
 // Key names the logos in a state file and in the seed's counts.
 func (logoSeed) Key() string { return "logos" }
-
-// Verifiers are the layer's store and blobfs's, which the logo's write and
-// activation run.
-func (s logoSeed) Verifiers() []query.Verifier {
-	return []query.Verifier{s.store, s.store.storage.FS}
-}
 
 // Write seeds each logo in file order and returns how many it activated.
 func (s logoSeed) Write(ctx context.Context, raw json.RawMessage, fixtures fs.FS) (int, error) {

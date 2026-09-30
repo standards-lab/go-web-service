@@ -9,6 +9,7 @@ import (
 	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate/migrate"
+	"github.com/standards-lab/sqlate/query"
 
 	dbadmin "github.com/standards-lab/go-web-service/admin/database"
 	storageadmin "github.com/standards-lab/go-web-service/admin/storage"
@@ -33,7 +34,8 @@ type Admin struct {
 // switches from cfg. It declares the database admin service on lc at
 // stageSchema, with the service as its own readiness check. The service
 // administers the data package's content: the migration sets, the
-// catalog, the statements registry, and the seeder, composed from dom's
+// catalog, the statements registry, and the seeder, which verifies every
+// store the service runs (each domain's and blobfs's) and composes dom's
 // seed contributions in the tables' dependency order (the organizations'
 // rows, then the logos and document trees that name them). gate is the
 // quiesce gate the database admin routes hold around a schema change;
@@ -51,8 +53,10 @@ func newAdmin(
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	db := admin.New(infra.DB, infra.SQL.DB, migrator, infra.SQL.Catalog, admin.Options{
-		Seed:     cfg.Admin.SeedState(),
-		Seeder:   data.NewSeeder(infra.SQL, dom.Organization.Seed(), dom.Organization.LogoSeed(), dom.Document.Seed()),
+		Seed: cfg.Admin.SeedState(),
+		Seeder: data.NewSeeder(infra.SQL,
+			[]query.Verifier{dom.Organization.Verifier(), dom.Document.Verifier(), infra.Storage.FS},
+			dom.Organization.Seed(), dom.Organization.LogoSeed(), dom.Document.Seed()),
 		Registry: infra.SQL,
 		Logger:   infra.Logger,
 	})

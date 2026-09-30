@@ -56,8 +56,13 @@ func (s *Storage) Serve(ctx context.Context, file blobfs.File) (Download, error)
 // was stored: a client that sent fewer bytes than it declared, or hung up.
 // Status answers it 400, so a truncated upload is never read as the
 // database's lost connection, which fails with the same io.ErrUnexpectedEOF.
-// A body read that timed out is not one: see [Objects.PutObject].
 var ErrBodyRead = errors.New("the request body could not be read")
+
+// ErrBodyTimeout reports an upload whose request body did not arrive
+// before the connection's read deadline, which the route's transfer sets
+// from the body's size and the slowest pace a client is allowed: the
+// client was too slow. Status answers it 408.
+var ErrBodyTimeout = errors.New("the request body did not arrive in time")
 
 // Objects adapts a started store to blobfs's ObjectStore and supplies the
 // open Serve streams through. It is the one place the domains' file
@@ -84,20 +89,23 @@ func (o *Objects) ValidateKey(key string) error {
 // caller declared, since a store's own report of it may differ once
 // written.
 //
-// A failed put is ErrBodyRead, wrapping the read's error, only when the
-// body failed in a way that points to the client: it ended short of its
-// declared size or broke off (io.ErrUnexpectedEOF, a reset connection, a
-// malformed chunk). ErrBodyRead takes precedence over whatever the provider
-// reported, since a provider fails a put whose body fails. A body read
-// that timed out (a deadline, os.ErrDeadlineExceeded or any net.Error
-// whose Timeout is true) is ambiguous: a store that stalled stops reading
-// the body until the server's read deadline passes, so the provider's own
-// error stands, and a stalled store stays the store's fault.
+// A failed put whose body failed is the client's, and the body's error
+// takes precedence over whatever the provider reported, since a provider
+// fails a put whose body fails: ErrBodyTimeout when the body's read
+// deadline passed (os.ErrDeadlineExceeded, or any net.Error whose Timeout
+// is true), and ErrBodyRead when it ended short of its declared size or
+// broke off (io.ErrUnexpectedEOF, a reset connection, a malformed chunk).
+// A store that stalls is cut off by the provider's per-try deadline, far
+// shorter than the body's read deadline, before the body's deadline can
+// pass, so a stalled store stays the store's fault.
 func (o *Objects) PutObject(ctx context.Context, key string, body io.Reader, contentType string, size int64) (blobfs.Object, error) {
 	r := &bodyReader{r: body}
 	obj, err := o.store.Put(ctx, key, r, storage.PutOptions{ContentType: contentType, Size: size})
 	if err != nil {
-		if r.err != nil && !timedOut(r.err) {
+		switch {
+		case r.err != nil && timedOut(r.err):
+			return blobfs.Object{}, fmt.Errorf("%w: %w", ErrBodyTimeout, r.err)
+		case r.err != nil:
 			return blobfs.Object{}, fmt.Errorf("%w: %w", ErrBodyRead, r.err)
 		}
 		return blobfs.Object{}, err

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -40,6 +41,7 @@ func TestStatus(t *testing.T) {
 		{"session connection failed", fmt.Errorf("%w: refused", sqlate.ErrConnectionFailed), 503, true},
 		{"connection lost mid-read", fmt.Errorf("query: %w", io.ErrUnexpectedEOF), 503, true},
 		{"upload body cut short", fmt.Errorf("write file: %w", fmt.Errorf("%w: %w", data.ErrBodyRead, io.ErrUnexpectedEOF)), 400, true},
+		{"upload body too slow", fmt.Errorf("write file: %w", fmt.Errorf("%w: %w", data.ErrBodyTimeout, os.ErrDeadlineExceeded)), 408, true},
 		{"blobfs invalid name", &blobfs.NameError{Name: "a/b", Reason: "contains a slash"}, 400, true},
 		{"blobfs root", blobfs.ErrRootDirectory, 400, true},
 		{"blobfs not found", fmt.Errorf("find: %w", blobfs.ErrNotFound), 404, true},
@@ -68,8 +70,8 @@ func TestStatus(t *testing.T) {
 			if got.Status != tc.want || ok != tc.ok {
 				t.Fatalf("Status(%v) = %d, %t; want %d, %t", tc.err, got.Status, ok, tc.want, tc.ok)
 			}
-			if tc.want != http.StatusConflict && tc.want != http.StatusBadRequest && got.Detail != "" {
-				t.Errorf("Status(%v) detail = %q; only a conflict or a request's refusal carries one", tc.err, got.Detail)
+			if tc.want != http.StatusConflict && tc.want != http.StatusBadRequest && tc.want != http.StatusRequestTimeout && got.Detail != "" {
+				t.Errorf("Status(%v) detail = %q; only a conflict or a request's refusal or timeout carries one", tc.err, got.Detail)
 			}
 		})
 	}

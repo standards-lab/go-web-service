@@ -128,11 +128,11 @@ func TestObjects_ABodyCutShortIsTheRequests(t *testing.T) {
 	}
 }
 
-// A body read that times out is ambiguous: a store that stalled stops
-// reading the body until the server's read deadline passes. The store's
-// own error stands, a 503 for a store that is down, never the request's
-// 400.
-func TestObjects_ABodyReadTimeoutLeavesTheStoresError(t *testing.T) {
+// A body read that times out is the client's, ErrBodyTimeout, a 408, even
+// when the store fails too: the route's transfer sized the read deadline
+// for a client at the slowest pace allowed, and a stalled store is cut off
+// by its far shorter per-try deadline first.
+func TestObjects_ABodyReadTimeoutIsTheClients(t *testing.T) {
 	for name, deadline := range map[string]error{
 		"os deadline":      os.ErrDeadlineExceeded,
 		"net timeout":      &net.OpError{Op: "read", Net: "tcp", Err: os.ErrDeadlineExceeded},
@@ -145,11 +145,11 @@ func TestObjects_ABodyReadTimeoutLeavesTheStoresError(t *testing.T) {
 
 			body := io.MultiReader(strings.NewReader("pn"), iotest.ErrReader(deadline))
 			_, err := o.PutObject(context.Background(), "1/logo.png", body, "image/png", 3)
-			if errors.Is(err, data.ErrBodyRead) || !errors.Is(err, storage.ErrUnavailable) {
-				t.Fatalf("PutObject = %v, want the store's storage.ErrUnavailable", err)
+			if !errors.Is(err, data.ErrBodyTimeout) || errors.Is(err, data.ErrBodyRead) {
+				t.Fatalf("PutObject = %v, want ErrBodyTimeout", err)
 			}
-			if p, ok := data.Status(err); !ok || p.Status != http.StatusServiceUnavailable {
-				t.Errorf("Status = %+v, %t; want 503", p, ok)
+			if p, ok := data.Status(err); !ok || p.Status != http.StatusRequestTimeout {
+				t.Errorf("Status = %+v, %t; want 408", p, ok)
 			}
 		})
 	}

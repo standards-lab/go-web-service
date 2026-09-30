@@ -29,4 +29,6 @@
 //     [DetailNotEmpty], [DetailDeleting], [DetailFileDeleting],
 //     [DetailReferenced], or [DetailConflict].
 //   - [ErrBodyRead]: an upload whose request body failed, a 400.
+//   - [ErrBodyTimeout]: an upload whose request body did not arrive in
+//     time, a 408.
 package data

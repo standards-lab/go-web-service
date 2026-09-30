@@ -46,6 +46,7 @@ const (
 //     operation on the root, or ErrBodyRead; the detail is the refusal
 //     alone, never the operation chain that wrapped it
 //   - 404: an absent row, entry, or object
+//   - 408: ErrBodyTimeout, an upload's body slower than the rate allows
 //   - 409: a taken name or id, a non-empty directory, a referenced file, a
 //     deleting file or directory, a cycle, a transition the status does not
 //     allow, or a unique or foreign-key violation, each with its Detail
@@ -64,6 +65,8 @@ func Status(err error) (web.Problem, bool) {
 	switch {
 	case errors.Is(err, ErrBodyRead):
 		return web.Problem{Status: http.StatusBadRequest, Detail: ErrBodyRead.Error()}, true
+	case errors.Is(err, ErrBodyTimeout):
+		return web.Problem{Status: http.StatusRequestTimeout, Detail: ErrBodyTimeout.Error()}, true
 	case errors.Is(err, blobfs.ErrInvalidName), errors.Is(err, blobfs.ErrInvalidPath),
 		errors.Is(err, blobfs.ErrInvalidKey), errors.Is(err, blobfs.ErrInvalidID),
 		errors.Is(err, blobfs.ErrRootDirectory):

@@ -12,9 +12,9 @@ import (
 	"github.com/standards-lab/go-web-service/internal/config/configtest"
 )
 
-// The suite is hermetic: no live database exists, so it proves the cold
-// start and the startup contract: construction performs no I/O, and a
-// failed database ping at stage 0 fails startup before the schema stage
+// The suite is hermetic: no live database or object store exists, so it
+// proves the cold start and the startup contract: construction performs no
+// I/O, and a failed start at stage 0 fails startup before the schema stage
 // runs, instead of serving unready. The serve-probes-drain path and every
 // behavior that needs a real engine are the integration tier's, the root
 // integration package.
@@ -42,11 +42,12 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// New is the cold start and performs no I/O — it succeeds with no database
-// listening — and Run then fails startup on the dead database's ping,
-// draining to exit 1 with the failure named in the log, never flipping
-// readiness.
-func TestRun_FailsStartupWithoutDatabase(t *testing.T) {
+// New is the cold start and performs no I/O — it succeeds with nothing
+// listening — and Run then fails startup at stage 0, draining to exit 1
+// with the failure named in the log, never flipping readiness. The
+// database and the object store start together, and the first to fail
+// cancels the other, so the log names whichever failed first.
+func TestRun_FailsStartupWithoutInfrastructure(t *testing.T) {
 	buf := &syncBuffer{}
 	a, err := app.New(configtest.Config(t), buf)
 	if err != nil {
@@ -59,15 +60,15 @@ func TestRun_FailsStartupWithoutDatabase(t *testing.T) {
 	select {
 	case code := <-done:
 		if code != 1 {
-			t.Errorf("Run = %d, want 1 on a failed database startup", code)
+			t.Errorf("Run = %d, want 1 on a failed startup", code)
 		}
 	case <-time.After(failsafe):
 		t.Fatal("timed out waiting for Run to fail startup")
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "database") {
-		t.Errorf("failure log does not name the database: %q", out)
+	if !strings.Contains(out, "startup: database") && !strings.Contains(out, "startup: storage") {
+		t.Errorf("failure log names neither stage-0 service: %q", out)
 	}
 	if strings.Contains(out, "server ready") {
 		t.Error("log carries a ready record despite the failed startup")

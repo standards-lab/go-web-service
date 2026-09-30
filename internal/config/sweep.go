@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	libconfig "github.com/standards-lab/go-core/config"
@@ -45,7 +46,7 @@ func (c *SweepConfig) Merge(src *SweepConfig) {
 }
 
 // Finalize applies the defaults, reads the block's environment overrides
-// when a prefix is given (APP_SWEEP_INTERVAL, APP_SWEEP_BATCH,
+// (APP_SWEEP_INTERVAL, APP_SWEEP_BATCH,
 // APP_SWEEP_STALE_AGE), and validates: both durations positive and the
 // batch at least 1, the bounds blobfs's sweep refuses a pass outside.
 func (c *SweepConfig) Finalize(envPrefix string) error {
@@ -59,16 +60,14 @@ func (c *SweepConfig) Finalize(envPrefix string) error {
 		c.StaleAge = libconfig.Duration(defaultSweepStaleAge)
 	}
 
-	if envPrefix != "" {
-		if err := overrideDuration(envPrefix, "sweep_interval", &c.Interval); err != nil {
-			return err
-		}
-		if err := overrideInt(envPrefix, "sweep_batch", c.Batch); err != nil {
-			return err
-		}
-		if err := overrideDuration(envPrefix, "sweep_stale_age", &c.StaleAge); err != nil {
-			return err
-		}
+	if err := overrideDuration(envPrefix, "sweep_interval", &c.Interval); err != nil {
+		return err
+	}
+	if err := libconfig.SetFromEnv(&c.Batch, libconfig.EnvName(envPrefix, "sweep_batch"), strconv.Atoi); err != nil {
+		return err
+	}
+	if err := overrideDuration(envPrefix, "sweep_stale_age", &c.StaleAge); err != nil {
+		return err
 	}
 
 	if c.Interval <= 0 {

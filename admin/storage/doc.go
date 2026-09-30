@@ -9,4 +9,7 @@
 // the container on demand, the operator's correction when the container
 // was removed out from under a running service. The composition root
 // mounts the group into the admin mount beside admin/database.
+//
+// The package's API: [Routes], the route group over a [Store], whose
+// diagnostics read answers [Diagnostics].
 package storage

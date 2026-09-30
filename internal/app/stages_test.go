@@ -2,10 +2,8 @@ package app
 
 import "testing"
 
-// The stage table ascends in the process's dependency order. The schema's
-// stage is go-database's constant, so a release that moved it below the
-// pool's or onto a later stage would reorder startup silently; this fails
-// instead.
+// The stage table ascends in the process's dependency order, so an edit
+// that reorders it fails here rather than reordering startup silently.
 func TestStages_Ascend(t *testing.T) {
 	stages := []struct {
 		name  string
@@ -13,7 +11,6 @@ func TestStages_Ascend(t *testing.T) {
 	}{
 		{"infrastructure", stageInfrastructure},
 		{"schema", stageSchema},
-		{"verify", stageVerify},
 		{"reactors", stageReactors},
 		{"root", stageRoot},
 	}

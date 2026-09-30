@@ -59,6 +59,23 @@ func TestReadsConfig_FinalizeEnvOverrides(t *testing.T) {
 	}
 }
 
+// An override points the field at its own value: the layer a merge shared
+// the pointer with keeps its value.
+func TestReadsConfig_EnvOverrideLeavesTheMergedLayer(t *testing.T) {
+	t.Setenv(libconfig.EnvName("app", "reads_default_size"), "5")
+	ten := 10
+	layer := &config.ReadsConfig{DefaultSize: &ten}
+
+	cfg := configtest.Minimal()
+	cfg.Reads.Merge(layer)
+	if err := cfg.Finalize("app"); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	if *cfg.Reads.DefaultSize != 5 || *layer.DefaultSize != 10 {
+		t.Errorf("finalized = %d, layer = %d; want 5 and the layer's 10", *cfg.Reads.DefaultSize, *layer.DefaultSize)
+	}
+}
+
 func TestReadsConfig_FinalizeRejectsInvalidSizes(t *testing.T) {
 	zero := 0
 	cfg := configtest.Minimal()

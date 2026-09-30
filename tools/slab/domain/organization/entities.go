@@ -4,11 +4,6 @@ import (
 	"github.com/standards-lab/go-web-sdk"
 )
 
-// DefaultPageSize is the page size a list request gets when it names none:
-// internal/config/reads.go's defaultReadsDefaultSize, which config.json
-// leaves in force.
-const DefaultPageSize = 20
-
 // CreateOrganization is the create command's body, the shape of
 // domain/organization's CreateOrganization: the parent under which the
 // organization is created, null for a root, and its code and name.

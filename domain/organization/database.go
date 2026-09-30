@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/standards-lab/blobfs"
 	"github.com/standards-lab/go-web-sdk"
@@ -31,6 +32,7 @@ var files embed.FS
 type store struct {
 	db             *data.Database
 	storage        *data.Storage
+	logger         *slog.Logger
 	stmts          *query.Statements
 	view           query.Projection[Organization]
 	createRows     query.Rows[Identity]
@@ -38,6 +40,7 @@ type store struct {
 	editGuard      query.Guard
 	transferGuard  query.Guard
 	deleteGuard    query.Guard
+	versionRows    query.Rows[int64]
 	activeLogoRows query.Rows[blobfs.File]
 	attachImage    query.Statement
 	detachImage    query.Statement
@@ -48,13 +51,14 @@ type store struct {
 // newStore compiles the statements against the service's catalog, registers
 // the inventory under the domain's name, and binds the handles. A compile
 // failure is a wiring defect and panics; no I/O happens here.
-func newStore(db *data.Database, st *data.Storage) *store {
+func newStore(db *data.Database, st *data.Storage, logger *slog.Logger) *store {
 	stmts := db.Catalog.MustCompile(files, "statements", db.Dialect())
 	db.Register("organization", stmts)
 	check := stmts.Statement("version")
 	return &store{
 		db:             db,
 		storage:        st,
+		logger:         logger,
 		stmts:          stmts,
 		view:           stmts.Statement("organization_view").Project(query.Scanner[Organization]()),
 		createRows:     stmts.Statement("create").Scan(query.Scanner[Identity]()),
@@ -62,6 +66,7 @@ func newStore(db *data.Database, st *data.Storage) *store {
 		editGuard:      stmts.Statement("edit").Guarded(check, "version"),
 		transferGuard:  stmts.Statement("transfer").Guarded(check, "version"),
 		deleteGuard:    stmts.Statement("delete").Guarded(check, "version"),
+		versionRows:    check.Scan(query.Scalar[int64]),
 		activeLogoRows: stmts.Statement("active_logo").Scan(query.Scanner[blobfs.File]()),
 		attachImage:    stmts.Statement("attach_image"),
 		detachImage:    stmts.Statement("detach_image"),
@@ -71,9 +76,9 @@ func newStore(db *data.Database, st *data.Storage) *store {
 }
 
 // Verify prepares every statement and the projection's field contract
-// against the live schema.
-func (s *store) Verify(ctx context.Context) error {
-	return query.Verify(ctx, s.db, s.stmts, s.view)
+// against the live schema over sess; the store is a query.Verifier.
+func (s *store) Verify(ctx context.Context, sess sqlate.Session) error {
+	return query.Verify(ctx, sess, s.stmts, s.view)
 }
 
 func (s *store) list(ctx context.Context, q web.Query) ([]Organization, web.Paging, error) {
@@ -122,6 +127,13 @@ func (s *store) delete(ctx context.Context, id string, version int64) error {
 	return err
 }
 
+// exists reads the organization by its key alone, without the read
+// model's lineage walk; a nonexistent organization is sql.ErrNoRows.
+func (s *store) exists(ctx context.Context, sess sqlate.Session, id string) error {
+	_, err := s.versionRows.One(ctx, sess, query.Args{"id": id})
+	return err
+}
+
 // activeLogo reads the file the organization's active image binds,
 // whatever its status, or sql.ErrNoRows.
 func (s *store) activeLogo(ctx context.Context, sess sqlate.Session, organizationID string) (blobfs.File, error) {
@@ -151,8 +163,8 @@ var _ data.Seed = seed{}
 // Key names the organizations in a state file and in the seed's counts.
 func (seed) Key() string { return "organizations" }
 
-// Verify prepares the domain's statements, the seed's among them.
-func (s seed) Verify(ctx context.Context) error { return s.store.Verify(ctx) }
+// Verifiers is the domain's store, whose statements include the seed's.
+func (s seed) Verifiers() []query.Verifier { return []query.Verifier{s.store} }
 
 // Apply inserts the tree in file order, each parent before its children,
 // resolving the file's parent codes to ids as it goes, and returns how

@@ -307,6 +307,32 @@ func TestContent_IsAnAttachment(t *testing.T) {
 	}
 }
 
+// A download whose object fails to open answers a problem that carries
+// none of the file's headers and is not cached in its place: no
+// attachment name, and no-store over the handler's private, no-cache. An
+// absent object is 404, a missing container 503.
+func TestContent_AnOpenFailureDropsTheFilesHeaders(t *testing.T) {
+	for name, c := range map[string]struct {
+		drop bool
+		want int
+	}{"absent object": {false, 404}, "missing container": {true, 503}} {
+		t.Run(name, func(t *testing.T) {
+			svc, _, fake := serviceOver(t, root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), within(true))
+			if c.drop {
+				fake.DropContainer()
+			}
+			rec := send(t, routes(svc), "GET", base+"/files/"+fileID+"/content", "", "")
+			problem(t, rec, c.want)
+			if got := rec.Header().Get("Content-Disposition"); got != "" {
+				t.Errorf("Content-Disposition = %q on the problem; want none", got)
+			}
+			if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+				t.Errorf("Cache-Control = %q on the problem; want no-store", got)
+			}
+		})
+	}
+}
+
 // A file whose write has not completed has no content to serve.
 func TestContent_OfAPendingFileIs404(t *testing.T) {
 	h := module(t, root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusPending, 1)), within(true))

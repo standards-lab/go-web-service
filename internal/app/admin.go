@@ -30,22 +30,14 @@ type Admin struct {
 }
 
 // newAdmin wires the admin layer over infra, each admin service handed its
-// switches from cfg at the construction site. It takes lc because an admin
-// service owns a lifecycle stage: the database admin service verifies and
-// corrects the schema at stageSchema, ahead of the statements verified at
-// stageVerify. The root declares that service itself, as go-database's
-// Register would (the name, the Start, and the service as its readiness
-// check), so its stage is named at the call site from the stage table
-// rather than taken inside the library. The content it administers is the
-// data package's: the migration sets behind the migrator, the seeder, the
-// catalog, and the statements registry. The seeder composes the domains'
-// seed contributions from dom, in the tables' dependency order, so the
-// data package reads the states without naming a domain's table: first
-// the organizations' rows, applied in the seed's transaction, then the
-// stored files that name them, the logos and the document trees, written
-// after it commits. gate is the process's quiesce gate, which the database
-// admin domain's routes hold around a schema change. Startup's own schema
-// correction takes no gate: it runs at stageSchema, before the sweep's
+// switches from cfg. It declares the database admin service on lc at
+// stageSchema, the service as its own readiness check. The service
+// administers the data package's content: the migration sets, the
+// catalog, the statements registry, and the seeder, composed from dom's
+// seed contributions in the tables' dependency order (the organizations'
+// rows, then the logos and document trees that name them). gate is the
+// quiesce gate the database admin routes hold around a schema change;
+// startup's own correction takes none, since it runs before the sweep's
 // stage starts.
 func newAdmin(
 	infra *Infrastructure,
@@ -76,9 +68,8 @@ func newAdmin(
 // mountAdmin builds the admin mount, /admin, with each admin domain's route
 // group mounted into it. In production the mount belongs on its own
 // listener, authenticated and unreachable from the public API's network
-// path; that isolation is the v1.admin-listener goal, and until then the
-// mount serves on the API listener. Each group's error writer logs
-// through logger.
+// path; until the management listener lands, it serves on the API
+// listener. Each group's error writer logs through logger.
 func mountAdmin(adm *Admin, logger *slog.Logger) *web.Group {
 	g := web.NewGroup("/admin")
 	g.Mount(dbadmin.Routes(adm.Database, adm.Gate, logger))

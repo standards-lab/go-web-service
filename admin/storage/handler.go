@@ -46,8 +46,7 @@ type handler struct {
 // cause of every 5xx the error writer sends.
 func Routes(store Store, logger *slog.Logger) *web.Group {
 	h := &handler{store: store}
-	ew := web.NewErrorWriter(status)
-	ew.Log(logger)
+	ew := web.NewErrorWriter(logger, status)
 	ew.Detail(http.StatusServiceUnavailable)
 	g := web.NewGroup("/storage")
 	g.SetErrorWriter(ew)

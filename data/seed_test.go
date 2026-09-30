@@ -39,16 +39,13 @@ type contribution struct {
 	key      string
 	order    *[]string
 	rows     []json.RawMessage
-	verified bool
+	verifier *verifier
 	err      error
 }
 
 func (c *contribution) Key() string { return c.key }
 
-func (c *contribution) Verify(context.Context) error {
-	c.verified = true
-	return c.err
-}
+func (c *contribution) Verifiers() []query.Verifier { return c.verifier.list() }
 
 func (c *contribution) Apply(ctx context.Context, tx *sqlate.Tx, raw json.RawMessage) (int, error) {
 	*c.order = append(*c.order, c.key)
@@ -77,15 +74,32 @@ type fileContribution struct {
 	rows     []json.RawMessage
 	opsAtRun []sqltest.Op
 	fixture  []byte
-	verified bool
+	verifier *verifier
 	err      error
 }
 
 func (c *fileContribution) Key() string { return c.key }
 
-func (c *fileContribution) Verify(context.Context) error {
-	c.verified = true
-	return nil
+func (c *fileContribution) Verifiers() []query.Verifier { return c.verifier.list() }
+
+// verifier counts its runs and fails with err, standing in for a domain's
+// store or blobfs's.
+type verifier struct {
+	runs int
+	err  error
+}
+
+// list is v as a contribution's verifiers, none when v is nil.
+func (v *verifier) list() []query.Verifier {
+	if v == nil {
+		return nil
+	}
+	return []query.Verifier{v}
+}
+
+func (v *verifier) Verify(context.Context, sqlate.Session) error {
+	v.runs++
+	return v.err
 }
 
 func (c *fileContribution) Write(_ context.Context, raw json.RawMessage, fixtures fs.FS) (int, error) {
@@ -105,21 +119,24 @@ func (c *fileContribution) Write(_ context.Context, raw json.RawMessage, fixture
 func TestSeeder_VerifiesItsOwnAndEveryContributions(t *testing.T) {
 	db, rec := newDatabase(t)
 	var order []string
-	c := &contribution{key: "organizations", order: &order}
-	f := &fileContribution{key: "logos", order: &order, rec: rec}
-	s := data.NewSeeder(db, c, f)
+	store, shared := &verifier{}, &verifier{}
+	c := &contribution{key: "organizations", order: &order, verifier: shared}
+	f := &fileContribution{key: "logos", order: &order, rec: rec, verifier: store}
+	g := &fileContribution{key: "documents", order: &order, rec: rec, verifier: shared}
+	s := data.NewSeeder(db, c, f, g)
 
 	reg := db.Registry()
 	if len(reg) != 1 || reg[0].Name != "data" || len(reg[0].Statements.Statements()) != 1 {
 		t.Fatalf("registry = %+v; want the lock alone under data", reg)
 	}
-	if err := s.Verify(context.Background()); err != nil || !c.verified || !f.verified {
-		t.Fatalf("Verify: %v, contributions verified %v and %v", err, c.verified, f.verified)
+	// A verifier two contributions share runs once.
+	if err := s.Verify(context.Background()); err != nil || store.runs != 1 || shared.runs != 1 {
+		t.Fatalf("Verify: %v, verifiers ran %d and %d times; want once each", err, store.runs, shared.runs)
 	}
 	if got := len(rec.SQL(sqltest.OpPrepare)); got != 1 {
 		t.Fatalf("prepared %d statements; want the lock", got)
 	}
-	c.err = errBoom
+	shared.err = errBoom
 	if err := s.Verify(context.Background()); !errors.Is(err, errBoom) {
 		t.Fatalf("Verify = %v; want the contribution's failure", err)
 	}
@@ -159,8 +176,8 @@ func TestNewSeeder_PanicsOnAContributionOfNoOneKind(t *testing.T) {
 
 type neither struct{}
 
-func (neither) Key() string                  { return "x" }
-func (neither) Verify(context.Context) error { return nil }
+func (neither) Key() string                 { return "x" }
+func (neither) Verifiers() []query.Verifier { return nil }
 
 type both struct{ neither }
 
@@ -322,8 +339,8 @@ func TestSeedFixtures_AreLogosTheUploadAccepts(t *testing.T) {
 // decodes each fixture a row names as a PNG and records its size.
 type fixtureReader struct{ sizes map[string]int }
 
-func (*fixtureReader) Key() string                  { return "logos" }
-func (*fixtureReader) Verify(context.Context) error { return nil }
+func (*fixtureReader) Key() string                 { return "logos" }
+func (*fixtureReader) Verifiers() []query.Verifier { return nil }
 func (f *fixtureReader) Write(_ context.Context, raw json.RawMessage, fixtures fs.FS) (int, error) {
 	type row struct {
 		Organization string `json:"organization"`

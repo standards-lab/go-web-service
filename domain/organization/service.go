@@ -3,6 +3,7 @@ package organization
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"github.com/standards-lab/go-web-sdk"
 
@@ -22,26 +23,21 @@ type Service struct {
 }
 
 // New constructs the service over the database and the object storage the
-// domains share. Construction compiles and binds the statements and
-// performs no I/O.
-func New(db *data.Database, st *data.Storage) *Service {
-	return &Service{store: newStore(db, st)}
+// domains share, logging to logger what a request that succeeded left for
+// the sweep. Construction compiles and binds the statements and performs no
+// I/O.
+func New(db *data.Database, st *data.Storage, logger *slog.Logger) *Service {
+	return &Service{store: newStore(db, st, logger)}
 }
 
-// Verify prepares every statement and the read contract against the
-// migrated schema; the composition root runs it at startup, once the
-// schema is corrected.
-func (s *Service) Verify(ctx context.Context) error { return s.store.Verify(ctx) }
-
-// Seed is the layer's seed contribution to the named states the data
-// package's seeder applies: the organization tree a state carries, seeded
-// by the layer's own statements. The composition root hands it to the seeder.
+// Seed is the layer's row contribution to the data package's named states:
+// the organization tree a state carries under "organizations", parents
+// first, seeded idempotently by the layer's own statements.
 func (s *Service) Seed() data.Seed { return seed{store: s.store} }
 
-// LogoSeed is the layer's second seed contribution, a file seed, to the
-// named states: the logos a state names, each written by blobfs's
-// two-phase write once the seed's rows commit and activated for an
-// organization that has none. The composition root hands it to the seeder after Seed.
+// LogoSeed is the layer's file contribution to the named states: the logos
+// a state carries under "logos", each written once the seed's rows commit
+// and activated for an organization that has none.
 func (s *Service) LogoSeed() data.FileSeed { return logoSeed{store: s.store} }
 
 // List returns one page of organizations and the read's paging, honoring
@@ -103,7 +99,9 @@ func (s *Service) Delete(ctx context.Context, id string, version int64) error {
 // active one, retiring the logo it replaces, and returns the new file's
 // id. A media type outside the logo's allowlist is refused before any
 // I/O; a nonexistent organization is sql.ErrNoRows, and a concurrent
-// replacement that activated first is a unique violation.
+// replacement that activated first is a unique violation. Once the
+// replacement commits, a failure to purge the replaced file is logged,
+// not returned.
 func (s *Service) PutLogo(ctx context.Context, id string, u web.Upload) (LogoIdentity, error) {
 	ext, err := logoExtension(u.MediaType)
 	if err != nil {
@@ -119,7 +117,8 @@ func (s *Service) Logo(ctx context.Context, id string) (Logo, error) {
 }
 
 // DeleteLogo retires the organization's active logo, its row and its
-// object, or returns sql.ErrNoRows when it has none.
+// object, or returns sql.ErrNoRows when it has none. Once the logo's image
+// is removed, a failure to purge its file is logged, not returned.
 func (s *Service) DeleteLogo(ctx context.Context, id string) error {
 	return s.store.deleteLogo(ctx, id)
 }

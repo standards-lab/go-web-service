@@ -20,6 +20,7 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
 	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
+	"github.com/standards-lab/go-web-service/tools/slab/input"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 
@@ -398,7 +399,7 @@ func (f *storageFake) list(w http.ResponseWriter, r *http.Request, n *fakeNode, 
 		f.fail(w, r)
 		return
 	}
-	size := document.DefaultPageSize
+	size := input.DefaultPageSize
 	if s := q.Get("size"); s != "" {
 		size, _ = strconv.Atoi(s)
 	}

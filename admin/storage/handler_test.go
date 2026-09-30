@@ -73,7 +73,7 @@ func TestContainer_RestoresARemovedContainer(t *testing.T) {
 func TestContainer_AnUnreachableStoreIs503WithTheReason(t *testing.T) {
 	fake := storagetest.NewFake()
 	h := module(t, fake)
-	fake.Down.Store(true)
+	fake.SetDown(true)
 
 	code, p := send(t, h, "POST", "/storage/container")
 	if detail, _ := p["detail"].(string); code != 503 || !strings.Contains(detail, "unavailable") {

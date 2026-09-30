@@ -3,7 +3,9 @@ package document_test
 import (
 	"context"
 	"database/sql/driver"
+	"encoding/json"
 	"fmt"
+	iofs "io/fs"
 	"strings"
 	"testing"
 	"time"
@@ -180,7 +182,7 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 		sqltest.OpQuery,
 		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpExec, sqltest.OpCommit,
 		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpCommit,
-		sqltest.OpQuery, sqltest.OpExec,
+		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpExec, sqltest.OpCommit, // the delete, scoped in its transaction
 	}
 	if len(ops) != len(want) {
 		t.Fatalf("ops = %v\nwant %v", ops, want)
@@ -192,14 +194,35 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 	}
 }
 
-// Verify prepares the layer's four statements and nothing of blobfs's,
-// which the composition root verifies on its own.
-func TestStore_VerifyPreparesEveryStatement(t *testing.T) {
-	s, rec, _ := serviceOver(t)
-	if err := s.Verify(context.Background()); err != nil {
+// The seeder's Verify prepares the layer's four statements, blobfs's, and
+// the data package's lock, each once: blobfs's store, which the layer's
+// seed and another contribution both name, is verified a single time.
+func TestSeed_VerifiesEachStoreOnce(t *testing.T) {
+	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
+	fs, err := bfdata.New(catalog, sqltest.Dialect{})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if prepared := rec.SQL(sqltest.OpPrepare); len(prepared) != 4 {
-		t.Errorf("prepared %d statements, want 4: %q", len(prepared), prepared)
+	alone, blobfsRec := sqltest.Open(t)
+	if err := fs.Verify(context.Background(), sqlate.Wrap(alone, sqltest.Dialect{})); err != nil {
+		t.Fatal(err)
+	}
+	pool, rec := sqltest.Open(t)
+	db := data.New(sqlate.Wrap(pool, sqltest.Dialect{}), catalog)
+	svc := document.New(db, data.NewStorage(fs, nil), nil)
+	if err := data.NewSeeder(db, svc.Seed(), sharing{fs}).Verify(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	want := 1 + 4 + len(blobfsRec.SQL(sqltest.OpPrepare))
+	if prepared := rec.SQL(sqltest.OpPrepare); len(prepared) != want {
+		t.Errorf("prepared %d statements, want %d: the lock, the layer's 4, and blobfs's once", len(prepared), want)
 	}
 }
+
+// sharing is another contribution that names blobfs's store among its
+// verifiers, as the organization layer's logo seed does.
+type sharing struct{ fs *bfdata.Store }
+
+func (sharing) Key() string                                                  { return "logos" }
+func (s sharing) Verifiers() []query.Verifier                                { return []query.Verifier{s.fs} }
+func (sharing) Write(context.Context, json.RawMessage, iofs.FS) (int, error) { return 0, nil }

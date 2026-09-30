@@ -189,15 +189,20 @@ func TestStore_DirectoryReads(t *testing.T) {
 	if err != nil || r.Path != "/" || r.Name != "/" || r.ParentID != nil || r.ID != rootID {
 		t.Fatalf("Directory(root) = %+v, %v", r, err)
 	}
+	// Each metadata read's scope, row, and path read one tree, in one
+	// transaction.
+	if ops := fmt.Sprint(rec.Ops()); ops != fmt.Sprint([]sqltest.Op{begin, q, q, q, q, commit, begin, q, q, q, commit}) {
+		t.Errorf("metadata reads = %v; want each in its own transaction", ops)
+	}
 	limits := web.Limits{DefaultSize: 20, MaxSize: 100, Cursor: true}
 	query, _ := web.ParseQuery(url.Values{"sort": {"-created_at"}}, limits)
 	dirs, paging, err := s.ListDirectories(ctx, orgID, document.RootAlias, query)
-	if err != nil || len(dirs) != 1 || dirs[0].ID != dirID || paging.Total != 1 || paging.More {
+	if err != nil || len(dirs) != 1 || dirs[0].ID != dirID || (paging.Total == nil || *paging.Total != 1) || paging.More {
 		t.Fatalf("ListDirectories = %+v, %+v, %v", dirs, paging, err)
 	}
 	query, _ = web.ParseQuery(url.Values{"status": {"available"}}, limits)
 	files, paging, err := s.ListFiles(ctx, orgID, dirID, query)
-	if err != nil || len(files) != 1 || files[0].Status != document.FileAvailable || paging.Total != 1 {
+	if err != nil || len(files) != 1 || files[0].Status != document.FileAvailable || (paging.Total == nil || *paging.Total != 1) {
 		t.Fatalf("ListFiles = %+v, %+v, %v", files, paging, err)
 	}
 	sqls := rec.SQL(q)
@@ -245,7 +250,7 @@ func TestStore_ReadsBeforeTheRoot(t *testing.T) {
 	s, _, _ := serviceOver(t, root(), organization(), root())
 	q, _ := web.ParseQuery(url.Values{}, web.Limits{DefaultSize: 20, MaxSize: 100})
 	items, paging, err := s.ListFiles(ctx, orgID, document.RootAlias, q)
-	if err != nil || len(items) != 0 || paging.Total != 0 {
+	if err != nil || len(items) != 0 || (paging.Total == nil || *paging.Total != 0) {
 		t.Fatalf("ListFiles(root) = %v, %+v, %v; want an empty page", items, paging, err)
 	}
 	if _, _, err := s.ListFiles(ctx, orgID, dirID, q); err == nil {

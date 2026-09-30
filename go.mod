@@ -3,17 +3,17 @@ module github.com/standards-lab/go-web-service
 go 1.27
 
 require (
-	github.com/standards-lab/blobfs v0.4.0
+	github.com/standards-lab/blobfs v0.5.0
 	github.com/standards-lab/blobfs/postgres v0.3.0
-	github.com/standards-lab/go-core v0.4.1
-	github.com/standards-lab/go-database v0.6.2
-	github.com/standards-lab/go-database/postgres v0.3.0
+	github.com/standards-lab/go-core v0.5.0
+	github.com/standards-lab/go-database v0.7.0
+	github.com/standards-lab/go-database/postgres v0.4.0
 	github.com/standards-lab/go-observability v0.1.0
 	github.com/standards-lab/go-observability/otlp v0.1.0
-	github.com/standards-lab/go-storage v0.2.1
-	github.com/standards-lab/go-storage/azureblob v0.2.0
-	github.com/standards-lab/go-web-sdk v0.12.0
-	github.com/standards-lab/go-web-sdk/middleware/rate-limit v0.1.1
+	github.com/standards-lab/go-storage v0.3.0
+	github.com/standards-lab/go-storage/azureblob v0.3.0
+	github.com/standards-lab/go-web-sdk v0.13.0
+	github.com/standards-lab/go-web-sdk/middleware/rate-limit v0.2.0
 	github.com/standards-lab/sqlate v0.4.1
 	github.com/standards-lab/sqlate/postgres v0.4.0
 	go.opentelemetry.io/otel/sdk/metric v1.46.0

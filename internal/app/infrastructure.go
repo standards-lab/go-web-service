@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -47,20 +46,15 @@ type Infrastructure struct {
 	Sets        []migrate.Set
 }
 
-// newInfrastructure constructs the infrastructure services in one place, in
-// dependency order, each registering on lc where it is built as a
-// lifecycle.Service at its stage from the stage table (stages.go), so a
-// service cannot exist without a startup, shutdown, or readiness
-// declaration. The database and the object store register at
-// stageInfrastructure with their readiness checks, so both are started
-// before the schema stage seeds objects; blobfs's store verifies its
-// statements at stageVerify, once the schema is corrected, beside the
-// domains that verify their own. Construction opens nothing: connectivity
-// belongs to a service's Start. The pattern catalog is built here, once:
-// the library's namespace, blobfs's, and the application's; a port adds
-// the engine's overlay beside them. This file is the one place a provider
-// is named: the database's, the object store's, and blobfs's engine with
-// its migration set.
+// newInfrastructure constructs the infrastructure services in dependency
+// order, each registering on lc where it is built, at its stage from the
+// stage table, so a service cannot exist without its startup, shutdown, and
+// readiness declaration: the database and the object store at
+// stageInfrastructure, before the schema stage seeds objects. Construction
+// opens nothing. The pattern catalog is built here, once: the library's
+// namespace, blobfs's, and the application's. This file is the one place a
+// provider is named: the database's, the object store's, and blobfs's
+// engine with its migration set.
 func newInfrastructure(
 	w io.Writer,
 	cfg *config.Config,
@@ -102,11 +96,6 @@ func newInfrastructure(
 	if err != nil {
 		return nil, fmt.Errorf("blobfs: %w", err)
 	}
-	lc.Add(lifecycle.Service{
-		Name:  "blobfs",
-		Stage: stageVerify,
-		Start: func(ctx context.Context) error { return fs.Verify(ctx, session) },
-	})
 	blobfsSet, err := blobfspg.Migrations()
 	if err != nil {
 		return nil, fmt.Errorf("blobfs migrations: %w", err)

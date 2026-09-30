@@ -23,3 +23,13 @@ func TestEnvironment_StorageOverride(t *testing.T) {
 		t.Errorf("StorageAddr = %q, want the endpoint's address", got)
 	}
 }
+
+// DatabaseAddr follows the same variables the service's database address
+// does, the defaults beneath them.
+func TestDatabaseAddr(t *testing.T) {
+	t.Setenv("APP_DATABASE_HOST", "")
+	t.Setenv("APP_DATABASE_PORT", "5433")
+	if got := DatabaseAddr(); got != "127.0.0.1:5433" {
+		t.Errorf("DatabaseAddr = %q, want the default host and the parent's port", got)
+	}
+}

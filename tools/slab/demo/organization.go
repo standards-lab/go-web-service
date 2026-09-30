@@ -8,6 +8,7 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
 	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
+	"github.com/standards-lab/go-web-service/tools/slab/input"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 
@@ -73,13 +74,13 @@ func (s *orgState) initialization(ctx context.Context, r *scenario.Reporter) err
 }
 
 func (s *orgState) rawList(ctx context.Context, r *scenario.Reporter) error {
-	r.Note("A list request with no query component (no filter, no page, no size) returns the first page at the configured default size, %d results per page. The later steps take the ids and versions they need from this page, by code.", organization.DefaultPageSize)
+	r.Note("A list request with no query component (no filter, no page, no size) returns the first page at the configured default size, %d results per page. The later steps take the ids and versions they need from this page, by code.", input.DefaultPageSize)
 	p, err := List(ctx, s.client, r)
 	if err != nil {
 		return err
 	}
-	if p.Size != organization.DefaultPageSize {
-		return fmt.Errorf("the default page size is %d, not the %d the narration states", p.Size, organization.DefaultPageSize)
+	if p.Size != input.DefaultPageSize {
+		return fmt.Errorf("the default page size is %d, not the %d the narration states", p.Size, input.DefaultPageSize)
 	}
 	s.tree = make(Tree, len(p.Items))
 	for _, o := range p.Items {

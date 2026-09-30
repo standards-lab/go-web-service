@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 
 	libconfig "github.com/standards-lab/go-core/config"
@@ -40,7 +39,7 @@ func (c *ReadsConfig) Merge(src *ReadsConfig) {
 }
 
 // Finalize applies the defaults, reads the block's environment overrides
-// when a prefix is given, and validates: DefaultSize at least 1 and MaxSize
+// (APP_READS_DEFAULT_SIZE, APP_READS_MAX_SIZE), and validates: DefaultSize at least 1 and MaxSize
 // at least DefaultSize — the same invariant [web.ParseQuery] panics on,
 // caught here as configuration rather than at the first request.
 func (c *ReadsConfig) Finalize(envPrefix string) error {
@@ -51,13 +50,11 @@ func (c *ReadsConfig) Finalize(envPrefix string) error {
 		c.MaxSize = new(defaultReadsMaxSize)
 	}
 
-	if envPrefix != "" {
-		if err := overrideInt(envPrefix, "reads_default_size", c.DefaultSize); err != nil {
-			return err
-		}
-		if err := overrideInt(envPrefix, "reads_max_size", c.MaxSize); err != nil {
-			return err
-		}
+	if err := libconfig.SetFromEnv(&c.DefaultSize, libconfig.EnvName(envPrefix, "reads_default_size"), strconv.Atoi); err != nil {
+		return err
+	}
+	if err := libconfig.SetFromEnv(&c.MaxSize, libconfig.EnvName(envPrefix, "reads_max_size"), strconv.Atoi); err != nil {
+		return err
 	}
 
 	if *c.DefaultSize < 1 {
@@ -79,20 +76,4 @@ func (c ReadsConfig) Limits() web.Limits {
 		DefaultSize: *c.DefaultSize,
 		MaxSize:     *c.MaxSize,
 	}
-}
-
-// overrideInt applies one integer environment override onto dst, named by
-// the prefix and key under the config package's naming scheme.
-func overrideInt(envPrefix, key string, dst *int) error {
-	name := libconfig.EnvName(envPrefix, key)
-	v := os.Getenv(name)
-	if v == "" {
-		return nil
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return fmt.Errorf("%s: %w", name, err)
-	}
-	*dst = n
-	return nil
 }

@@ -39,7 +39,7 @@ func New(cfg *config.Config, w io.Writer) (*App, error) {
 	// The sweep's wake precedes the domain: the document layer nudges it,
 	// and the sweep receives from it.
 	wake := newSweepWake(cfg)
-	dom := newDomain(infra, wake, lc)
+	dom := newDomain(infra, wake)
 
 	// The quiesce gate precedes the admin layer and the reactors, the two
 	// halves that meet in it: a verb that changes the schema holds it
@@ -53,9 +53,7 @@ func New(cfg *config.Config, w io.Writer) (*App, error) {
 		return nil, err
 	}
 
-	if _, err := newReactors(infra, cfg, wake, gate, lc); err != nil {
-		return nil, err
-	}
+	newReactors(infra, cfg, wake, gate, lc)
 
 	router := web.NewRouter()
 	router.Use(middleware(infra, cfg)...)
@@ -63,7 +61,7 @@ func New(cfg *config.Config, w io.Writer) (*App, error) {
 		router.Mount(m)
 	}
 
-	server := web.NewServer(cfg.Server, router)
+	server := web.NewServer(cfg.Server, router, infra.Logger)
 	lc.Add(lifecycle.Service{
 		Name:     "server",
 		Stage:    stageRoot,

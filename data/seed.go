@@ -15,6 +15,7 @@ import (
 
 	"github.com/standards-lab/go-database/admin"
 	"github.com/standards-lab/sqlate"
+	"github.com/standards-lab/sqlate/query"
 )
 
 //go:embed seeds/*.json seeds/fixtures
@@ -31,9 +32,10 @@ type Contribution interface {
 	// Key names the contribution's rows in a state file and its count in
 	// the seed's result.
 	Key() string
-	// Verify prepares the statements the contribution runs against the
-	// live schema.
-	Verify(ctx context.Context) error
+	// Verifiers check against the live schema the statements the
+	// contribution runs: the domain's store, blobfs's. Each is comparable,
+	// a pointer, so one that several contributions share is verified once.
+	Verifiers() []query.Verifier
 }
 
 // Seed is a contribution of rows alone, applied by the domain's own
@@ -56,7 +58,7 @@ type Seed interface {
 type FileSeed interface {
 	Contribution
 	// Write stores the files rows declare, the state's JSON under Key,
-	// each through blobfs's retry-safe write (Storage.FS.Ensure), and
+	// each through blobfs's retry-safe write (Storage.FS.EnsureFile), and
 	// returns how many it stored. A file already there is left as it is,
 	// and every row carries its id, so a rerun finds each file and a
 	// reset writes it again under the same key. fixtures holds the bytes
@@ -112,14 +114,22 @@ func NewSeeder(db *Database, contributions ...Contribution) *Seeder {
 	return s
 }
 
-// Verify prepares the package's statements and every contribution's
-// against the live schema.
+// Verify checks the package's statements and every contribution's
+// verifiers against the live schema, each verifier once. The admin service
+// runs it at startup, before it seeds, and on a verify request, so it is
+// the service's one statement check.
 func (s *Seeder) Verify(ctx context.Context) error {
-	errs := []error{s.db.Verify(ctx)}
+	vs := []query.Verifier{s.db.stmts}
+	seen := map[query.Verifier]bool{}
 	for _, c := range s.all {
-		errs = append(errs, c.Verify(ctx))
+		for _, v := range c.Verifiers() {
+			if !seen[v] {
+				seen[v] = true
+				vs = append(vs, v)
+			}
+		}
 	}
-	return errors.Join(errs...)
+	return query.Verify(ctx, s.db.DB, vs...)
 }
 
 // States lists the embedded state files by name, sorted; the fixtures
@@ -141,23 +151,16 @@ func (s *Seeder) States() []string {
 
 // Seed applies the named state: every Seed's rows in one transaction, in
 // the order the contributions were given, then, once it commits, every
-// FileSeed's files, each through the storage protocols. It is idempotent,
-// leaving an existing row or file as it is, and it runs at every start of
-// an environment that names a state, not only the first, and on demand
-// from the admin mount. Each run writes again whatever the state names
-// that is missing, so a seeded organization, logo, or file a client
-// deleted is restored at the next start. Of the checked-in
-// configurations, only the local overlay names a state. The
-// counts are what this run inserted, rows or files, for every
-// contribution; one the state does not carry, or a seeded database,
-// reports zero. A key no contribution reads is a defect in the file,
-// refused before any I/O; the refusal names the first such key by name.
+// FileSeed's files. It is idempotent, leaving an existing row or file as
+// it is and writing again whatever the state names that is missing. The
+// counts are what this run stored, per contribution, zero for one the
+// state does not carry. A key no contribution reads is a defect in the
+// file, refused before any I/O.
 //
-// A failure in the transaction rolls every row back, and no file is
-// written. A failure writing files leaves the committed rows and the
-// files stored before it, each file's write abandoned by the protocol when
-// it fails partway, so a rerun converges; the counts returned beside the
-// error are what the run stored before it stopped.
+// A failure in the transaction rolls every row back and writes no file. A
+// failure writing files leaves the committed rows and the files stored
+// before it, so a rerun converges; the counts beside the error are what
+// the run stored before it stopped.
 func (s *Seeder) Seed(ctx context.Context, name string) (admin.Seeded, error) {
 	var st map[string]json.RawMessage
 	if err := readSeed(name, &st); err != nil {

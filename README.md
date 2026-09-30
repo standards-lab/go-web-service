@@ -111,26 +111,12 @@ mise run serve      # run the service
 run first — see [`compose/README.md`](compose/README.md) for the mechanism and its one accepted
 limitation.
 
-Telemetry starts first, ahead of every lifecycle stage: a startup hook installs the tracer and
-meter providers before the pool connects, and a shutdown hook flushes them after the last stage
-drains, so it brackets the stages rather than holding one of its own. Startup then runs the
-stages the composition root's stage table (`internal/app/stages.go`) names, in order, and the
-drain runs them in reverse:
-
-- `infrastructure`: the pool connects, and the object store ensures its container and answers a
-  probe. Both are up before the `schema` stage, whose seed writes the seeded files into the
-  store.
-- `schema`: the migration sets are verified, any pending migration is applied, and the
-  configured seed set is applied (the `local` overlay names `default`). The stage is
-  go-database's `admin.Stage`: the table names the library's value instead of choosing its own.
-- `verify`: blobfs's store and each domain verify their statements against the migrated
-  schema. The domains declare no stage and register nothing themselves; the composition root
-  registers each domain's `Verify` here.
-- `reactors`: the sweep starts (see [Sweep](#sweep)).
-- `root`: the server, which starts last and drains first.
-
-The service then logs `server ready` on `localhost:8080` (the `local` overlay binds loopback and
-runs debug logging). From a second shell:
+Startup connects the database and the object store, applies any pending migration, checks every
+statement against the schema, seeds the configured state (the `local` overlay names `default`),
+starts the [sweep](#sweep), and starts the server last; the drain runs in reverse. The stage
+table in `internal/app/stages.go` is the one declaration of that order. The service then logs
+`server ready` on `localhost:8080` (the `local` overlay binds loopback and runs debug logging).
+From a second shell:
 
 ```sh
 curl localhost:8080/healthz   # 200 {"status":"ok"}
@@ -183,7 +169,9 @@ type, SVG included, answers 415. A `PUT` answers 201 with the logo's `Location` 
 replaced a logo, since every `PUT` stores a new file. The logo routes take no `If-Match`: the
 last write wins, and a 409, not a precondition, tells apart two replacements racing to
 activate. The `GET` is served `Cache-Control: no-cache` with the object's `ETag` and
-`Last-Modified`, so a client revalidates on every use.
+`Last-Modified`, so a client revalidates on every use. Once a replacement or a delete commits,
+the old file's object and row are purged; a purge that fails is logged at warn and the request
+still succeeds (201 or 204), the file left deleting for the sweep's stale reclaim.
 
 ```sh
 curl localhost:8080/api/organizations                          # the seeded reference data, paged
@@ -209,31 +197,34 @@ answer an empty page, and for an organization that does not exist, 404:
 | `DELETE` | `/files/{id}` | Delete a file |
 | `POST` | `/files/{id}/move` | Move it into a directory within the root |
 
-An upload creates a new file under an id the server mints, so it is a `POST` to its directory's
-files, the file's name in the required `name` parameter, and answers 201 with the file's
-metadata read as its `Location`. It is not idempotent: a retry after a lost response is a second
-create, which answers 409 on the name the first took. An upload the store refuses while it is
-unreachable answers 503; if the store also refuses the abandon's object delete, the file is left
-deleting, hidden from the listings, and keeps its name until the sweep's stale reclaim (the
-`sweep` block's `stale_age`), an upload of that name meanwhile answering 409 "the file is being
-deleted". The moves and the deletes take the row's
-version in `If-Match`: 428 when it is missing, 412 when it is stale. A recursive delete marks the branch deleting and answers 202 with the
-directory's read as its `Location`; the [sweep](#sweep) then removes the rows and their
-objects. Until the sweep finishes, the directory reads `deleting`, its listings answer 404, and
-a write into it answers 409 "the directory is being deleted". A repeated recursive delete
-answers 202 and nudges the sweep again. An object the sweep cannot delete leaves its file, and
-the directories above it, for a later pass; the sweep logs the refusal and runs on. A recursive
-delete of `root` removes the organization's document root with it, and the next write creates a
-new one. Every conflict carries one of six curated details: "an entry with that name already
-exists", "the directory is not empty", "the directory is being deleted", "the file is being
-deleted", "the file is referenced", or "the request conflicts with the current state". A move of
-a file whose own delete began, in a directory that is not deleting, answers "the file is being
-deleted"; a file in a marked branch, or a move into one, answers the directory's detail.
+- An upload is a `POST` to its directory's files, the file's name in the required `name`
+  parameter, and answers 201 with the file's metadata read as its `Location`. It creates a new
+  file under an id the server mints, so it is not idempotent: a retry after a lost response
+  answers 409 on the name the first took.
+- An upload the store refuses while it is unreachable answers 503. If the store also refuses
+  the abandon's object delete, the file is left deleting, hidden from the listings, and keeps
+  its name until the sweep's stale reclaim (`sweep.stale_age`); an upload of that name
+  meanwhile answers 409 "the file is being deleted". An upload whose body ends before its
+  declared length is the request's fault, 400, never an outage.
+- The moves and the deletes take the row's version in `If-Match`: 428 when it is missing, 412
+  when it is stale.
+- A recursive delete marks the branch deleting and answers 202 with the directory's read as its
+  `Location`; the [sweep](#sweep) then removes the rows and their objects. Until it finishes,
+  the directory reads `deleting`, its listings answer 404, and a write into it answers 409 "the
+  directory is being deleted". A repeated recursive delete answers 202 and nudges the sweep
+  again. A recursive delete of `root` removes the document root, and the next write creates a
+  new one.
+- Every conflict carries one of six curated details: "an entry with that name already exists",
+  "the directory is not empty", "the directory is being deleted", "the file is being deleted",
+  "the file is referenced", or "the request conflicts with the current state". A move of a file
+  whose own delete began answers "the file is being deleted"; a file in a marked branch, or a
+  move into one, answers the directory's detail.
 
 An id outside the organization's document root answers 404, as an absent one does, so no
 request reads, moves, or deletes across organizations. A download is served as
 `Content-Disposition: attachment` with `Cache-Control: private, no-cache`, never rendered
-inline, since stored HTML would run in the API's origin.
+inline, since stored HTML would run in the API's origin. A download whose object cannot be
+opened answers its problem with none of the file's headers and `Cache-Control: no-store`.
 
 Two validators share HTTP's entity-tag syntax, the version and the object ETag, and neither
 stands in for the other:
@@ -257,13 +248,13 @@ library function startup runs; the schema verbs answer with the resulting schema
 | `GET` | `/admin/database/patterns` | The pattern catalog |
 | `GET` | `/admin/database/statements` | Every domain's compiled statements |
 | `GET` | `/admin/database/states` | The named states the service declares |
-| `POST` | `/admin/database/schema/verify` | Verify every set's history and the seed statements |
+| `POST` | `/admin/database/schema/verify` | Verify every set's history and every statement |
 | `POST` | `/admin/database/schema/up` | Apply every set's pending migrations |
 | `POST` | `/admin/database/schema/down` | Revert a set's migrations (`{"set": "app", "steps": 1}`, one by default) |
 | `POST` | `/admin/database/schema/steps` | Apply or revert a set's `{"set": "app", "steps": n}`, negative to revert |
 | `POST` | `/admin/database/schema/force` | Set a set's history to `{"set": "app", "version": v}` without running a file |
 | `POST` | `/admin/database/seed` | Apply the configured set, or `{"state": "…"}`, over what is there (403 with no set) |
-| `POST` | `/admin/database/state` | Reset to `{"state": "…", "confirm": true}`: revert every set, apply them, seed the state |
+| `POST` | `/admin/database/state` | Reset to `{"state": "…", "confirm": true}`: revert every set, apply them, seed the state (the configured set when `state` is empty; 403 with none) |
 
 The schema is two migration sets, run in declaration order: `blobfs`, blobfs's own tables, and
 `app`, the service's (`data/migrations`), whose migrations reference the tables beneath. The
@@ -369,53 +360,21 @@ recursive delete waited out through the sweep.
 
 Two tiers. The unit tier, `mise run test`, runs on every pull request and touches no service,
 network, or disk: a package that runs SQL proves it over sqlate's scripted driver, and one that
-stores objects over go-storage's fake. The `data` package's tests prove the shared file
-protocols, the seeder's composition of the domains' seed contributions, and the sweep worker
-through its public constructor over both: its pass loop, its stop at the drain, its logging
-policy, and its wait on the quiesce gate. The integration tier,
-`mise run integration`, runs the composed service black-box through its API against the compose
-stack, in CI on every merge to main and on demand from the Actions tab.
+stores objects over go-storage's fake. The integration tier, `mise run integration`, runs the
+composed service black-box through its API against the compose stack, in CI on every merge to
+main and on demand from the Actions tab.
 
-The suite lives in the `integration` package under the `integration` build tag. Its harness is
-the toolkit the SDKs ship beside what it exercises: go-core's `process/processtest` builds
-`cmd/server` once, runs it as a subprocess configured by `APP_*` variables on a reserved port,
-and relays the database or the object store through a loopback forwarder (`Options.Database`,
-`Options.Storage`) that a test severs for the outage and for a sweep the store refuses.
-go-web-sdk's `webtest` drives the service through its API. `integration.Objects` reads the
-container beneath the API, so a test can assert an object is gone. A failing test prints each
-service process's output, so a 500 comes with the service's own record of it. The service adds only its configuration and
-state control through the admin mount; nothing in the service exists for the tests' sake.
-
-The storage cases:
-
-- `TestDocument`: the document API's contract, the deleting state, the guarded deletes, the
-  conflicts' curated details (a file's own delete told apart from its directory's), both
-  listings paged by number and by cursor with their cursor 400s, a file delete the severed store
-  refuses, left deleting and finished by its retry at the client's version, the listings of an
-  organization that does not exist, a download's round trip with its exact bytes and headers and
-  its 304s, and cross-organization isolation, one organization reaching none of another's
-  directories or files.
-- `TestDocumentRefusedUpload`: an upload through a severed store answers 503 and leaves no
-  object; its abandon is refused too, so the row is left deleting, hidden from the listing but
-  holding its name until the sweep's stale reclaim, an upload of it meanwhile answering 409 "the
-  file is being deleted", after which the same upload stores.
-- `TestStorageOutage`: with the store severed, `/readyz` names the `storage` check, a download
-  and an upload answer 503, and the metadata reads answer 200; the service recovers without a
-  restart.
-- `TestDocumentSweep`: a marked branch swept of its rows and objects, a refused pass that
-  converges once the store returns, and the root's recursive delete.
-- `TestSweepAtStartup`: a branch marked before a restart is swept at the next start.
-- `TestSweepUnderReset`: state resets under a working sweep, which the quiesce gate orders.
-- `TestOrganizationLogo`: the logo's upload, replacement (the replaced object gone from the
-  store), revalidation, 415, and delete, and an upload through a severed store reclaimed by the
-  sweep.
-- `TestSeededStorage`: the `default` state's logos and document tree, acme's logo under its
-  fixed key, an additive reseed that stores nothing, a reset that writes them again, and
-  `empty`, which seeds none of it.
-
-The document and sweep cases work in `finance`, an organization the `default` state seeds no
-document tree for, so each starts from an organization without a root; the seeded tree is
-acme's.
+The suite lives in the `integration` package under the `integration` build tag, each file named
+for the surface it asserts (`organization_test.go`, `document_test.go`, `logo_test.go`,
+`sweep_test.go`, `outage_test.go`, and the rest), each test's comment stating what it proves.
+Its harness is the toolkit the SDKs ship beside what it exercises: go-core's
+`process/processtest` builds `cmd/server` once, runs it as a subprocess configured by `APP_*`
+variables on a reserved port, and relays the database or the object store through a loopback
+forwarder (`Options.Database`, `Options.Storage`) that a test severs for an outage. go-web-sdk's
+`webtest` drives the service through its API, and `integration.Objects` reads the container
+beneath it. A failing test prints each service process's output, so a 500 comes with the
+service's own record of it. The service adds only its configuration and state control through
+the admin mount; nothing in the service exists for the tests' sake.
 
 The task runs the same `compose.yml` as its own project (`go-web-service-integration`, Postgres
 on 5433 and Azurite on 10001), so the development stack and its data are never touched, and
@@ -441,11 +400,13 @@ Configuration layers in a fixed precedence, later sources winning:
    `APP_OBSERVABILITY_SAMPLE_RATIO`, the rate limit (`APP_RATE_LIMIT_REQUESTS`,
    `APP_RATE_LIMIT_WINDOW`), the reads paging policy
    (`APP_READS_DEFAULT_SIZE`, `APP_READS_MAX_SIZE`), the admin seed set (`APP_ADMIN_SEED`, a
-   state name), and the sweep's interval, pass size, and stale age (`APP_SWEEP_INTERVAL`,
+   state name; an empty value is unset, as for every override, so only a file's
+   `"seed": ""` clears a configured one), and the sweep's interval, pass size, and stale age (`APP_SWEEP_INTERVAL`,
    `APP_SWEEP_BATCH`, `APP_SWEEP_STALE_AGE`).
 
 Every file is optional: a deployment can run on the base file and environment variables alone,
-or on environment variables only.
+or on environment variables only. Each file decodes strictly: a key the configuration does not
+declare fails the load.
 
 The `storage` block is go-storage's, each setting with its override:
 
@@ -457,9 +418,8 @@ The `storage` block is go-storage's, each setting with its override:
 | `key` | `APP_STORAGE_KEY` | none, required; a secret, and `secrets.example.json` carries Azurite's published development key |
 | `max_object_size` | `APP_STORAGE_MAX_OBJECT_SIZE` | 10485760 bytes, 10 MiB (`config.json`); 0 is unbounded |
 | `list_page_size` | `APP_STORAGE_LIST_PAGE_SIZE` | 0, the provider's own page size |
-| `request_timeout` | `APP_STORAGE_REQUEST_TIMEOUT` | `3s` (`config.json`; go-storage's own is `10s`), bounding the store's own startup check and readiness probe, so `/readyz` answers within it when the store is down |
-| `options.<key>` | `APP_STORAGE_OPTIONS_<KEY>` | the provider's settings; `config.json` sets azureblob's `max_retries` to `1` (the SDK's own is 3 with exponential backoff), so a request to a store that is down fails in seconds, not tens of seconds |
-| `options` | none | the provider's own settings (`max_retries`, `block_size`, `concurrency`) |
+| `request_timeout` | `APP_STORAGE_REQUEST_TIMEOUT` | `3s` (`config.json`; go-storage's own is `10s`), bounding the store's own startup check and readiness probe, so `/readyz` answers within it when the store is down; the object operations take no bound from it |
+| `options.<key>` | `APP_STORAGE_OPTIONS_<KEY>` | azureblob's own settings. `try_timeout` bounds each try of an object operation, a `Put` block's upload or a `Get` whose body the client must finish reading within it: `60s` (`config.json`), sized for the 10 MiB object limit over a slow client. `max_retries` is how many times a failed try is retried: the SDK's 3, with exponential backoff from 800 ms, in `config.json`, and `1` in the `local` overlay and the integration harness, so a store that is down is refused in about a second. `block_size` and `concurrency` size a `Put`'s staged blocks |
 
 The `sweep` block schedules the [sweep](#sweep): `interval` (`APP_SWEEP_INTERVAL`, `30s`), the
 backstop wake; `batch` (`APP_SWEEP_BATCH`, 100), the records one pass handles; and `stale_age`

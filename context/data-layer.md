@@ -11,10 +11,11 @@ section the code comes to express is deleted.
   in authored files throughout, and native Postgres features where they earn it, each in a
   file that declares it in its header and so enters the port list (the README's Stack section).
   Standard SQL is preferred where it costs nothing; a native choice is a choice, named as such.
-- Library-bound infrastructure is prototyped natively in the SDK repository that owns it:
-  go-database for the persistence surface, go-web-sdk for the web surface. It's linked into
-  this repository through the local gitignored `go.work` during development. Nothing is staged
-  under a `pkg/` tree here.
+- A library change is prototyped natively in the SDK repository that owns it, go-database for
+  the persistence surface and go-web-sdk for the web surface, linked into this repository
+  through the local gitignored `go.work` during development. A convention proven here before
+  its library is settled stages in the flat root `sdk` package (`domain-architecture.md`);
+  nothing is staged under a `pkg/` tree.
 - The layer spans the SDKs and this service. The reads and writes slices are coordinated
   sessions — a library slice and the service slice that proves it, planned together, each
   repository on its own branch with its own pull request. The domain slices are service-only.
@@ -24,9 +25,9 @@ section the code comes to express is deleted.
 
 ## Reads and writes
 
-The organization and document domains run on authored SQL; `domain-architecture.md` and
-`internal/app/doc.go` hold the rules the next layer is built by. Ids are database-minted (`uuidv7()`) and `RETURNING` is
-the application's identity pattern, both on the port list. Base packages outside `internal/` are
+The organization and document domains run on authored SQL; `domain-architecture.md` holds the
+rules the next layer is built by. Ids are database-minted (`uuidv7()`) and `RETURNING` is the
+application's identity pattern, both on the port list. Base packages outside `internal/` are
 importable by other modules, a deliberate choice for a reference service, with the wiring kept
 compiler-private under `internal/`.
 
@@ -70,13 +71,22 @@ surfaces, routes, constraint names, and enum vocabularies are settled per task.
 
 ## Evaluation evidence (`v1.data.evaluation`)
 
-The `v1.data.evaluation` task weighs this evidence. The `sdk` package stages two tenants for go-web-
-sdk, `PathID` and `Command`. The `data` package holds the shared status matcher and the directives
+The `v1.data.evaluation` task weighs this evidence. The `sdk` package stages `Command` for
+go-web-sdk (its path parse, `PathUUID`, promoted in go-web-sdk v0.13.0) and the reactor and the
+quiesce gate for go-core. The `data` package holds the shared status matcher and the directives
 lowering, which the template cannot scaffold while it stays engine-free. A generic seed helper is a
 fit question for the evaluation: it promotes to go-database when its shape is the library's own, not
 when a second service repeats the per-table loop. It also decides whether a linter (`depguard`,
 denying the provider modules outside the composition root) enforces the provider import boundary the
 README's Stack section states.
+
+## The general sweeper
+
+The sweep worker (`data.Storage.SweepWorker`) is the standalone sweeper of blobfs's deletes, the
+one reclamation the service runs. The moment any other layer needs sweeper-like reclamation
+(outbox cleanup, expired sessions, soft-delete purge, or any cascade beyond pruning SQL rows),
+that step builds the general sweeper and moves blobfs's sweep onto it as its first reclaimer; it
+never builds a second standalone worker.
 
 ## Prior R&D
 

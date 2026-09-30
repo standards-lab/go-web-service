@@ -13,6 +13,7 @@ import (
 	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
+	"github.com/standards-lab/sqlate/query"
 
 	"github.com/standards-lab/go-web-service/data"
 )
@@ -134,29 +135,33 @@ func (s *store) createDirectory(ctx context.Context, organizationID string, c Cr
 	return Identity{ID: dir.ID, Version: dir.Version}, err
 }
 
-// directory reads the directory with its path from the root: blobfs's path
-// runs from its own root, and its first segment is the document root.
+// directory reads the directory with its path from the root, in one
+// transaction with its scope check, so the three reads see one tree:
+// blobfs's path runs from its own root, and its first segment is the
+// document root.
 func (s *store) directory(ctx context.Context, organizationID, id string) (Directory, error) {
 	fs := s.storage.FS
-	root, id, err := s.scope(ctx, s.db, organizationID, id)
-	if err != nil {
-		return Directory{}, err
-	}
-	d, err := fs.Directories.Find(ctx, s.db, id)
-	if err != nil {
-		return Directory{}, err
-	}
-	path, err := fs.Directories.Path(ctx, s.db, id)
-	if err != nil {
-		return Directory{}, err
-	}
-	out, err := directoryOf(d, root)
-	if err != nil {
-		return Directory{}, err
-	}
-	_, below, _ := strings.Cut(strings.TrimPrefix(path, "/"), "/")
-	out.Path = "/" + below
-	return out, nil
+	return s.db.Transact(ctx, func(tx *sqlate.Tx) (Directory, error) {
+		root, id, err := s.scope(ctx, tx, organizationID, id)
+		if err != nil {
+			return Directory{}, err
+		}
+		d, err := fs.Directories.Find(ctx, tx, id)
+		if err != nil {
+			return Directory{}, err
+		}
+		path, err := fs.Directories.Path(ctx, tx, id)
+		if err != nil {
+			return Directory{}, err
+		}
+		out, err := directoryOf(d, root)
+		if err != nil {
+			return Directory{}, err
+		}
+		_, below, _ := strings.Cut(strings.TrimPrefix(path, "/"), "/")
+		out.Path = "/" + below
+		return out, nil
+	})
 }
 
 // listDirectories reads one page of the directory's child directories. An
@@ -202,19 +207,22 @@ func rootless[T any](ctx context.Context, s *store, organizationID, id string, e
 	if err := s.organizationExists(ctx, s.db, organizationID); err != nil {
 		return nil, web.Paging{}, fmt.Errorf("organization %s: %w", organizationID, err)
 	}
-	return nil, web.Paging{}, nil
+	return nil, web.Paging{Total: new(0)}, nil
 }
 
-// deleteDirectory removes the empty directory at version, its scope
-// checked first. Removing the root removes its owner row with it, through
-// the owner row's cascading foreign key, so the organization has no root
-// until its next write ensures a new one.
+// deleteDirectory removes the empty directory at version in one
+// transaction with its scope check. Removing the root removes its owner row
+// with it, through the owner row's cascading foreign key, so the
+// organization has no root until its next write ensures a new one.
 func (s *store) deleteDirectory(ctx context.Context, organizationID, id string, version int64) error {
-	_, id, err := s.scope(ctx, s.db, organizationID, id)
-	if err != nil {
-		return err
-	}
-	return s.storage.FS.Directories.Delete(ctx, s.db, id, bfdata.AtVersion(version))
+	_, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (struct{}, error) {
+		_, id, err := s.scope(ctx, tx, organizationID, id)
+		if err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, s.storage.FS.Directories.Delete(ctx, tx, id, bfdata.AtVersion(version))
+	})
+	return err
 }
 
 // markBranch begins the delete of the directory with everything beneath
@@ -256,24 +264,18 @@ func (s *store) moveDirectory(ctx context.Context, organizationID, id string, ve
 
 // uploadFile stores the upload as a new file named name in the directory,
 // ensuring the root when the directory is its alias, by blobfs's two-phase
-// write: the scope check and the pending row commit together before any
-// byte is stored, the put runs outside any transaction, and the completion
-// runs on the pool. A put or a completion that fails abandons the pending
-// row, so its name is free for a retry; one whose abandon fails too leaves
-// the row for the sweep. A completion refused because the row's delete
-// began or the sweep removed it, the mark of a branch that raced the
-// write, deletes the object just put; the row is the sweep's. blobfs
-// reports a completion refused from deleting as a blobfs.DeletingError
-// naming whose delete refused it, the file's own when the stale reclaim
-// began it and the directory's when a branch's mark reached it, and
-// data.Status tells the two apart.
+// write, whose first transaction runs the scope check with the pending
+// row's insert. A put or completion that fails abandons the row (the sweep
+// finishes one whose abandon fails too), and a completion refused as
+// deleting, a blobfs.DeletingError naming whose delete it was, deletes the
+// object just put.
 func (s *store) uploadFile(ctx context.Context, organizationID, directoryID, name string, u web.Upload) (Identity, error) {
 	st := s.storage
 	directoryID, err := s.writable(ctx, organizationID, directoryID)
 	if err != nil {
 		return Identity{}, err
 	}
-	file, err := st.FS.Write(ctx, s.db.DB, st.Objects, u.Body, u.Size, func(tx *sqlate.Tx) (blobfs.File, error) {
+	file, err := st.FS.WriteFile(ctx, s.db.DB, st.Objects, u.Body, u.Size, func(tx *sqlate.Tx) (blobfs.File, error) {
 		_, dir, err := s.scope(ctx, tx, organizationID, directoryID)
 		if err != nil {
 			return blobfs.File{}, err
@@ -299,11 +301,11 @@ func (s *store) content(ctx context.Context, organizationID, id string) (Content
 	if err != nil {
 		return Content{}, err
 	}
-	obj, open, err := s.storage.Serve(ctx, file)
+	dl, err := s.storage.Serve(ctx, file)
 	if err != nil {
 		return Content{}, fmt.Errorf("content: %w", err)
 	}
-	return Content{Name: file.Name, Object: obj, Open: open}, nil
+	return Content{Name: file.Name, Object: dl.Object, Open: dl.Open}, nil
 }
 
 // deleteFile removes the file at version by blobfs's two-phase delete, its scope checked in the transaction that begins the delete. No
@@ -312,7 +314,7 @@ func (s *store) content(ctx context.Context, organizationID, id string) (Content
 // converges at any version, so a delete is never refused as deleting.
 func (s *store) deleteFile(ctx context.Context, organizationID, id string, version int64) error {
 	st := s.storage
-	return st.FS.Remove(ctx, s.db.DB, st.Objects, func(tx *sqlate.Tx) (string, error) {
+	return st.FS.RemoveFile(ctx, s.db.DB, st.Objects, func(tx *sqlate.Tx) (string, error) {
 		_, file, err := s.fileScope(ctx, tx, organizationID, id)
 		return file.ID, err
 	}, bfdata.AtVersion(version))
@@ -350,10 +352,10 @@ var _ data.FileSeed = seed{}
 // Key names the hierarchies in a state file and in the seed's counts.
 func (seed) Key() string { return "documents" }
 
-// Verify prepares the layer's statements, the seed's path walk among
-// them, and blobfs's, which the tree's writes run.
-func (s seed) Verify(ctx context.Context) error {
-	return errors.Join(s.store.Verify(ctx), s.store.storage.FS.Verify(ctx, s.store.db))
+// Verifiers are the layer's store and blobfs's, which the tree's writes
+// run.
+func (s seed) Verifiers() []query.Verifier {
+	return []query.Verifier{s.store, s.store.storage.FS}
 }
 
 // Write seeds each hierarchy in file order and returns how many entries,
@@ -404,17 +406,12 @@ func (s *store) seedEntries(ctx context.Context, parent string, entries []seedEn
 	return created, nil
 }
 
-// seedEntry ensures one entry by blobfs's insert-or-find under the entry's
-// id: a directory on the pool, then its entries, and a file by the write
-// protocol's retry-safe form, blobfs's Store.Ensure, its content put and
-// the row completed. An entry already there by name is left as it is and
-// keeps its own id, the directory's contents still ensured beneath it: a
-// file there under another id, a client's upload pending or complete, is
-// never written over, since Store.Ensure reports it as a taken name. An
-// entry whose id a row already carries under another name, one a client
-// moved or renamed, is left where the client put it, a directory with its
-// contents. So is an entry whose delete is under way, which the sweep
-// finishes and the next seed writes again.
+// seedEntry ensures one entry under the entry's id: a directory by blobfs's
+// insert-or-find, then its entries, and a file by blobfs's Store.EnsureFile.
+// An entry the seed does not own is left as it stands and counts nothing:
+// one there by name under another id (its directory's contents are still
+// ensured), one whose id a row carries under another name, and one whose
+// delete is under way.
 func (s *store) seedEntry(ctx context.Context, parent string, e seedEntry) (int, error) {
 	st := s.storage
 	isDir, err := e.directory()
@@ -423,12 +420,8 @@ func (s *store) seedEntry(ctx context.Context, parent string, e seedEntry) (int,
 	}
 	if isDir {
 		dir, created, err := st.FS.Directories.Ensure(ctx, s.db, parent, e.Name, bfdata.WithID(e.ID))
-		if errors.Is(err, blobfs.ErrIDTaken) {
-			// A concurrent seed committed the directory between the
-			// lookup and the insert; the lookup finds it now. An id a
-			// moved directory holds is taken again.
-			dir, created, err = st.FS.Directories.Ensure(ctx, s.db, parent, e.Name, bfdata.WithID(e.ID))
-		}
+		// blobfs recovers a concurrent seed's insert under the same id on
+		// the pool, so ErrIDTaken here is an id a moved directory holds.
 		if errors.Is(err, blobfs.ErrIDTaken) || errors.Is(err, blobfs.ErrDeleting) {
 			return 0, nil
 		}
@@ -441,7 +434,7 @@ func (s *store) seedEntry(ctx context.Context, parent string, e seedEntry) (int,
 		}
 		return n, err
 	}
-	_, stored, err := st.FS.Ensure(ctx, s.db.DB, st.Objects, e.ID, strings.NewReader(e.Content), int64(len(e.Content)), func(tx *sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
+	_, stored, err := st.FS.EnsureFile(ctx, s.db.DB, st.Objects, e.ID, strings.NewReader(e.Content), int64(len(e.Content)), func(tx *sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
 		return st.FS.Files.Ensure(ctx, tx, st.Objects, parent, e.Name, e.ContentType, bfdata.WithID(e.ID))
 	})
 	switch {

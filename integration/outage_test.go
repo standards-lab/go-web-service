@@ -4,7 +4,6 @@ package integration_test
 
 import (
 	"net/http"
-	"os"
 	"testing"
 
 	"github.com/standards-lab/go-core/process/processtest"
@@ -13,25 +12,12 @@ import (
 	"github.com/standards-lab/go-web-service/integration"
 )
 
-// databaseAddr is the compose database as the forwarder reaches it, from
-// the same variables the harness passes the service.
-func databaseAddr() string {
-	host, port := "127.0.0.1", "5432"
-	if v := os.Getenv("APP_DATABASE_HOST"); v != "" {
-		host = v
-	}
-	if v := os.Getenv("APP_DATABASE_PORT"); v != "" {
-		port = v
-	}
-	return host + ":" + port
-}
-
 // A database outage is a temporary condition, not a server fault: while
 // the database is unreachable the readiness probe, a read, and a command
 // each answer 503, and when it returns the service recovers without a
 // restart.
 func TestOutage(t *testing.T) {
-	f := processtest.Forward(t, databaseAddr())
+	f := processtest.Forward(t, integration.DatabaseAddr())
 	s := integration.Start(t, integration.Options{Seed: integration.Default, Database: f.Addr()})
 	c := s.Client()
 	integration.Reset(t, c, integration.Default)

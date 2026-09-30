@@ -13,4 +13,8 @@
 // which the --version flag supplies or, on the --body path, a top-level
 // "version" number in the JSON stands in for. Neither function touches the
 // request; a command passes what they return to its client.
+//
+// ReadFlags is the read grammar a collection read's command binds (Bind)
+// and turns into its query pairs (Query); DefaultPageSize is the page size
+// the service gives a read that names none.
 package input

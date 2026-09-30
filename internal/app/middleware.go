@@ -24,6 +24,10 @@ import (
 // the source function to read, and RequestLogger before RequestID logs
 // before the id exists.
 //
+// Recoverer follows RequestLogger, so a handler's panic is answered with a
+// 500 problem carrying the request's id and logged as that status; the SDK
+// allows either order between the two.
+//
 // RateLimit sits innermost, inside RequestID and RequestLogger, so a
 // rejected request still carries a correlation id and is logged with its
 // 429 status. It is wrapped in Maybe against mw.NotProbe so the liveness
@@ -33,6 +37,7 @@ func middleware(infra *Infrastructure, cfg *config.Config) []web.Middleware {
 		observability.NewMiddleware(observabilityConfig(cfg)),
 		mw.RequestID(mw.WithIDSource(observability.RequestIDSource)),
 		mw.RequestLogger(infra.Logger),
+		mw.Recoverer(infra.Logger),
 		mw.Maybe(ratelimit.New(cfg.RateLimit), mw.NotProbe),
 	}
 }

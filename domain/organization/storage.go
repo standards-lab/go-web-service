@@ -14,6 +14,7 @@ import (
 	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
+	"github.com/standards-lab/sqlate/query"
 
 	"github.com/standards-lab/go-web-service/data"
 )
@@ -24,32 +25,23 @@ import (
 const imagesDirectory = "organization-images"
 
 // putLogo stores the upload as the organization's logo, named for its new
-// file id with ext, and makes it the active one, retiring the logo it
-// replaces. The file is written by blobfs's two-phase write, its
-// pending row created after the organization is read, so a nonexistent
-// organization is the missing row before any byte is stored. The pending
-// row stands alone: no image references it until the write completes, so
-// a write that stops partway, an aborted upload included, leaves a row the
-// write abandons or blobfs's stale reclaim removes, and never an image
-// that blocks the organization's delete.
+// file id with ext, and makes it the active one. blobfs's two-phase write
+// stores the file, its pending row created once the organization is read,
+// so a missing organization is sql.ErrNoRows before any byte is stored; no
+// image references the pending row, so a write that stops partway leaves
+// only a row the stale reclaim removes.
 //
-// The completed file is then activated in one transaction, which holds the
-// file, so no delete begins under the reference; removes the replaced
-// logo's image and begins its delete; and inserts the file's image as the
-// organization's active one. The replaced file is then purged, its object
-// and its row. A concurrent replacement that activated first fails the
-// insert with a unique violation; the new file is retired so it does not
-// linger.
+// One transaction then holds the completed file, releases the replaced
+// logo (its image removed, its file's delete begun), and binds the new file
+// as the active image. A concurrent replacement that activated first fails
+// the bind with a unique violation, and the new file is retired. Once the
+// activation commits, the replaced file is purged; a purge that fails is
+// logged and the request succeeds, since the replacement stands and the
+// stale reclaim finishes the deleting row.
 //
-// Once the write completes, the file is available and nothing references
-// it until the activation commits, so the steps after the write run to the
-// end whatever the client does: the retire of a file whose activation
-// failed and the purge of the replaced file run on a context the request's
-// cancellation does not reach. A client that hangs up after its body is
-// stored cancels the activation, and on the request's context the retire
-// would be cancelled with it, leaving an available file no image
-// references, which the stale reclaim, reaching only pending and deleting
-// rows, never removes.
+// The steps after the write run on a context the request's cancellation
+// does not reach: an available file no image references is one the stale
+// reclaim, which reaches only pending and deleting rows, never removes.
 func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload, ext string) (LogoIdentity, error) {
 	st := s.storage
 	// On the pool, Ensure finds the directory a concurrent first upload
@@ -59,10 +51,10 @@ func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload
 		return LogoIdentity{}, err
 	}
 	id := blobfs.NewID()
-	file, err := st.FS.Write(ctx, s.db.DB, st.Objects, u.Body, u.Size, func(tx *sqlate.Tx) (blobfs.File, error) {
+	file, err := st.FS.WriteFile(ctx, s.db.DB, st.Objects, u.Body, u.Size, func(tx *sqlate.Tx) (blobfs.File, error) {
 		// A nonexistent organization is the missing row, before the
 		// activation's foreign key would refuse it as a conflict.
-		if _, err := s.view.One(ctx, tx, "id", organizationID); err != nil {
+		if err := s.exists(ctx, tx, organizationID); err != nil {
 			return blobfs.File{}, err
 		}
 		return st.FS.Files.Create(ctx, tx, st.Objects, dir.ID, id+ext, u.ContentType, bfdata.WithID(id))
@@ -91,16 +83,10 @@ func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload
 	})
 	if err != nil {
 		// The activation rolled back, so no image references the new file.
-		return LogoIdentity{}, abandoned(err, st.FS.Remove(cleanup, s.db.DB, st.Objects, func(*sqlate.Tx) (string, error) { return file.ID, nil }))
+		return LogoIdentity{}, abandoned(err, st.FS.RemoveFileID(cleanup, s.db.DB, st.Objects, file.ID))
 	}
 	if replaced.ID != "" {
-		// The new logo is active and the replaced file unreferenced and
-		// deleting, so a failed purge is the request's error though the
-		// replacement stands; the stale reclaim finishes the file if no
-		// retry does.
-		if err := st.FS.Purge(cleanup, s.db.DB, st.Objects, replaced); err != nil {
-			return LogoIdentity{}, fmt.Errorf("retire the replaced logo %s: %w", replaced.ID, err)
-		}
+		s.purge(cleanup, organizationID, replaced)
 	}
 	return LogoIdentity{ID: file.ID}, nil
 }
@@ -112,25 +98,41 @@ func (s *store) logo(ctx context.Context, organizationID string) (Logo, error) {
 	if err != nil {
 		return Logo{}, err
 	}
-	obj, open, err := s.storage.Serve(ctx, file)
+	dl, err := s.storage.Serve(ctx, file)
 	if err != nil {
 		return Logo{}, fmt.Errorf("logo of %s: %w", organizationID, err)
 	}
-	return Logo{Object: obj, Open: open}, nil
+	return Logo(dl), nil
 }
 
 // deleteLogo retires the organization's active logo by blobfs's two-phase
-// delete, its image removed in the transaction that begins the delete;
-// none is sql.ErrNoRows.
+// delete: one transaction removes its image and begins its file's delete,
+// and the file is purged once that commits; none is sql.ErrNoRows. A purge
+// that fails is logged and the delete succeeds, as putLogo's does.
 func (s *store) deleteLogo(ctx context.Context, organizationID string) error {
-	st := s.storage
-	return st.FS.Remove(ctx, s.db.DB, st.Objects, func(tx *sqlate.Tx) (string, error) {
+	deleting, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (blobfs.File, error) {
 		logo, err := s.activeLogo(ctx, tx, organizationID)
 		if err != nil {
-			return "", err
+			return blobfs.File{}, err
 		}
-		return logo.ID, s.detach(ctx, tx, logo.ID)
+		return s.release(ctx, tx, logo.ID)
 	})
+	if err != nil {
+		return err
+	}
+	s.purge(context.WithoutCancel(ctx), organizationID, deleting)
+	return nil
+}
+
+// purge removes a released logo's object and row, the delete's second
+// phase, after the change that released it committed. A failure is logged,
+// not returned: the change stands, and the stale reclaim finishes the
+// deleting row.
+func (s *store) purge(ctx context.Context, organizationID string, file blobfs.File) {
+	if err := s.storage.FS.PurgeFile(ctx, s.db.DB, s.storage.Objects, file); err != nil {
+		s.logger.Warn("logo purge failed; the sweep's stale reclaim finishes it",
+			"organization", organizationID, "file", file.ID, "error", err)
+	}
 }
 
 // release removes the image binding the file and begins the file's delete,
@@ -155,10 +157,10 @@ var _ data.FileSeed = logoSeed{}
 // Key names the logos in a state file and in the seed's counts.
 func (logoSeed) Key() string { return "logos" }
 
-// Verify prepares the layer's statements and blobfs's, which the logo's
-// write and activation run.
-func (s logoSeed) Verify(ctx context.Context) error {
-	return errors.Join(s.store.Verify(ctx), s.store.storage.FS.Verify(ctx, s.store.db))
+// Verifiers are the layer's store and blobfs's, which the logo's write and
+// activation run.
+func (s logoSeed) Verifiers() []query.Verifier {
+	return []query.Verifier{s.store, s.store.storage.FS}
 }
 
 // Write seeds each logo in file order and returns how many it activated.
@@ -181,26 +183,17 @@ func (s logoSeed) Write(ctx context.Context, raw json.RawMessage, fixtures fs.FS
 }
 
 // seedLogo makes the fixture the organization's active logo unless it has
-// one, and reports whether it did. The fixture passes the upload's rules,
-// the size bound and the allowlist by its sniffed type, before any I/O.
-// An organization with an active logo, the seed's own from an earlier run
-// or one a client uploaded, is left alone. Otherwise the file is written
-// under the row's id by blobfs's retry-safe write, Store.Ensure, which finds
-// the file an interrupted run completed or resumes one it left pending,
-// and is activated as the organization's logo only if none became active
-// meanwhile.
+// one, and reports whether it did. The fixture passes the upload's rules
+// before any I/O. The file is written under the row's id by blobfs's
+// Store.EnsureFile, which finds or resumes an interrupted run's file, and
+// is activated only if no logo became active meanwhile.
 //
-// What the seed does not own it leaves as it stands: a file found under
-// the id that another organization's image binds, one whose organization
-// a client renamed or moved so the state's path now names a new row; a
-// row that holds the id under another name; a row that holds the name
-// under another id, which Store.Ensure reports as a taken name and no
-// client upload can make, since an uploaded logo is named for its own
-// minted id; a file whose delete is under way, which the sweep finishes and the next seed writes again; and a
-// file a concurrent seed activated first. Only a file this run stored and
-// could not activate is retired, as a lost replacement is, and at the
-// version it completed at, so no delete begins on a file an image may
-// reference.
+// What the seed does not own it leaves as it stands, with no error: a file
+// under the id that another organization's image binds, a row holding the
+// id or the name otherwise, a file whose delete is under way, and a logo
+// that became active first, a concurrent seed's or a client's. Only a file
+// this run stored and could not activate is retired, at the version it
+// completed at, so no delete begins on a file an image may reference.
 func (s *store) seedLogo(ctx context.Context, l logoSeedRow, fixtures fs.FS) (bool, error) {
 	body, err := fs.ReadFile(fixtures, l.Fixture)
 	if err != nil {
@@ -229,7 +222,7 @@ func (s *store) seedLogo(ctx context.Context, l logoSeedRow, fixtures fs.FS) (bo
 	if err != nil {
 		return false, err
 	}
-	file, stored, err := st.FS.Ensure(ctx, s.db.DB, st.Objects, l.ID, bytes.NewReader(body), int64(len(body)), func(tx *sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
+	file, stored, err := st.FS.EnsureFile(ctx, s.db.DB, st.Objects, l.ID, bytes.NewReader(body), int64(len(body)), func(tx *sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
 		return st.FS.Files.Ensure(ctx, tx, st.Objects, dir.ID, l.ID+ext, contentType, bfdata.WithID(l.ID))
 	})
 	switch {
@@ -261,23 +254,30 @@ func (s *store) seedLogo(ctx context.Context, l logoSeedRow, fixtures fs.FS) (bo
 		return attached, nil
 	case errors.Is(err, blobfs.ErrDeleting):
 		return false, nil
-	case errors.Is(err, sqlate.ErrUniqueViolation):
-		// A concurrent seed activated the same file first, or another
-		// organization's image binds the file found under the id.
-		if current, rerr := s.activeLogo(ctx, s.db, org.ID); rerr == nil && current.ID == file.ID {
+	case errors.As(err, &ce) && ce.Class == sqlate.ErrUniqueViolation:
+		switch ce.Constraint {
+		case constraintImageFile:
+			// Another organization's image binds the file found under
+			// the id.
 			return false, nil
-		}
-		if errors.As(err, &ce) && ce.Constraint == constraintImageFile {
-			return false, nil
+		case constraintImageActive:
+			// Another logo won the activation since the check. A
+			// concurrent seed that activated this same file is done;
+			// any other logo is left alone, as the check's own finding
+			// is, and the file this run stored is retired below.
+			if current, rerr := s.activeLogo(ctx, s.db, org.ID); rerr == nil && current.ID == file.ID {
+				return false, nil
+			}
+			err = nil
 		}
 	}
 	if !stored {
 		return false, err
 	}
-	// The activation rolled back, or another logo became active since the
-	// check and is left alone: no image references the file this run
-	// stored, so it is retired, at the version it completed at.
-	return false, abandoned(err, st.FS.Remove(ctx, s.db.DB, st.Objects, func(*sqlate.Tx) (string, error) { return file.ID, nil }, bfdata.AtVersion(file.Version)))
+	// The activation rolled back, or another logo became active and is
+	// left alone: no image references the file this run stored, so it is
+	// retired, at the version it completed at.
+	return false, abandoned(err, st.FS.RemoveFileID(ctx, s.db.DB, st.Objects, file.ID, bfdata.AtVersion(file.Version)))
 }
 
 // abandoned is the error of a write refused with err whose stored file was
@@ -292,6 +292,11 @@ func abandoned(err, removeErr error) error {
 	return errors.Join(err, removeErr)
 }
 
-// constraintImageFile is the unique constraint that admits one image per
-// file, which a seeded file another organization's image binds violates.
-const constraintImageFile = "uq_organization_image_file"
+// The unique constraints of organization_image the logo seed tells apart:
+// one image per file, which a seeded file another organization's image
+// binds violates, and one active image per organization, which a logo that
+// won the activation first violates.
+const (
+	constraintImageFile   = "uq_organization_image_file"
+	constraintImageActive = "ux_organization_image_active"
+)

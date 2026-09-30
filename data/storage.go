@@ -2,24 +2,23 @@ package data
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 
 	"github.com/standards-lab/blobfs"
 	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/go-storage"
+	"github.com/standards-lab/go-web-sdk"
 )
 
-// Storage is the object storage infrastructure as the domains see it:
-// blobfs's store, whose tables hold a row for every stored file and a tree
-// of directories over them, run through the same session as [Database],
-// and the object store the rows' keys name. The composition root installs
-// the engine and starts the object store. A domain runs the file protocols
-// that span the two, blobfs's two-phase write and delete, from its storage
-// translation file as FS's own methods over Objects, with its scope checks
-// and its own rows as their callbacks, and sequences the rest, the moves
-// and its directories, over blobfs's steps directly. The read of an
-// available file, which answers in the web SDK's terms, is Storage's own
-// (Serve, in protocol.go).
+// Storage is the object storage as the domains see it: blobfs's store,
+// whose rows run through the same session as [Database], and Objects, the
+// object store the rows' keys name. A domain runs blobfs's file protocols
+// (FS.WriteFile, FS.EnsureFile, FS.RemoveFile, FS.RemoveFileID,
+// FS.PurgeFile) over Objects, with its scope checks and its own rows in
+// their callbacks, and blobfs's steps directly for the rest; the read of an
+// available file, in the web SDK's terms, is Serve.
 type Storage struct {
 	FS      *bfdata.Store
 	Objects *Objects
@@ -31,11 +30,36 @@ func NewStorage(fs *bfdata.Store, objects *storage.Store) *Storage {
 	return &Storage{FS: fs, Objects: &Objects{store: objects}}
 }
 
+// Download is an available file as a download serves it: the object's
+// description, which answers a revalidation alone, and the open that
+// streams its bytes, run only when they are sent.
+type Download struct {
+	Object web.Object
+	Open   func() (io.ReadCloser, error)
+}
+
+// Serve describes an available file as a download, its open streaming
+// under ctx. Any other file is blobfs.ErrNotFound, as an absent one is, so
+// a pending upload or a file whose delete has begun is never served.
+func (s *Storage) Serve(ctx context.Context, file blobfs.File) (Download, error) {
+	if file.Status != blobfs.StatusAvailable || file.Size == nil || file.ETag == nil {
+		return Download{}, fmt.Errorf("file %s is %s: %w", file.ID, file.Status, blobfs.ErrNotFound)
+	}
+	return Download{
+		Object: web.Object{ContentType: file.ContentType, Size: *file.Size, ETag: *file.ETag, ModifiedAt: file.UpdatedAt},
+		Open:   func() (io.ReadCloser, error) { return s.Objects.Open(ctx, file.Key) },
+	}, nil
+}
+
+// ErrBodyRead reports an upload whose request body failed while its object
+// was stored: a client that sent fewer bytes than it declared, or hung up.
+// Status answers it 400, so a truncated upload is never read as the
+// database's lost connection, which fails with the same io.ErrUnexpectedEOF.
+var ErrBodyRead = errors.New("the request body could not be read")
+
 // Objects is the adapter between blobfs and a started store, the one place
 // the domains' file operations reach the object-store library, so no domain
-// imports it. It is the key validator blobfs's writes take as their first
-// step's argument, the object store blobfs's write and delete protocols and
-// its sweep call, and the open Serve streams a download through.
+// imports it: blobfs's ObjectStore, and the open Serve streams through.
 //
 // A missing container is go-storage's storage.ErrContainerNotFound on
 // every operation, which never matches storage.ErrNotFound, so a put, an
@@ -57,9 +81,15 @@ func (o *Objects) ValidateKey(key string) error {
 // as blobfs's completion records it. The content type is the one the
 // caller declared, since a store's own report of it may differ once
 // written.
+// A put that failed because body did is ErrBodyRead, wrapping the read's
+// error, whatever the provider reported.
 func (o *Objects) PutObject(ctx context.Context, key string, body io.Reader, contentType string, size int64) (blobfs.Object, error) {
-	obj, err := o.store.Put(ctx, key, body, storage.PutOptions{ContentType: contentType, Size: size})
+	r := &bodyReader{r: body}
+	obj, err := o.store.Put(ctx, key, r, storage.PutOptions{ContentType: contentType, Size: size})
 	if err != nil {
+		if r.err != nil {
+			return blobfs.Object{}, fmt.Errorf("%w: %w", ErrBodyRead, r.err)
+		}
 		return blobfs.Object{}, err
 	}
 	return blobfs.Object{Size: obj.Size, ContentType: contentType, ETag: obj.ETag}, nil
@@ -80,4 +110,19 @@ func (o *Objects) Open(ctx context.Context, key string) (io.ReadCloser, error) {
 // succeeds, on every provider.
 func (o *Objects) DeleteObject(ctx context.Context, key string) error {
 	return o.store.Delete(ctx, key)
+}
+
+// bodyReader records the first error its reader returns other than
+// io.EOF, so a failed put can tell the body's failure from the store's.
+type bodyReader struct {
+	r   io.Reader
+	err error
+}
+
+func (b *bodyReader) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	if err != nil && err != io.EOF && b.err == nil {
+		b.err = err
+	}
+	return n, err
 }

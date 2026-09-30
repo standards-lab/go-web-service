@@ -75,7 +75,7 @@ func TestStore_LogoProtocolsBindTheirFilesParameters(t *testing.T) {
 	s, rec, fake := serviceOver(t, sqltest.ReturningDialect{},
 		// PutLogo, replacing the active logo.
 		datatest.DirectoryRows(imagesDirectory()), // the images directory, found on the pool
-		row(), // write: the organization exists
+		exists(), // write: the organization exists
 		datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),   // write: the pending file, alone
 		datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)), // complete, on the pool
 		exec(1), // activate: the hold
@@ -148,7 +148,7 @@ func TestStore_LogoProtocolsBindTheirFilesParameters(t *testing.T) {
 // block the organization's delete.
 func TestStore_AFailedPutAbandonsThePendingRow(t *testing.T) {
 	s, rec, fake := serviceOver(t, sqltest.ReturningDialect{},
-		datatest.DirectoryRows(imagesDirectory()), row(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
+		datatest.DirectoryRows(imagesDirectory()), exists(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
 		datatest.FileRows(file(newFileID, blobfs.StatusDeleting, 2)), exec(1), // the abandon: the delete begun, the purge
 	)
 	fake.FailPut(errors.New("put failed"))
@@ -176,7 +176,7 @@ func TestStore_ARefusedCompletionDeletesTheLogosObject(t *testing.T) {
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			s, rec, fake := serviceOver(t, sqltest.ReturningDialect{}, append([]sqltest.Response{
-				datatest.DirectoryRows(imagesDirectory()), row(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
+				datatest.DirectoryRows(imagesDirectory()), exists(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
 				datatest.FileRows(), // the completion matches no pending row; blobfs reads why
 			}, c.reads...)...)
 			_, err := s.PutLogo(context.Background(), validID, logoUpload(t))
@@ -242,7 +242,7 @@ func (c *hangUp) Err() error {
 // remove it.
 func TestStore_AHangUpAfterTheWriteRetiresTheNewFile(t *testing.T) {
 	s, rec, fake := serviceOver(t, sqltest.ReturningDialect{},
-		datatest.DirectoryRows(imagesDirectory()), row(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
+		datatest.DirectoryRows(imagesDirectory()), exists(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
 		datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)),         // complete, on the pool
 		datatest.FileRows(file(newFileID, blobfs.StatusDeleting, 3)), exec(1), // the new file retired
 	)
@@ -275,7 +275,7 @@ func TestStore_AHangUpAfterTheWriteRetiresTheNewFile(t *testing.T) {
 // the activation rolled back, so no image references it.
 func TestStore_ALostActivationIs409AndRetiresTheNewFile(t *testing.T) {
 	s, rec, fake := serviceOver(t, sqltest.ReturningDialect{},
-		datatest.DirectoryRows(imagesDirectory()), row(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
+		datatest.DirectoryRows(imagesDirectory()), exists(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
 		datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)),
 		exec(1), datatest.FileRows(), // the hold, no current logo
 		sqltest.Response{Err: &sqlate.ConstraintError{Constraint: "ux_organization_image_active", Class: sqlate.ErrUniqueViolation, Err: errors.New("unique")}},
@@ -303,7 +303,7 @@ func TestStore_ALostActivationIs409AndRetiresTheNewFile(t *testing.T) {
 // is retired, a retry of the delete already begun.
 func TestStore_AHoldRefusedByTheFilesOwnDeleteIs409(t *testing.T) {
 	s, rec, fake := serviceOver(t, sqltest.ReturningDialect{},
-		datatest.DirectoryRows(imagesDirectory()), row(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
+		datatest.DirectoryRows(imagesDirectory()), exists(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
 		datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)),
 		exec(0), datatest.FileRows(file(newFileID, blobfs.StatusDeleting, 3)), // the hold matches nothing; blobfs reads the row: deleting
 		datatest.DirectoryRows(imagesDirectory()),                             // and its directory: active
@@ -333,7 +333,7 @@ func TestStore_AHoldRefusedByTheFilesOwnDeleteIs409(t *testing.T) {
 // not the answer.
 func TestStore_AHoldRefusedAfterTheReclaimIs409(t *testing.T) {
 	s, rec, _ := serviceOver(t, sqltest.ReturningDialect{},
-		datatest.DirectoryRows(imagesDirectory()), row(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
+		datatest.DirectoryRows(imagesDirectory()), exists(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
 		datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)),
 		exec(0), datatest.FileRows(file(newFileID, blobfs.StatusDeleting, 3)), // the hold matches nothing; blobfs reads the row: deleting
 		datatest.DirectoryRows(imagesDirectory()), // and its directory: active
@@ -385,7 +385,7 @@ const (
 // A logo for an organization that does not exist is the missing row,
 // before the file's row is written.
 func TestStore_PutLogoForAMissingOrganizationIs404(t *testing.T) {
-	h := module(t, datatest.DirectoryRows(imagesDirectory()), sqltest.Response{Columns: []string{"id", "parent_id", "code", "name", "version", "created_at", "updated_at", "path"}})
+	h := module(t, datatest.DirectoryRows(imagesDirectory()), sqltest.Response{Columns: []string{"version"}})
 	problem(t, upload(t, h, "/organizations/"+validID+"/logo", "image/png", "png", 3), 404)
 }
 
@@ -393,7 +393,7 @@ func TestStore_PutLogoForAMissingOrganizationIs404(t *testing.T) {
 // path as its Location; there is no replaced file to retire.
 func TestPutLogo_AnswersCreatedWithLocation(t *testing.T) {
 	s, db, _ := serviceOver(t, sqltest.ReturningDialect{},
-		datatest.DirectoryRows(imagesDirectory()), row(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
+		datatest.DirectoryRows(imagesDirectory()), exists(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
 		datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)),
 		exec(1), datatest.FileRows(), exec(1), // the hold, no current logo, the new image
 	)
@@ -541,8 +541,7 @@ func TestLogoSeed_LeavesAFileItDoesNotOwnAlone(t *testing.T) {
 			datatest.FileRows(file(seededLogoID, blobfs.StatusAvailable, 2)), // write: the file, found
 			exec(1), datatest.FileRows(), // the hold, no logo for this organization
 			{Err: &sqlate.ConstraintError{Constraint: "uq_organization_image_file", Class: sqlate.ErrUniqueViolation, Err: errors.New("unique")}},
-			datatest.FileRows(), // the active logo read again: still none
-		}, []sqltest.Op{q, q, q, begin, q, commit, begin, x, q, x, rollback, q}},
+		}, []sqltest.Op{q, q, q, begin, q, commit, begin, x, q, x, rollback}},
 		"deleting": {[]sqltest.Response{
 			row(), datatest.FileRows(), datatest.DirectoryRows(imagesDirectory()),
 			datatest.FileRows(file(seededLogoID, blobfs.StatusDeleting, 3)),
@@ -593,6 +592,73 @@ func TestLogoSeed_ALostActivationToAConcurrentSeedLeavesTheFile(t *testing.T) {
 		t.Errorf("puts = %d; want the resumed row's put", fake.Puts())
 	}
 	sameOps(t, rec, q, q, q, begin, q, commit, q, begin, x, q, x, sqltest.OpRollback, q)
+}
+
+// A different logo that wins the activation after the check, a client's
+// upload racing the seed, is left alone: the bind's unique violation on
+// the one active image is no error, and the seeded file, which no image
+// references, is retired, as when the activation finds that logo itself.
+func TestLogoSeed_ALostActivationToAnotherLogoRetiresTheSeededFile(t *testing.T) {
+	ctx := context.Background()
+	fixtures, _ := seedFixtures(t)
+	s, rec, fake := serviceOver(t, sqltest.ReturningDialect{},
+		row(), datatest.FileRows(), datatest.DirectoryRows(imagesDirectory()),
+		datatest.FileRows(), datatest.FileRows(file(seededLogoID, blobfs.StatusPending, 1)),
+		datatest.FileRows(file(seededLogoID, blobfs.StatusAvailable, 2)),
+		exec(1), datatest.FileRows(), // the hold, no logo yet
+		sqltest.Response{Err: &sqlate.ConstraintError{Constraint: "ux_organization_image_active", Class: sqlate.ErrUniqueViolation, Err: errors.New("unique")}},
+		datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)),            // the active logo read again: a client's
+		datatest.FileRows(file(seededLogoID, blobfs.StatusDeleting, 3)), exec(1), // the seeded file retired
+	)
+	if n, err := s.LogoSeed().Write(ctx, logoRows, fixtures); err != nil || n != 0 {
+		t.Fatalf("Write = %d, %v; want the other logo left and no error", n, err)
+	}
+	if _, err := fake.Get(ctx, file(seededLogoID, blobfs.StatusPending, 1).Key, storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
+		t.Errorf("the retired file's object outlived it: %v", err)
+	}
+	sameOps(t, rec, q, q, q, begin, q, q, commit, q, begin, x, q, x, sqltest.OpRollback, q, begin, q, commit, x)
+}
+
+// Once the change commits, a purge that fails is logged and the request
+// succeeds: a replacement's replaced file and a delete's file are left
+// deleting for the stale reclaim.
+func TestStore_AFailedPurgeAfterTheCommitIsLogged(t *testing.T) {
+	lost := sqltest.Response{Err: errors.New("connection lost")}
+	cases := map[string]struct {
+		responses []sqltest.Response
+		run       func(*organization.Service) error
+	}{
+		"replace": {[]sqltest.Response{
+			datatest.DirectoryRows(imagesDirectory()), exists(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
+			datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)),
+			exec(1), datatest.FileRows(file(oldFileID, blobfs.StatusAvailable, 2)), exec(1),
+			datatest.FileRows(file(oldFileID, blobfs.StatusDeleting, 3)), exec(1),
+			lost, // the replaced file's purge
+		}, func(s *organization.Service) error {
+			_, err := s.PutLogo(context.Background(), validID, logoUpload(t))
+			return err
+		}},
+		"delete": {[]sqltest.Response{
+			datatest.FileRows(file(oldFileID, blobfs.StatusAvailable, 2)), exec(1),
+			datatest.FileRows(file(oldFileID, blobfs.StatusDeleting, 3)),
+			lost, // the purge
+		}, func(s *organization.Service) error { return s.DeleteLogo(context.Background(), validID) }},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			var logs bytes.Buffer
+			s, rec, _ := serviceLogging(t, slog.New(slog.NewTextHandler(&logs, nil)), sqltest.ReturningDialect{}, c.responses...)
+			if err := c.run(s); err != nil {
+				t.Fatalf("= %v; want success once the change committed", err)
+			}
+			if rec.Pending() != 0 {
+				t.Errorf("pending = %d", rec.Pending())
+			}
+			if out := logs.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, oldFileID) {
+				t.Errorf("log = %q; want a warning naming the file", out)
+			}
+		})
+	}
 }
 
 // A fixture the upload would refuse, a type outside the allowlist or a

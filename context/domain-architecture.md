@@ -73,8 +73,8 @@ at the engine, never a 500. Which statuses carry a problem's detail on the wire 
   reported as a 500.
 - The group's error writer composes three vocabularies, first match winning:
   - the SDK maps its own request errors (400, 413, 428)
-  - the layer's matcher maps only its own errors (`ErrValidation` and `sdk.PathError` to 400,
-    `ErrCycle` to 409)
+  - the layer's matcher maps only its own errors (`ErrValidation` to 400, `ErrCycle` to 409);
+    a malformed path id is the SDK's `web.PathError`
   - `data.Status` maps the library's (directives 400, the missing row 404, unique and
     foreign-key violations 409, the stale version 412, an outage 503)
 
@@ -93,14 +93,15 @@ contract (`ParseQuery`); the lowering to the read model's header is `data.Direct
 
 ## Composition wiring
 
-`internal/app/domain.go` constructs each layer's service from the `data` package and registers
-its `Verify` on the coordinator at `stageVerify`, never handing the `Infrastructure` struct down.
-Every stage the process uses is named once in `internal/app/stages.go`, in dependency order:
-`stageInfrastructure` (the pool and the object store), `stageSchema` (go-database's
-`admin.Stage`, named rather than chosen), `stageVerify` (blobfs's store and the domains),
-`stageReactors`, and `stageRoot` (the server). Each layer file registers at a stage from that
-table, so the ordering is the root's alone: a stage stays at the call site, never in a library or
-a domain.
+`internal/app/domain.go` constructs each layer's service from the `data` package, never handing
+the `Infrastructure` struct down; a domain declares no lifecycle service. Its statements are
+checked by the seeder its contributions join, which the admin service runs at the schema stage
+before it seeds: each contribution names its verifiers (its store, blobfs's), and the seeder
+runs each once. Every stage the process uses is named once in `internal/app/stages.go`, in
+dependency order: `stageInfrastructure` (the pool and the object store), `stageSchema` (the
+schema, the statements, and the seed), `stageReactors`, and `stageRoot` (the server). Each
+layer file registers at a stage from that table, so the ordering is the root's alone: a stage
+stays at the call site, never in a library or a domain.
 The base layers (`data`, `domain/<layer>`, `admin/<service>`) are root-level packages because
 the domain packages import `data` and the topology-and-naming principle forbids a root-level
 package importing `internal/*`.
@@ -108,14 +109,14 @@ A domain that seeds the named states declares each contribution over its own tab
 statements, returned by a method of its service (`Seed`, `LogoSeed`). A contribution of rows is
 a `data.Seed`, applied in the seed's one transaction. A contribution of stored files is a
 `data.FileSeed`: blobfs's two-phase write puts an object outside any transaction, so the seeder
-runs it after the row transaction commits. Each file goes through blobfs's `Store.Ensure`, the
+runs it after the row transaction commits. Each file goes through blobfs's `Store.EnsureFile`, the
 two-phase write's retry-safe form, under a fixed id the state file carries. A rerun then
 finds the file, and a reset, which leaves the container's objects in place, writes it again
 under the same key. A file seed leaves alone what it does not own. `admin.go` hands every
 contribution to `data.NewSeeder` in the tables' dependency order, so the domain is constructed
 before the admin layer and `data` names no domain's table.
 `mountAPI` mounts each layer's group and hands policy at the construction site: the
-service-owned reads configuration yields the `web.Limits` each handler constructor receives.
+service-owned reads configuration yields the one `web.Limits` every handler constructor receives.
 Per-layer policy variation is different values at different construction sites.
 
 ## The sdk staging package
@@ -123,8 +124,8 @@ Per-layer policy variation is different values at different construction sites.
 Library promotion candidates stage in the base `sdk` package: flat, a package meant to empty out
 accumulates no sub-packages, with each file named for the library its contents are bound for.
 Staging is cheap and deliberate; the `v1.data.evaluation` task rules on every tenant. The
-tenants are `PathID`, the typed path-value parse, and `Command`, the guarded-command read
-composing it with the SDK's `IfMatch` and `DecodeJSON`, both bound for go-web-sdk, and the
+tenants are `Command`, the guarded-command read composing the SDK's `PathUUID` (promoted from
+here in go-web-sdk v0.13.0), `IfMatch`, and `DecodeJSON`, bound for go-web-sdk, and the
 reactor (`reactor.go`, with the `Every` and `Wake` sources) with the quiesce gate (`gate.go`, a
 context-aware readers-writer gate that prefers its exclusive side), both bound for go-core.
 

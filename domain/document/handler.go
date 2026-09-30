@@ -30,29 +30,15 @@ type handler struct {
 	limits  web.Limits
 }
 
-// Routes builds the layer's route group, rooted at /documents, every route
-// under /{org}, the organization's id, where a directory's {id} may be the
-// root alias. The directories: create (POST /directories), the metadata read
-// with the path (GET /directories/{id}), the paged listings of its child
-// directories and its files, the delete (DELETE /directories/{id}, 204 for
-// an empty directory, or with ?recursive=true 202 once the branch is
-// marked for the sweep), and the move, an action on its own path
-// (POST /directories/{id}/move). An upload is a POST of the raw body to its
-// directory's files, the new file's name in the name query parameter
-// (POST /directories/{id}/files?name=…), a create of a file whose id the
-// server mints. The files: the metadata read (GET /files/{id}), the download
-// (GET /files/{id}/content), the delete, and the move. The moves and the
-// deletes take their version precondition from If-Match. Every rejection
-// is an RFC 9457 problem through the group's error writer: the SDK maps
-// its own request errors, the layer's matcher its own vocabulary, and the
-// data package's matcher the library's. The composition root mounts the
-// group into the API module, supplies limits from the service's reads
-// configuration, and hands it the service's logger, which records the
-// cause of every 5xx the error writer sends.
+// Routes builds the layer's route group, /documents/{org}, with the
+// directory routes under /directories/{id} ({id} may be RootAlias) and the
+// file routes under /files/{id}; the README's API section lists them. The
+// moves and deletes take their version from If-Match. limits is the paging
+// policy of the listings, and logger records the cause of every 5xx the
+// group's error writer sends.
 func Routes(service *Service, limits web.Limits, logger *slog.Logger) *web.Group {
 	h := &handler{service: service, limits: limits}
-	ew := web.NewErrorWriter(status, data.Status)
-	ew.Log(logger)
+	ew := web.NewErrorWriter(logger, status, data.Status)
 	g := web.NewGroup("/documents")
 	g.SetErrorWriter(ew)
 	g.HandleErr("POST", "/{org}/directories", h.createDirectory)
@@ -70,7 +56,7 @@ func Routes(service *Service, limits web.Limits, logger *slog.Logger) *web.Group
 }
 
 func (h *handler) createDirectory(w http.ResponseWriter, r *http.Request) error {
-	org, err := sdk.PathID(r, "org")
+	org, err := web.PathUUID(r, "org")
 	if err != nil {
 		return err
 	}
@@ -265,7 +251,7 @@ func (h *handler) deleteFile(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (h *handler) moveFile(w http.ResponseWriter, r *http.Request) error {
-	org, err := sdk.PathID(r, "org")
+	org, err := web.PathUUID(r, "org")
 	if err != nil {
 		return err
 	}
@@ -283,34 +269,31 @@ func (h *handler) moveFile(w http.ResponseWriter, r *http.Request) error {
 // directoryPath reads the organization's id and a directory's, the root
 // alias or a UUID in canonical form.
 func directoryPath(r *http.Request) (org, id string, err error) {
-	if org, err = sdk.PathID(r, "org"); err != nil {
+	if org, err = web.PathUUID(r, "org"); err != nil {
 		return "", "", err
 	}
 	if r.PathValue("id") == RootAlias {
 		return org, RootAlias, nil
 	}
-	id, err = sdk.PathID(r, "id")
+	id, err = web.PathUUID(r, "id")
 	return org, id, err
 }
 
 // filePath reads the organization's id and a file's.
 func filePath(r *http.Request) (org, id string, err error) {
-	if org, err = sdk.PathID(r, "org"); err != nil {
+	if org, err = web.PathUUID(r, "org"); err != nil {
 		return "", "", err
 	}
-	id, err = sdk.PathID(r, "id")
+	id, err = web.PathUUID(r, "id")
 	return org, id, err
 }
 
 // status is the layer's own error vocabulary as one web.ProblemMatcher: a
-// validation rejection or a malformed path id (400). The SDK's request
-// errors map themselves, and the library's vocabulary (blobfs's and the
-// object store's sentinels, directives, the missing row, constraint
-// violations, the stale version, the outage) is data.Status, composed
-// after this one, which gives every conflict its curated detail.
+// validation rejection (400). The SDK maps its own request errors, a
+// malformed path id among them, and the library's vocabulary is
+// data.Status, composed after this one.
 func status(err error) (web.Problem, bool) {
-	var path *sdk.PathError
-	if errors.Is(err, ErrValidation) || errors.As(err, &path) {
+	if errors.Is(err, ErrValidation) {
 		return web.Problem{Status: http.StatusBadRequest}, true
 	}
 	return web.Problem{}, false

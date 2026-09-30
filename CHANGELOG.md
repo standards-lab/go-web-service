@@ -12,8 +12,8 @@ accumulate under [Unreleased] until the first cut.
 - Object storage: the `storage` configuration block (`APP_STORAGE_*`, go-storage's), an Azure
   Blob Storage provider through `go-storage/azureblob`, Azurite in the compose file, and blobfs
   with `blobfs/postgres` for the file tree's rows, its migration set (`blobfs`) run beneath the
-  service's own (`app`). The object store starts at the infrastructure stage beside the pool,
-  and blobfs verifies its statements beside the domains. `/readyz` lists the `storage` check.
+  service's own (`app`). The object store starts at the infrastructure stage beside the pool.
+  `/readyz` lists the `storage` check.
 - The storage admin service under `/admin/storage`: `GET /diagnostics` (whether a live probe
   succeeds, the container, the provider's longest key) and `POST /container`, which creates the
   configured container when it is missing.
@@ -46,9 +46,10 @@ accumulate under [Unreleased] until the first cut.
   hold it exclusively and each sweep pass holds it shared, so the two never run at once and a
   state reset never deadlocks with a pass (SQLSTATE 40P01). The gate is per process.
 - The file protocols both domains run: blobfs's two-phase write with its retry-safe form for
-  fixed ids and its two-phase delete (`Store.Write`, `Ensure`, `Remove`, `Purge`), promoted to
-  blobfs v0.3.0 from the copies this service staged in `data`, and `data.Storage.Serve`, the
-  read of an available file, which stays the service's.
+  fixed ids and its two-phase delete (`Store.WriteFile`, `EnsureFile`, `RemoveFile`,
+  `RemoveFileID`, `PurgeFile`), promoted to blobfs v0.3.0 from the copies this service staged in
+  `data`, and `data.Storage.Serve`, the read of an available file as a `data.Download`, which
+  stays the service's.
 - The storage seeds: the `default` state stores a logo per organization and acme's document
   tree under fixed `5eed…` ids, so a rerun finds each file and a reset, which leaves the objects
   in the container, writes it again under the same key.
@@ -120,7 +121,28 @@ accumulate under [Unreleased] until the first cut.
 
 ### Changed
 
-- The storage libraries this service validated: blobfs v0.4.0 with postgres/v0.3.0, go-storage
+- The storage suite's closing releases, validated together: go-core v0.5.0, go-web-sdk v0.13.0
+  with middleware/rate-limit v0.2.0, go-database v0.7.0 with postgres/v0.4.0, go-storage v0.3.0
+  with azureblob/v0.3.0, and blobfs v0.5.0 with postgres/v0.3.0:
+  - A malformed path id is go-web-sdk's `PathUUID` refusal (`sdk.PathID`, promoted), and a
+    handler's panic answers a logged 500 through `middleware.Recoverer`.
+  - A listing omits `total` only when it did not count; a document root's alias before its first
+    write lists a counted empty page.
+  - A download whose object fails to open answers `no-store`, with none of the file's headers.
+  - `POST /admin/database/state` with an empty state resets to the configured seed.
+  - Every configuration file decodes strictly: an unknown key fails the load.
+  - Startup's schema stage checks every statement once, through the seeder, before it seeds;
+    the `verify` stage is gone.
+- A logo replacement or delete whose purge fails after its commit succeeds and logs the failure
+  at warn; the stale reclaim finishes the file. A logo seed that loses its activation to another
+  logo leaves that logo and retires its own file, with no error.
+- An upload whose body fails is 400, no longer the 503 of a lost database connection.
+- Storage options: `try_timeout` (`60s`) bounds each object operation's try; `max_retries: 1`
+  moves from `config.json` to the `local` overlay and the integration harness.
+- A directory read and an empty directory's delete run their scope check in their own
+  transaction; the logo's organization check is a key lookup.
+- CI runs slab's vet, `go mod tidy -diff`, tests, and golangci-lint.
+- The storage libraries this service validated before them: blobfs v0.4.0 with postgres/v0.3.0, go-storage
   v0.2.1 with azureblob/v0.2.0, go-web-sdk v0.12.0, and go-database v0.6.2, the promotions and
   resolution items of `v1.storage.suite`:
   - A lost container is a 503 on every storage operation, a download's read included, which
@@ -147,15 +169,14 @@ accumulate under [Unreleased] until the first cut.
   key, null meaning the root.
 - The composition root is one file per layer under `internal/app`, as go-web-sdk-template
   v0.6.0 ships it.
-- Pins: go-core v0.4.1, go-database v0.6.2 with postgres/v0.3.0, go-web-sdk v0.12.0 with
-  middleware/rate-limit v0.1.1, sqlate v0.4.1 with postgres/v0.4.0, go-storage v0.2.1 with
-  azureblob/v0.2.0, and blobfs v0.4.0 with postgres/v0.3.0.
+- Pins: go-core v0.5.0, go-database v0.7.0 with postgres/v0.4.0, go-web-sdk v0.13.0 with
+  middleware/rate-limit v0.2.0, sqlate v0.4.1 with postgres/v0.4.0, go-storage v0.3.0 with
+  azureblob/v0.3.0, and blobfs v0.5.0 with postgres/v0.3.0.
 - The database admin verbs act on migration sets by name: `down`, `steps`, and `force` name
   the set in their body (400 when it is missing or undeclared), and the schema status reports
   each set. The state reset requires `"confirm": true`.
 - The lifecycle stages are named once, in the composition root's stage table: infrastructure,
-  schema (go-database's `admin.Stage`), verify, reactors, and root. The domains declare no
-  stage; the root registers each domain's `Verify`.
+  schema, reactors, and root. The domains declare no stage.
 - Every 409 carries a curated detail naming its kind, never the error's text: "an entry with that
   name already exists", "the directory is not empty", "the directory is being deleted", "the
   file is being deleted", "the file is referenced", or "the request conflicts with the current
@@ -183,6 +204,7 @@ accumulate under [Unreleased] until the first cut.
 - `cmd/db` and golang-migrate: migrations and seeding are library mechanisms the composition
   root triggers, and the admin mount exposes the former verbs.
 - The `internal/infrastructure`, `internal/domain`, and `internal/reactors` packages.
-- `sdk.IfMatch`, promoted to go-web-sdk v0.6.0 with the strict body decode.
+- `sdk.IfMatch`, promoted to go-web-sdk v0.6.0 with the strict body decode, and `sdk.PathID`,
+  promoted to go-web-sdk v0.13.0 as `PathUUID`.
 
 [Unreleased]: https://github.com/standards-lab/go-web-service/commits/main

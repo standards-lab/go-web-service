@@ -2,7 +2,8 @@
 // root composes the library capability blocks (log, server, database,
 // storage, observability, rate limit), the service-owned blocks (the reads
 // policy, the admin switches, and the sweep's schedule), and the shutdown
-// timeout; [Load] reads the layered files and finalizes the result
-// under the service's env prefix. The unexported envPrefix const is the
+// timeout; [Load] reads the layered files and finalizes the result under
+// the service's env prefix. The service-owned blocks are [ReadsConfig],
+// [AdminConfig], and [SweepConfig]. The unexported envPrefix const is the
 // single place a seeded service renames its environment namespace.
 package config

@@ -110,7 +110,7 @@ func TestSeed_ASeededTreeIsLeftAsItIs(t *testing.T) {
 func TestSeed_AnEntryItDoesNotOwnIsLeftAlone(t *testing.T) {
 	taken := sqltest.Response{Err: &sqlate.ConstraintError{Constraint: blobfs.ConstraintPrimaryKeyDirectory, Class: sqlate.ErrUniqueViolation, Err: errors.New("duplicate key")}}
 	cases := map[string][]sqltest.Response{
-		"moved":    {datatest.DirectoryRows(), taken, datatest.DirectoryRows(), taken}, // the retry is taken again
+		"moved":    {datatest.DirectoryRows(), taken, datatest.DirectoryRows()}, // blobfs's second lookup finds no row under the name
 		"deleting": {datatest.DirectoryRows(deleting(directory(seedDirID, seedRootID, "reports", 1)))},
 	}
 	for name, found := range cases {

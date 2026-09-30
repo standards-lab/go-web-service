@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/url"
 	"strings"
 	"testing"
@@ -43,6 +44,12 @@ func service(t *testing.T, responses ...sqltest.Response) (*organization.Service
 // over the fake, started as the composition root starts the real one.
 func serviceOver(t *testing.T, dialect sqlate.Dialect, responses ...sqltest.Response) (*organization.Service, *sqltest.Recorder, *storagetest.Fake) {
 	t.Helper()
+	return serviceLogging(t, slog.New(slog.DiscardHandler), dialect, responses...)
+}
+
+// serviceLogging is serviceOver with the service logging to logger.
+func serviceLogging(t *testing.T, logger *slog.Logger, dialect sqlate.Dialect, responses ...sqltest.Response) (*organization.Service, *sqltest.Recorder, *storagetest.Fake) {
+	t.Helper()
 	pool, rec := sqltest.Open(t, responses...)
 	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
 	fs, err := bfdata.New(catalog, dialect)
@@ -60,7 +67,7 @@ func serviceOver(t *testing.T, dialect sqlate.Dialect, responses ...sqltest.Resp
 	}
 	t.Cleanup(func() { _ = objects.Shutdown(context.Background()) })
 	db := data.New(sqlate.Wrap(pool, dialect), catalog)
-	return organization.New(db, data.NewStorage(fs, objects)), rec, fake
+	return organization.New(db, data.NewStorage(fs, objects), logger), rec, fake
 }
 
 // seeder composes the data package's seeder over the layer's row
@@ -76,7 +83,7 @@ func seeder(t *testing.T, responses ...sqltest.Response) (*data.Seeder, *sqltest
 		t.Fatal(err)
 	}
 	db := data.New(sqlate.Wrap(pool, sqltest.Dialect{}), catalog)
-	svc := organization.New(db, data.NewStorage(fs, nil))
+	svc := organization.New(db, data.NewStorage(fs, nil), slog.New(slog.DiscardHandler))
 	return data.NewSeeder(db, svc.Seed(), noFiles("logos"), noFiles("documents")), rec
 }
 
@@ -84,8 +91,8 @@ func seeder(t *testing.T, responses ...sqltest.Response) (*data.Seeder, *sqltest
 // storing nothing.
 type noFiles string
 
-func (k noFiles) Key() string                { return string(k) }
-func (noFiles) Verify(context.Context) error { return nil }
+func (k noFiles) Key() string               { return string(k) }
+func (noFiles) Verifiers() []query.Verifier { return nil }
 func (noFiles) Write(context.Context, json.RawMessage, fs.FS) (int, error) {
 	return 0, nil
 }
@@ -96,6 +103,11 @@ func identity(id string, version int64) sqltest.Response {
 
 func count(n int64) sqltest.Response {
 	return sqltest.Response{Columns: []string{"count"}, Rows: [][]driver.Value{{n}}}
+}
+
+// exists is the organization's key lookup finding it.
+func exists() sqltest.Response {
+	return sqltest.Response{Columns: []string{"version"}, Rows: [][]driver.Value{{int64(1)}}}
 }
 
 func row() sqltest.Response {
@@ -124,7 +136,7 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 		sqltest.Response{Affected: 1}, // delete
 	)
 	q, _ := web.ParseQuery(url.Values{"code": {"acme"}, "sort": {"-path"}}, web.Limits{DefaultSize: 20, MaxSize: 100})
-	if items, paging, err := s.List(ctx, q); err != nil || paging.Total != 1 || paging.More || items[0].Path != "/acme" {
+	if items, paging, err := s.List(ctx, q); err != nil || (paging.Total == nil || *paging.Total != 1) || paging.More || items[0].Path != "/acme" {
 		t.Fatalf("List = %v, %+v, %v", items, paging, err)
 	}
 	if o, err := s.Find(ctx, validID); err != nil || o.Code != "acme" || o.ParentID != nil {
@@ -200,17 +212,18 @@ func TestStore_GuardDistinguishesAbsentFromStale(t *testing.T) {
 	}
 }
 
-// Verify prepares the twelve statements and the read contract's three
-// probes: the fields against their declared types, a page past a cursor,
-// and the same page counted.
+// The seeder's Verify prepares the layer's twelve statements and the read
+// contract's three probes (the fields against their declared types, a page
+// past a cursor, and the same page counted) beside the data package's
+// lock.
 func TestStore_VerifyPreparesEveryStatement(t *testing.T) {
-	s, rec := service(t)
+	s, rec := seeder(t)
 	if err := s.Verify(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	prepared := rec.SQL(sqltest.OpPrepare)
-	if len(prepared) != 15 {
-		t.Errorf("prepared %d statements, want 12 + the contract's 3 probes", len(prepared))
+	if len(prepared) != 16 {
+		t.Errorf("prepared %d statements, want the lock, 12, and the contract's 3 probes", len(prepared))
 	}
 }
 
@@ -247,7 +260,7 @@ func TestStore_ListContinuesByCursor(t *testing.T) {
 
 	q, _ := web.ParseQuery(url.Values{"size": {"1"}, "sort": {"code"}}, limits)
 	first, paging, err := s.List(ctx, q)
-	if err != nil || len(first) != 1 || paging.Total != 3 || !paging.More || paging.Next == "" {
+	if err != nil || len(first) != 1 || (paging.Total == nil || *paging.Total != 3) || !paging.More || paging.Next == "" {
 		t.Fatalf("first page = %v, %+v, %v", first, paging, err)
 	}
 	q, err = web.ParseQuery(url.Values{"size": {"1"}, "sort": {"code"}, "cursor": {paging.Next}}, limits)
@@ -255,7 +268,7 @@ func TestStore_ListContinuesByCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 	next, paging, err := s.List(ctx, q)
-	if err != nil || len(next) != 1 || next[0].Code != "b" || paging.Total != 3 || paging.More {
+	if err != nil || len(next) != 1 || next[0].Code != "b" || (paging.Total == nil || *paging.Total != 3) || paging.More {
 		t.Fatalf("continued page = %v, %+v, %v", next, paging, err)
 	}
 	sqls := rec.SQL(sqltest.OpQuery)

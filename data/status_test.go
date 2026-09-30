@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -36,9 +37,9 @@ func TestStatus(t *testing.T) {
 		{"foreign key violation", fmt.Errorf("store: %w", sqlate.ErrForeignKeyViolation), 409, true},
 		{"version mismatch", query.ErrVersionMismatch, 412, true},
 		{"not ready", database.ErrNotReady, 503, true},
-		{"pool connection failed", fmt.Errorf("%w: refused", database.ErrConnectionFailed), 503, true},
 		{"session connection failed", fmt.Errorf("%w: refused", sqlate.ErrConnectionFailed), 503, true},
 		{"connection lost mid-read", fmt.Errorf("query: %w", io.ErrUnexpectedEOF), 503, true},
+		{"upload body cut short", fmt.Errorf("write file: %w", fmt.Errorf("%w: %w", data.ErrBodyRead, io.ErrUnexpectedEOF)), 400, true},
 		{"blobfs invalid name", &blobfs.NameError{Name: "a/b", Reason: "contains a slash"}, 400, true},
 		{"blobfs root", blobfs.ErrRootDirectory, 400, true},
 		{"blobfs not found", fmt.Errorf("find: %w", blobfs.ErrNotFound), 404, true},
@@ -103,7 +104,7 @@ func TestStatus_ConflictsCarryACuratedDetail(t *testing.T) {
 		{"unique violation", fmt.Errorf("create: %w", &sqlate.ConstraintError{Constraint: "organization_uq_parent_code", Class: sqlate.ErrUniqueViolation, Err: errors.New(`duplicate key value violates unique constraint "organization_uq_parent_code"`)}), "the request conflicts with the current state"},
 		{"foreign key violation", fmt.Errorf("create: %w", &sqlate.ConstraintError{Constraint: "organization_fk_parent", Class: sqlate.ErrForeignKeyViolation, Err: errors.New(`insert violates foreign key constraint "organization_fk_parent"`)}), "the request conflicts with the current state"},
 	}
-	ew := web.NewErrorWriter(data.Status)
+	ew := web.NewErrorWriter(slog.New(slog.DiscardHandler), data.Status)
 	ew.Detail(http.StatusConflict)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -154,6 +155,8 @@ func TestStatus_ARequestsRefusalCarriesOnlyItsInput(t *testing.T) {
 			`unknown sort field "nope"`},
 		{"invalid name", fmt.Errorf("data: create file in d: %w", &blobfs.NameError{Name: "a/b", Reason: "contains a slash"}),
 			`invalid name "a/b": contains a slash`},
+		{"upload body cut short", fmt.Errorf("data: write file 01a0ee49-0000-7000-8000-000000000001: %w", fmt.Errorf("%w: %w", data.ErrBodyRead, io.ErrUnexpectedEOF)),
+			"the request body could not be read"},
 		{"root", fmt.Errorf("data: delete directory 00000000-0000-0000-0000-000000000000: %w", blobfs.ErrRootDirectory),
 			strings.TrimPrefix(blobfs.ErrRootDirectory.Error(), "blobfs: ")},
 	}

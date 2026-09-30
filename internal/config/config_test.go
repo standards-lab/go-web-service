@@ -157,3 +157,21 @@ func TestConfig_FinalizeRequiresDatabaseName(t *testing.T) {
 		t.Errorf("error = %v, want the database block wrap", err)
 	}
 }
+
+// The shipped files load together, strictly: the base, the local overlay,
+// and the example secrets, so a key the configuration does not declare
+// fails here rather than at a deployment's start.
+func TestConfig_ShippedFilesLoad(t *testing.T) {
+	t.Setenv("SHIPPED_ENV", "local")
+	cfg, err := libconfig.Load[config.Config](libconfig.Options{
+		Dir:         "../..",
+		EnvVar:      "SHIPPED_ENV",
+		SecretsName: "secrets.example.json",
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Admin.SeedState() != "default" || cfg.Storage.Options["max_retries"] != "1" || cfg.Storage.Options["try_timeout"] != "60s" {
+		t.Errorf("loaded admin seed %q, storage options %v; want the overlay over the base", cfg.Admin.SeedState(), cfg.Storage.Options)
+	}
+}

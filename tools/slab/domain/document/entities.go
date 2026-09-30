@@ -9,11 +9,6 @@ import (
 // RootAlias.
 const RootAlias = "root"
 
-// DefaultPageSize is the page size a listing gets when it names none:
-// internal/config/reads.go's defaultReadsDefaultSize, which config.json
-// leaves in force for the document listings as for the organization list.
-const DefaultPageSize = 20
-
 // CreateDirectory is the dirs create command's body, the shape of
 // domain/document's CreateDirectory: the parent, the root alias or a
 // directory id, and the new directory's name.

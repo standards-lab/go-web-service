@@ -71,9 +71,14 @@ func TestDirectives(t *testing.T) {
 func TestPaging_CarriesTheCollectionsReport(t *testing.T) {
 	c := query.Collection[string]{Items: []string{"a"}, Total: query.NoTotal, More: true, Next: "c2"}
 
-	want := web.Paging{Total: web.NoTotal, More: true, Next: "c2"}
+	want := web.Paging{More: true, Next: "c2"}
 	if got := data.Paging(c); got != want {
-		t.Fatalf("got %+v, want %+v", got, want)
+		t.Fatalf("uncounted: got %+v, want %+v", got, want)
+	}
+
+	c.Total = 0
+	if got := data.Paging(c); got.Total == nil || *got.Total != 0 {
+		t.Fatalf("counted: total = %v, want 0", got.Total)
 	}
 }
 

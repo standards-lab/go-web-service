@@ -120,13 +120,15 @@ accumulate under [Unreleased] until the first cut.
 
 ### Changed
 
-- The storage libraries this service validated: blobfs v0.3.0 and postgres/v0.3.0, go-storage
-  v0.2.0 and azureblob/v0.2.0, go-web-sdk v0.12.0, and go-database v0.6.2, the promotions of
-  `v1.storage.suite`:
+- The storage libraries this service validated: blobfs v0.4.0 with postgres/v0.3.0, go-storage
+  v0.2.1 with azureblob/v0.2.0, go-web-sdk v0.12.0, and go-database v0.6.2, the promotions and
+  resolution items of `v1.storage.suite`:
   - A lost container is a 503 on every storage operation, a download's read included, which
     answered 404 before; go-storage's `ErrContainerNotFound` replaces the service's workaround.
   - A file's own delete and a branch's are told apart by blobfs's `DeletingError`, with no
-    re-read, the same details on the wire.
+    re-read, the same details on the wire. A name a hidden deleting row holds answers 409 "the
+    file is being deleted" (or the directory's), no longer "an entry with that name already
+    exists".
   - The sweep worker runs blobfs's `SweepUntilDone` over its gated pass.
   - A download's `Content-Disposition` is go-web-sdk's `Attachment`, which carries a name
     holding a `%` in `filename*`.
@@ -145,9 +147,9 @@ accumulate under [Unreleased] until the first cut.
   key, null meaning the root.
 - The composition root is one file per layer under `internal/app`, as go-web-sdk-template
   v0.6.0 ships it.
-- Pins: go-core v0.4.1, go-database v0.6.1 with postgres/v0.3.0, go-web-sdk v0.11.0 with
-  middleware/rate-limit v0.1.1, sqlate v0.4.1 with postgres/v0.4.0, go-storage v0.1.0 with
-  azureblob/v0.1.0, and blobfs v0.2.0 with postgres/v0.2.0.
+- Pins: go-core v0.4.1, go-database v0.6.2 with postgres/v0.3.0, go-web-sdk v0.12.0 with
+  middleware/rate-limit v0.1.1, sqlate v0.4.1 with postgres/v0.4.0, go-storage v0.2.1 with
+  azureblob/v0.2.0, and blobfs v0.4.0 with postgres/v0.3.0.
 - The database admin verbs act on migration sets by name: `down`, `steps`, and `force` name
   the set in their body (400 when it is missing or undeclared), and the schema status reports
   each set. The state reset requires `"confirm": true`.

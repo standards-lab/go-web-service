@@ -212,7 +212,11 @@ answer an empty page, and for an organization that does not exist, 404:
 An upload creates a new file under an id the server mints, so it is a `POST` to its directory's
 files, the file's name in the required `name` parameter, and answers 201 with the file's
 metadata read as its `Location`. It is not idempotent: a retry after a lost response is a second
-create, which answers 409 on the name the first took. The moves and the deletes take the row's
+create, which answers 409 on the name the first took. An upload the store refuses while it is
+unreachable answers 503; if the store also refuses the abandon's object delete, the file is left
+deleting, hidden from the listings, and keeps its name until the sweep's stale reclaim (the
+`sweep` block's `stale_age`), an upload of that name meanwhile answering 409 "the file is being
+deleted". The moves and the deletes take the row's
 version in `If-Match`: 428 when it is missing, 412 when it is stale. A recursive delete marks the branch deleting and answers 202 with the
 directory's read as its `Location`; the [sweep](#sweep) then removes the rows and their
 objects. Until the sweep finishes, the directory reads `deleting`, its listings answer 404, and
@@ -393,7 +397,8 @@ The storage cases:
   directories or files.
 - `TestDocumentRefusedUpload`: an upload through a severed store answers 503 and leaves no
   object; its abandon is refused too, so the row is left deleting, hidden from the listing but
-  holding its name (409) until the sweep's stale reclaim, after which the same upload stores.
+  holding its name until the sweep's stale reclaim, an upload of it meanwhile answering 409 "the
+  file is being deleted", after which the same upload stores.
 - `TestStorageOutage`: with the store severed, `/readyz` names the `storage` check, a download
   and an upload answer 503, and the metadata reads answer 200; the service recovers without a
   restart.

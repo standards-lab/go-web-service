@@ -558,9 +558,11 @@ func TestDocumentRefusedUpload(t *testing.T) {
 		t.Errorf("the store after the refused upload holds %d objects (%v); want the %d before it", len(after.Objects), err, len(before.Objects))
 	}
 
-	// The hidden row holds the name: the retry is refused in the begin's
-	// transaction, before any put, so it answers at once.
-	conflict(t, c.Post(t, docs+"/directories/root/files?name=q3.txt", q3), "an entry with that name already exists")
+	// The hidden row holds the name, and blobfs refuses it as the deleting
+	// row it is, not as a taken name the client cannot list: the retry is
+	// refused in the begin's transaction, before any put, so it answers at
+	// once.
+	conflict(t, c.Post(t, docs+"/directories/root/files?name=q3.txt", q3), "the file is being deleted")
 
 	f.Restore(t)
 	restored = true

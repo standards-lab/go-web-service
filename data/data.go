@@ -23,9 +23,9 @@ var files embed.FS
 // lists its patterns. Each registration, and [NewStorage]'s for blobfs's
 // store, also records the store's verifier, which [Seeder.Verify] runs, so
 // a store that runs statements cannot be left out of the startup check.
-// The package's own statement, under
-// statements/, is the lock; it compiles once here and registers under
-// "data". The seed's statements are the domains' own (Seed).
+// The package's own statement, under statements/, is the lock; it compiles
+// once here and registers under "data". The seed's statements are the
+// domains' own (Seed).
 type Database struct {
 	*sqlate.DB
 	Catalog *query.Catalog
@@ -64,9 +64,9 @@ func (d *Database) Register(name string, stmts *query.Statements, verifier query
 	d.verifiers = append(d.verifiers, verifier)
 }
 
-// verify records a verifier that has no statements registry entry, as
-// blobfs's store, whose statements are its own.
-func (d *Database) verify(v query.Verifier) {
+// record adds v to the verifiers [Seeder.Verify] runs, for a store with no
+// statements registry entry, as blobfs's, whose statements are its own.
+func (d *Database) record(v query.Verifier) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.verifiers = append(d.verifiers, v)

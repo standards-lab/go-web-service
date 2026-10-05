@@ -43,9 +43,9 @@ done
 
 # Compose and CI service images pinned below the highest semver tag that
 # carries the pinned tag's variant suffix (18.6-alpine -> -alpine). A tag
-# needs at least one dot to count: Tempo and Grafana also publish bare
-# build numbers (98813352) that would otherwise sort above every release.
-for ref in $(grep -ho '^ *image: *[^ ]*' compose/*.yml .github/workflows/*.yml 2>/dev/null |
+# needs at least one dot to count: some images also publish bare build
+# numbers (Grafana's 98813352) that would otherwise sort above every release.
+for ref in $(grep -ho '^ *image: *[^ ]*' compose.yml compose/*.yml .github/workflows/*.yml 2>/dev/null |
 	sed 's/^ *image: *//' | tr -d "\"'" | sort -u); do
 	image=${ref%:*}
 	pin=${ref##*:}

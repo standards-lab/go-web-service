@@ -338,6 +338,9 @@ mise. `serve`'s full command also needs a shell that understands `/dev/tcp` (bas
 
 | Task | Command | What it does |
 |------|---------|--------------|
+| `mise run check` | per module (`.`, `tools/slab`): build, vet, `gofmt -l`, `go fix -diff`, `go mod tidy -diff`, `go test -race`, `golangci-lint`; then `go tool sqlint` | The one read-only check, run by CI; vet, fix, and lint read the integration suite too |
+| `mise run currency` | `scripts/currency.sh` | Report every requirement, Go version, tool, action pin, and image tag behind its latest; writes nothing |
+| `mise run upgrade` | `go get` latest of each module's direct requirements, `go mod tidy`, `mise upgrade --bump --local` | Upgrade the requirements and the mise tools; actions and images move by hand from currency's report |
 | `mise run vet` | `go vet -tags integration ./...`, then `go vet ./...` in `tools/slab` | Compile-check and vet, the integration suite and slab included |
 | `mise run serve` | `go run ./cmd/server`, tee'd to the observability collector | Run the service locally |
 | `mise run test` | `go test -race ./...`, then the same in `tools/slab` | Run the unit tier, slab included |

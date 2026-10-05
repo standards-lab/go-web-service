@@ -363,11 +363,11 @@ recursive delete waited out through the sweep.
 
 ## Tests
 
-Two tiers. The unit tier, `mise run test`, runs on every pull request and touches no service,
-network, or disk: a package that runs SQL proves it over sqlate's scripted driver, and one that
-stores objects over go-storage's fake. The integration tier, `mise run integration`, runs the
-composed service black-box through its API against the compose stack, in CI on every merge to
-main and on demand from the Actions tab.
+Two tiers. The unit tier, `mise run test`, runs on every pull request inside `mise run check`
+and touches no service, network, or disk: a package that runs SQL proves it over sqlate's
+scripted driver, and one that stores objects over go-storage's fake. The integration tier,
+`mise run integration`, runs the composed service black-box through its API against the compose
+stack, in CI on every merge to main and on demand from the Actions tab.
 
 The suite lives in the `integration` package under the `integration` build tag. Each file is
 named for the surface it asserts (`organization_test.go`, `document_test.go`, `logo_test.go`,

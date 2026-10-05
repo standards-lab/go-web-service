@@ -1,9 +1,10 @@
-package demo
+package demo_test
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/standards-lab/go-web-sdk"
 
+	"github.com/standards-lab/go-web-service/tools/slab/demo"
 	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
 	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
@@ -18,7 +20,7 @@ import (
 )
 
 func TestTree_Get(t *testing.T) {
-	tree := Tree{"acme": {ID: "x", Code: "acme"}}
+	tree := demo.Tree{"acme": {ID: "x", Code: "acme"}}
 	o, err := tree.Get("acme")
 	if err != nil || o.ID != "x" {
 		t.Errorf("Get(acme) = %+v, %v", o, err)
@@ -30,37 +32,37 @@ func TestTree_Get(t *testing.T) {
 
 func TestIdentityOf(t *testing.T) {
 	res := &httpx.Response{Status: http.StatusOK, Body: []byte(`{"id":"x","version":2}`)}
-	id, err := IdentityOf(res, "x")
+	id, err := demo.IdentityOf(res, "x")
 	if err != nil || id != (organization.Identity{ID: "x", Version: 2}) {
 		t.Errorf("IdentityOf = %+v, %v", id, err)
 	}
-	if _, err := IdentityOf(res, "y"); err == nil {
+	if _, err := demo.IdentityOf(res, "y"); err == nil {
 		t.Error("IdentityOf with the wrong id = nil, want an error")
 	}
 }
 
 func TestExpectVersion(t *testing.T) {
-	if err := ExpectVersion(organization.Identity{Version: 2}, 2); err != nil {
-		t.Errorf("ExpectVersion(2, 2) = %v", err)
+	if err := demo.ExpectVersion(organization.Identity{Version: 2}, 2); err != nil {
+		t.Errorf("demo.ExpectVersion(2, 2) = %v", err)
 	}
-	if err := ExpectVersion(organization.Identity{Version: 1}, 2); err == nil {
-		t.Error("ExpectVersion(1, 2) = nil, want an error")
+	if err := demo.ExpectVersion(organization.Identity{Version: 1}, 2); err == nil {
+		t.Error("demo.ExpectVersion(1, 2) = nil, want an error")
 	}
 }
 
-func TestOversizedBody_IsValidJSONPastTheLimit(t *testing.T) {
-	payload, printable := OversizedBody()
-	if len(payload) <= maxCommandBody {
-		t.Errorf("payload is %d bytes, want more than %d", len(payload), maxCommandBody)
+// The service bounds a command body at 64 KiB (domain/organization's
+// maxCommandBody), so the body must be well-formed JSON past it, and the
+// stand-in must name the filler's length rather than carry it.
+func TestOversizedBody_IsValidJSONPastTheServicesLimit(t *testing.T) {
+	payload, printable := demo.OversizedBody()
+	if len(payload) <= 1<<16 {
+		t.Errorf("payload is %d bytes, want more than %d", len(payload), 1<<16)
 	}
 	var body organization.CreateOrganization
 	if err := json.Unmarshal(payload, &body); err != nil {
 		t.Fatalf("payload does not decode: %v", err)
 	}
-	if len(body.Code) != maxCommandBody+1 {
-		t.Errorf("code is %d bytes, want %d", len(body.Code), maxCommandBody+1)
-	}
-	if want := `{"code":"<65537 bytes>"}`; printable != want {
+	if want := fmt.Sprintf(`{"code":"<%d bytes>"}`, len(body.Code)); printable != want {
 		t.Errorf("printable = %q, want %q", printable, want)
 	}
 }
@@ -83,7 +85,7 @@ func listServer(t *testing.T, status int) (*httptest.Server, *[]string) {
 func TestList_NarratesTheRawListAndDecodesIt(t *testing.T) {
 	srv, lines := listServer(t, http.StatusOK)
 	var out bytes.Buffer
-	p, err := List(context.Background(), httpx.NewClient(srv.URL), scenario.NewReporter(&out, false))
+	p, err := demo.List(context.Background(), httpx.NewClient(srv.URL), scenario.NewReporter(&out, false))
 	if err != nil {
 		t.Fatalf("List = %v", err)
 	}
@@ -103,7 +105,7 @@ func TestList_NarratesTheRawListAndDecodesIt(t *testing.T) {
 func TestList_FailsOnAnotherStatus(t *testing.T) {
 	srv, _ := listServer(t, http.StatusServiceUnavailable)
 	var out bytes.Buffer
-	_, err := List(context.Background(), httpx.NewClient(srv.URL), scenario.NewReporter(&out, false))
+	_, err := demo.List(context.Background(), httpx.NewClient(srv.URL), scenario.NewReporter(&out, false))
 	if err == nil || !strings.Contains(err.Error(), "503") {
 		t.Fatalf("List = %v, want a 503 error", err)
 	}
@@ -118,14 +120,14 @@ func TestReset_ShowsTheSeedFileThenPostsTheState(t *testing.T) {
 		got.line = r.Method + " " + r.URL.RequestURI()
 		_ = json.NewDecoder(r.Body).Decode(&got.body)
 		w.Header().Set("Content-Type", web.JSONMediaType)
-		_ = json.NewEncoder(w).Encode(map[string]string{"state": SeedState})
+		_ = json.NewEncoder(w).Encode(map[string]string{"state": demo.SeedState})
 	}))
 	t.Cleanup(srv.Close)
 	var out bytes.Buffer
-	if err := Reset(context.Background(), httpx.NewClient(srv.URL), scenario.NewReporter(&out, false)); err != nil {
+	if err := demo.Reset(context.Background(), httpx.NewClient(srv.URL), scenario.NewReporter(&out, false)); err != nil {
 		t.Fatalf("Reset = %v\n%s", err, out.String())
 	}
-	if got.line != "POST /admin/database/state" || got.body["state"] != SeedState {
+	if got.line != "POST /admin/database/state" || got.body["state"] != demo.SeedState {
 		t.Errorf("the service received %s %v", got.line, got.body)
 	}
 	caption, reset := strings.Index(out.String(), "  data/seeds/default.json\n"), strings.Index(out.String(), "POST /admin/database/state")
@@ -142,7 +144,7 @@ func TestReset_FailsWhenTheRepoIsNotARoot(t *testing.T) {
 	t.Cleanup(srv.Close)
 	ctx := env.WithContext(context.Background(), env.Env{Repo: t.TempDir()})
 	var out bytes.Buffer
-	if err := Reset(ctx, httpx.NewClient(srv.URL), scenario.NewReporter(&out, false)); err == nil {
+	if err := demo.Reset(ctx, httpx.NewClient(srv.URL), scenario.NewReporter(&out, false)); err == nil {
 		t.Fatal("Reset = nil, want the repo error")
 	}
 }

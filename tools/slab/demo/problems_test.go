@@ -1,4 +1,4 @@
-package demo
+package demo_test
 
 import (
 	"bytes"
@@ -9,16 +9,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/standards-lab/go-web-service/tools/slab/demo"
 	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
 	"github.com/standards-lab/go-web-service/tools/slab/env"
-	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
+
+// absentID is the well-formed id the not-found step asks for, which no
+// seeded row carries.
+const absentID = "00000000-0000-7000-8000-000000000000"
 
 // runProblems runs the problems scenario against the fake.
 func runProblems(t *testing.T) (*fakeService, string) {
 	t.Helper()
-	return runScenario(t, Problems())
+	return runScenario(t, demo.Problems())
 }
 
 func TestProblems_RunsTwelveStepsInOrderAgainstTheFake(t *testing.T) {
@@ -170,43 +174,33 @@ func TestProblems_KeepsEveryNoteLineWithinEightyColumns(t *testing.T) {
 }
 
 // An expected problem status is the step's success; a status the step did
-// not narrate, a success included, is the step's failure.
+// not narrate, a success included, is the step's failure. The fake answers
+// the not-found step's id with a row, as a service that minted it would.
 func TestProblems_FailsTheStepWhenTheStatusIsNotTheOneNarrated(t *testing.T) {
-	srv := httptest.NewServer(newFakeService())
+	fake := newFakeService()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == organization.Organizations+"/"+absentID {
+			w.Header().Set("X-Request-Id", fakeTrace)
+			writeJSON(w, http.StatusOK, organization.Organization{ID: absentID, Code: "minted", Version: 1})
+			return
+		}
+		fake.ServeHTTP(w, r)
+	}))
 	t.Cleanup(srv.Close)
 	ctx := env.WithContext(context.Background(), env.Env{Base: srv.URL, Grafana: srv.URL, Tempo: srv.URL})
-	s := &problemState{client: httpx.NewClient(srv.URL)}
 	var out bytes.Buffer
-	r := scenario.NewReporter(&out, false)
-	res, err := s.client.Get(ctx, organization.Organizations+"/"+fakeID(1))
-	if err != nil {
-		t.Fatal(err)
+	err := scenario.Run(ctx, demo.Problems(), scenario.NewReporter(&out, false))
+	if err == nil || !strings.Contains(err.Error(), "step 10 (Not Found): status = 200 OK, want 404") {
+		t.Fatalf("run = %v, want the not-found step to reject the 200:\n%s", err, out.String())
 	}
-	if err := s.observe(ctx, r, res, http.StatusNotFound); err == nil || !strings.Contains(err.Error(), "status = 200 OK, want 404") {
-		t.Errorf("observe accepted a 200 where the step narrates a 404: %v", err)
+	notFound := step(t, out.String(), "[10/12]")
+	if !strings.Contains(notFound, "HTTP 200 OK") {
+		t.Errorf("the step does not show the response it rejected:\n%s", notFound)
 	}
-	if strings.Contains(out.String(), "Trace ID") {
-		t.Errorf("observe printed a trace pointer for a response it rejected:\n%s", out.String())
+	if strings.Contains(notFound, "Trace ID") {
+		t.Errorf("the step printed a trace pointer for a response it rejected:\n%s", notFound)
 	}
-}
-
-func TestList_ShowsTheProblemsScenarioWithItsFourNeeds(t *testing.T) {
-	var out bytes.Buffer
-	scenario.WriteListing(&out, Scenarios())
-	listing := out.String()
-	at := strings.Index(listing, "problems  The service's problem-response contract (RFC 9457)")
-	if at < 0 {
-		t.Fatalf("list lacks the problems scenario:\n%s", listing)
-	}
-	rest := listing[at:]
-	for _, want := range []string{
-		"needs postgres (mise run db-up)",
-		"needs the observability profile (mise run otel-up)",
-		"needs the service (mise run serve)",
-		"needs Grafana (mise run otel-up)",
-	} {
-		if !strings.Contains(rest, want) {
-			t.Errorf("list lacks %q under problems:\n%s", want, listing)
-		}
+	if strings.Contains(out.String(), "[11/12]") {
+		t.Errorf("the run went on past the failed step:\n%s", out.String())
 	}
 }

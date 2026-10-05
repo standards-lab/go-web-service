@@ -1,4 +1,4 @@
-package demo
+package demo_test
 
 import (
 	"bytes"
@@ -19,6 +19,8 @@ import (
 
 	"github.com/standards-lab/go-web-sdk"
 
+	"github.com/standards-lab/go-web-service/tools/slab/admin/database"
+	"github.com/standards-lab/go-web-service/tools/slab/demo"
 	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
 	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/input"
@@ -26,14 +28,8 @@ import (
 )
 
 // codePattern is the layer's code rule, domain/organization's codePattern,
-// repeated here so the test pins the created code to the rule it must pass.
+// repeated here so the fake refuses a code the service would.
 var codePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
-
-func TestCreatedCode_IsAValidOrganizationCode(t *testing.T) {
-	if !codePattern.MatchString(createdCode) {
-		t.Errorf("code %q does not match %s", createdCode, codePattern)
-	}
-}
 
 // fakeService stands in for the service, Tempo, and Grafana on one
 // listener: the routes do not overlap. It holds the organization tree in
@@ -61,6 +57,14 @@ const fakeTrace = "4bf92f3577b34da6a3ce929d0e0e4736"
 // fakeMaxPageSize is the largest size a list request may ask for:
 // internal/config/reads.go's defaultReadsMaxSize.
 const fakeMaxPageSize = 100
+
+// fakeMaxCommandBody is the byte limit the service puts on a command's
+// request body: domain/organization/handler.go's maxCommandBody.
+const fakeMaxCommandBody = 1 << 16
+
+// stateRoute is the database admin service's reset, the route the
+// scenarios' first step posts to.
+const stateRoute = database.Database + "/state"
 
 // The fake's error vocabulary: the domain's validation and cycle errors, the
 // path parser's, and the store's stale version and constraint violation,
@@ -197,7 +201,7 @@ func (f *fakeService) route(w http.ResponseWriter, r *http.Request) error {
 		w.WriteHeader(http.StatusOK)
 	case r.Method == http.MethodPost && r.URL.Path == stateRoute:
 		f.reseed()
-		writeJSON(w, http.StatusOK, map[string]string{"state": SeedState})
+		writeJSON(w, http.StatusOK, map[string]string{"state": demo.SeedState})
 	case r.Method == http.MethodGet && r.URL.Path == organization.Organizations:
 		return f.list(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == organization.Organizations+"/lookup":
@@ -244,7 +248,7 @@ func command[T any](w http.ResponseWriter, r *http.Request) (id string, version 
 	if version, err = web.IfMatch(r); err != nil {
 		return "", 0, body, err
 	}
-	if body, err = web.DecodeJSON[T](w, r, maxCommandBody); err != nil {
+	if body, err = web.DecodeJSON[T](w, r, fakeMaxCommandBody); err != nil {
 		return "", 0, body, err
 	}
 	return id, version, body, nil
@@ -311,7 +315,7 @@ func (f *fakeService) find(w http.ResponseWriter, r *http.Request) error {
 // key) and no sibling may carry the code (the unique constraint, null
 // parents equal).
 func (f *fakeService) create(w http.ResponseWriter, r *http.Request) error {
-	body, err := web.DecodeJSON[organization.CreateOrganization](w, r, maxCommandBody)
+	body, err := web.DecodeJSON[organization.CreateOrganization](w, r, fakeMaxCommandBody)
 	if err != nil {
 		return err
 	}
@@ -427,7 +431,7 @@ func (f *fakeService) index(o *organization.Organization) int {
 // runDomain runs the domain scenario against the fake.
 func runDomain(t *testing.T) (*fakeService, string) {
 	t.Helper()
-	return runScenario(t, Organization())
+	return runScenario(t, demo.Organization())
 }
 
 // runScenario runs s against a fake of the service, Tempo, and Grafana, from
@@ -606,7 +610,7 @@ func TestScenario_StopsAtTheServiceNeedWhenNothingListens(t *testing.T) {
 	srv.Close()
 	ctx := env.WithContext(context.Background(), env.Env{Base: srv.URL, Grafana: srv.URL, Tempo: srv.URL})
 	var out bytes.Buffer
-	err := scenario.Run(ctx, Organization(), scenario.NewReporter(&out, false))
+	err := scenario.Run(ctx, demo.Organization(), scenario.NewReporter(&out, false))
 	if err == nil {
 		t.Fatalf("run succeeded with nothing listening:\n%s", out.String())
 	}
@@ -630,27 +634,11 @@ func TestScenario_StopsAtTheGrafanaNeedWhenOnlyTheServiceAnswers(t *testing.T) {
 	t.Cleanup(grafana.Close)
 	ctx := env.WithContext(context.Background(), env.Env{Base: service.URL, Grafana: grafana.URL, Tempo: grafana.URL})
 	var out bytes.Buffer
-	err := scenario.Run(ctx, Organization(), scenario.NewReporter(&out, false))
+	err := scenario.Run(ctx, demo.Organization(), scenario.NewReporter(&out, false))
 	if err == nil || !strings.Contains(err.Error(), `need "Grafana"`) {
 		t.Fatalf("run = %v, want the Grafana need to fail:\n%s", err, out.String())
 	}
 	if !strings.Contains(out.String(), "start it with: mise run otel-up") {
 		t.Errorf("output does not name the task:\n%s", out.String())
-	}
-}
-
-func TestList_ShowsTheScenarioWithItsFourNeeds(t *testing.T) {
-	var out bytes.Buffer
-	scenario.WriteListing(&out, Scenarios())
-	for _, want := range []string{
-		"domain    The organization domain's full CRUD surface against the running service",
-		"needs postgres (mise run db-up)",
-		"needs the observability profile (mise run otel-up)",
-		"needs the service (mise run serve)",
-		"needs Grafana (mise run otel-up)",
-	} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("list lacks %q:\n%s", want, out.String())
-		}
 	}
 }

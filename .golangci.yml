@@ -13,11 +13,3 @@ linters:
   settings:
     testpackage:
       skip-regexp: export_test\.go
-  exclusions:
-    rules:
-      # Pending the architect's decision: slab's duplicate-scenario panic is
-      # reachable only through the unexported commands, since Commands
-      # builds over the fixed Scenarios list.
-      - path: demo/commands_internal_test\.go
-        linters:
-          - testpackage

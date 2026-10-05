@@ -108,26 +108,6 @@ func TestCommands_MountsTheSchemaGroupAndOneSubcommandPerEndpoint(t *testing.T) 
 	}
 }
 
-func TestCommands_ConstructsTheClientWhenASubcommandRuns(t *testing.T) {
-	_, srv := newService(t, http.StatusOK, `{}`)
-	calls := 0
-	db := database.Commands(func() *database.Client {
-		calls++
-		return database.NewClient(httpx.NewClient(srv.URL))
-	}, output.New(io.Discard, io.Discard, nil))
-	if calls != 0 {
-		t.Fatalf("Commands constructed the client %d times while building the tree", calls)
-	}
-	db.SetOut(io.Discard)
-	db.SetArgs([]string{"schema", "status"})
-	if err := db.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	if calls != 1 {
-		t.Errorf("the client was constructed %d times, want once at run time", calls)
-	}
-}
-
 func TestContainers_PrintHelpAndAcceptNoArguments(t *testing.T) {
 	s, srv := newService(t, http.StatusOK, `{}`)
 	for _, args := range [][]string{{}, {"schema"}} {

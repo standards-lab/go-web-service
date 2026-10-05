@@ -9,7 +9,6 @@ import (
 	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate/migrate"
-	"github.com/standards-lab/sqlate/query"
 
 	dbadmin "github.com/standards-lab/go-web-service/admin/database"
 	storageadmin "github.com/standards-lab/go-web-service/admin/storage"
@@ -65,12 +64,11 @@ func newAdmin(
 	return &Admin{Database: db, Storage: infra.ObjectStore, Gate: gate}, nil
 }
 
-// newSeeder composes the seeder: the stores it verifies, every store whose
-// statements the service runs (each domain's and blobfs's), and dom's seed
-// contributions in the tables' dependency order.
+// newSeeder composes the seeder from dom's seed contributions in the
+// tables' dependency order. The stores it verifies are the ones registered
+// on infra.SQL (each domain's and blobfs's), not a list kept here.
 func newSeeder(infra *Infrastructure, dom *Domain) *data.Seeder {
 	return data.NewSeeder(infra.SQL,
-		[]query.Verifier{dom.Organization.Verifier(), dom.Document.Verifier(), infra.Storage.FS},
 		dom.Organization.Seed(), dom.Organization.LogoSeed(), dom.Document.Seed())
 }
 

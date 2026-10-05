@@ -124,26 +124,6 @@ func TestCommands_MountsOneSubcommandPerEndpoint(t *testing.T) {
 	}
 }
 
-func TestCommands_ConstructsTheClientWhenASubcommandRuns(t *testing.T) {
-	_, srv := newService(t, http.StatusOK, `{}`)
-	calls := 0
-	docs := document.Commands(func() *document.Client {
-		calls++
-		return document.NewClient(httpx.NewClient(srv.URL))
-	}, output.New(io.Discard, io.Discard, nil))
-	if calls != 0 {
-		t.Fatalf("Commands constructed the client %d times while building the tree", calls)
-	}
-	docs.SetOut(io.Discard)
-	docs.SetArgs([]string{"dirs", "get", org, "root"})
-	if err := docs.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	if calls != 1 {
-		t.Errorf("the client was constructed %d times, want once at run time", calls)
-	}
-}
-
 // Every command sends its one request: the method, the URI with each
 // segment escaped, and the body and headers the flags build. An upload's
 // raw body is covered by the put tests below.

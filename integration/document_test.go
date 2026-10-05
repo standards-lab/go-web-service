@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"testing"
 
 	"github.com/standards-lab/go-core/process/processtest"
@@ -175,7 +176,7 @@ func TestDocument(t *testing.T) {
 				}
 				walked = append(walked, p.names()...)
 			}
-			if !equal(numbered, want) || !equal(walked, want) {
+			if !slices.Equal(numbered, want) || !slices.Equal(walked, want) {
 				t.Errorf("%s by number = %v, by cursor = %v; want %v", listing, numbered, walked, want)
 			}
 			cursors[listing] = first.Next

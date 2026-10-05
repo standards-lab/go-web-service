@@ -47,10 +47,10 @@ func TestCommand_RejectsInOrder(t *testing.T) {
 	var pathErr *web.PathError
 	var preErr *web.PreconditionError
 	var bodyErr *web.BodyError
-	if _, _, _, err := command(t, "nope", "", ""); !errors.As(err, &pathErr) {
+	if _, _, _, err := command(t, "nope", "", `{"nope":"x"}`); !errors.As(err, &pathErr) {
 		t.Errorf("bad id first: %v", err)
 	}
-	if _, _, _, err := command(t, id, "", `{"name":"x"}`); !errors.As(err, &preErr) || !preErr.Missing {
+	if _, _, _, err := command(t, id, "", `{"nope":"x"}`); !errors.As(err, &preErr) || !preErr.Missing {
 		t.Errorf("missing If-Match second: %v", err)
 	}
 	if _, _, _, err := command(t, id, `"1"`, `{"nope":"x"}`); !errors.As(err, &bodyErr) {

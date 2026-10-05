@@ -76,24 +76,34 @@ func TestConfig_FinalizeDefaults(t *testing.T) {
 
 // Every environment-variable name derives from the prefix Finalize receives —
 // in production, the one envPrefix const Load passes, the single place a
-// seeded service renames.
-func TestConfig_FinalizeSeedsEnvNamesFromPrefix(t *testing.T) {
+// seeded service renames — so a renamed prefix reads its own variables and
+// ignores the default namespace.
+func TestConfig_FinalizeReadsEnvUnderPrefix(t *testing.T) {
+	t.Setenv("SVC_LOG_LEVEL", "debug")
+	t.Setenv("SVC_SERVER_PORT", "9090")
+	t.Setenv("SVC_DATABASE_NAME", "renamed")
+	t.Setenv("SVC_RATE_LIMIT_REQUESTS", "50")
+	t.Setenv("APP_LOG_LEVEL", "error")
+	t.Setenv("APP_SERVER_PORT", "7070")
+	t.Setenv("APP_DATABASE_NAME", "default")
+	t.Setenv("APP_RATE_LIMIT_REQUESTS", "70")
+
 	cfg := configtest.Minimal()
-	if err := cfg.Finalize("app"); err != nil {
+	if err := cfg.Finalize("svc"); err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
 
-	if got := cfg.Log.Env.Level; got != "APP_LOG_LEVEL" {
-		t.Errorf("Log.Env.Level = %s, want APP_LOG_LEVEL", got)
+	if cfg.Log.Level != logging.LevelDebug {
+		t.Errorf("Log.Level = %s, want debug from SVC_LOG_LEVEL", cfg.Log.Level)
 	}
-	if got := cfg.Server.Env.Port; got != "APP_SERVER_PORT" {
-		t.Errorf("Server.Env.Port = %s, want APP_SERVER_PORT", got)
+	if cfg.Server.Port == nil || *cfg.Server.Port != 9090 {
+		t.Errorf("Server.Port = %v, want 9090 from SVC_SERVER_PORT", cfg.Server.Port)
 	}
-	if got := cfg.Database.Env.Name; got != "APP_DATABASE_NAME" {
-		t.Errorf("Database.Env.Name = %s, want APP_DATABASE_NAME", got)
+	if cfg.Database.Name != "renamed" {
+		t.Errorf("Database.Name = %s, want renamed from SVC_DATABASE_NAME", cfg.Database.Name)
 	}
-	if got := cfg.RateLimit.Env.Requests; got != "APP_RATE_LIMIT_REQUESTS" {
-		t.Errorf("RateLimit.Env.Requests = %s, want APP_RATE_LIMIT_REQUESTS", got)
+	if cfg.RateLimit.Requests == nil || *cfg.RateLimit.Requests != 50 {
+		t.Errorf("RateLimit.Requests = %v, want 50 from SVC_RATE_LIMIT_REQUESTS", cfg.RateLimit.Requests)
 	}
 }
 

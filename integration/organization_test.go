@@ -5,6 +5,7 @@ package integration_test
 import (
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -88,18 +89,6 @@ func codes(items []organization) []string {
 	return out
 }
 
-func equal(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 func TestOrganization(t *testing.T) {
 	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	c := s.Client()
@@ -129,11 +118,11 @@ func TestOrganization(t *testing.T) {
 
 	run("paging and sort", func(t *testing.T) {
 		p := webtest.Decode[organizationPage](t, c.Get(t, organizations+"?size=3&sort=-path"), http.StatusOK)
-		if p.total() != seededTotal || p.Page != 1 || p.Size != 3 || !p.More || !equal(codes(p.Items), []string{"logistics", "operations", "finance"}) {
+		if p.total() != seededTotal || p.Page != 1 || p.Size != 3 || !p.More || !slices.Equal(codes(p.Items), []string{"logistics", "operations", "finance"}) {
 			t.Errorf("page 1 by -path = %v (total %d)", codes(p.Items), p.total())
 		}
 		p = webtest.Decode[organizationPage](t, c.Get(t, organizations+"?size=3&page=3&sort=code"), http.StatusOK)
-		if !equal(codes(p.Items), []string{"product"}) {
+		if !slices.Equal(codes(p.Items), []string{"product"}) {
 			t.Errorf("page 3 by code = %v", codes(p.Items))
 		}
 		_ = c.Get(t, organizations+"?page=x").Problem(t, http.StatusBadRequest)
@@ -157,7 +146,7 @@ func TestOrganization(t *testing.T) {
 			walked = append(walked, codes(p.Items)...)
 		}
 		want := []string{"logistics", "operations", "finance", "product", "platform", "engineering", "acme"}
-		if !equal(walked, want) || first.total() != seededTotal {
+		if !slices.Equal(walked, want) || first.total() != seededTotal {
 			t.Errorf("walk by -path = %v (first total %d), want %v", walked, first.total(), want)
 		}
 		// A cursor with a page, one sent under another sort, and one that
@@ -177,7 +166,7 @@ func TestOrganization(t *testing.T) {
 		}
 		for query, want := range cases {
 			p := webtest.Decode[organizationPage](t, c.Get(t, organizations+"?"+query), http.StatusOK)
-			if !equal(codes(p.Items), want) || p.total() != len(want) {
+			if !slices.Equal(codes(p.Items), want) || p.total() != len(want) {
 				t.Errorf("?%s = %v (total %d), want %v", query, codes(p.Items), p.total(), want)
 			}
 		}

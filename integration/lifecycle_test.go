@@ -21,18 +21,6 @@ type readiness struct {
 	} `json:"checks"`
 }
 
-type page struct {
-	Total *int `json:"total"`
-}
-
-// total is the page's counted total, or -1 when the page omitted it.
-func (p page) total() int {
-	if p.Total == nil {
-		return -1
-	}
-	return *p.Total
-}
-
 const organizations = "/api/organizations"
 
 // seededTotal is the organization count the default state carries.
@@ -59,7 +47,7 @@ func assertCurrent(t *testing.T, c *webtest.Client) {
 	if app.Version != app.Latest || app.Dirty || len(app.Pending) != 0 || !st.Ready {
 		t.Errorf("schema = %+v, want the app set at its head, clean, nothing pending, ready", st)
 	}
-	if p := webtest.Decode[page](t, c.Get(t, organizations), http.StatusOK); p.total() != seededTotal {
+	if p := webtest.Decode[organizationPage](t, c.Get(t, organizations), http.StatusOK); p.total() != seededTotal {
 		t.Errorf("organizations total = %d, want %d", p.total(), seededTotal)
 	}
 }
@@ -67,7 +55,9 @@ func assertCurrent(t *testing.T, c *webtest.Client) {
 // Startup applies the migration set to an empty schema and seeds the
 // reference data; the probes report every stage ready; the seed is
 // idempotent on a second run and across a second start; an interrupt
-// drains to exit 0.
+// drains to exit 0. The sweep starts only after the schema stage: its
+// startup pass, which startup's own migration does not gate, runs over the
+// tables the migration created, so no pass of the process is refused.
 func TestLifecycle_StartupMigratesSeedsAndDrains(t *testing.T) {
 	revert(t)
 
@@ -105,6 +95,9 @@ func TestLifecycle_StartupMigratesSeedsAndDrains(t *testing.T) {
 	}
 	if !strings.Contains(s.Output(), "server stopped") {
 		t.Errorf("drain not logged:\n%s", s.Output())
+	}
+	if strings.Contains(s.Output(), refusedRecord) {
+		t.Errorf("a sweep pass was refused while the schema was empty; want the sweep started after the schema stage:\n%s", s.Output())
 	}
 
 	// A second start against the seeded database inserts nothing.

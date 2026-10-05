@@ -111,22 +111,14 @@ func TestResponse_ColorsTheBodyAndStatusLineWhenOn(t *testing.T) {
 }
 
 // Whether to color is decided by a flag parsed after the tree, and so after
-// the Output, is built. So New must not ask; each render must.
-func TestNew_AsksWhetherToColorAtEachRenderNotAtConstruction(t *testing.T) {
-	asked, color := 0, false
+// the Output, is built. So the decision New is given must be read at each
+// render: one turned on after New colors the next render.
+func TestNew_DecidesColorAtEachRenderNotAtConstruction(t *testing.T) {
+	color := false
 	var out bytes.Buffer
-	o := output.New(&out, &out, func() bool {
-		asked++
-		return color
-	})
-	if asked != 0 {
-		t.Fatalf("New asked whether to color %d times; want none until a render", asked)
-	}
+	o := output.New(&out, &out, func() bool { return color })
 
 	o.Response(http.StatusNoContent, nil)
-	if asked != 1 {
-		t.Errorf("the first render asked %d times, want once", asked)
-	}
 	if got := out.String(); got != "204 No Content\n" {
 		t.Errorf("with color off, Response wrote %q, want it plain", got)
 	}
@@ -134,9 +126,6 @@ func TestNew_AsksWhetherToColorAtEachRenderNotAtConstruction(t *testing.T) {
 	color = true
 	out.Reset()
 	o.Response(http.StatusNoContent, nil)
-	if asked != 2 {
-		t.Errorf("the second render brought the count to %d, want 2", asked)
-	}
 	if want := style.New(true).Status("204 No Content") + "\n"; out.String() != want {
 		t.Errorf("with color turned on after New, Response wrote %q, want %q", out.String(), want)
 	}

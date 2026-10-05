@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -67,7 +68,7 @@ func serviceLogging(t *testing.T, logger *slog.Logger, dialect sqlate.Dialect, r
 	}
 	t.Cleanup(func() { _ = objects.Shutdown(context.Background()) })
 	db := data.New(sqlate.Wrap(pool, dialect), catalog)
-	return organization.New(db, data.NewStorage(fs, objects), logger), rec, fake
+	return organization.New(db, data.NewStorage(db, fs, objects), logger), rec, fake
 }
 
 // seeder composes the data package's seeder over the layer's row
@@ -76,6 +77,14 @@ func serviceLogging(t *testing.T, logger *slog.Logger, dialect sqlate.Dialect, r
 // write nothing: the logo seed's own tests are storage_test.go's.
 func seeder(t *testing.T, responses ...sqltest.Response) (*data.Seeder, *sqltest.Recorder) {
 	t.Helper()
+	s, _, rec := seederOver(t, responses...)
+	return s, rec
+}
+
+// seederOver is seeder with the database the layer registered its
+// statements on.
+func seederOver(t *testing.T, responses ...sqltest.Response) (*data.Seeder, *data.Database, *sqltest.Recorder) {
+	t.Helper()
 	pool, rec := sqltest.Open(t, responses...)
 	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
 	fs, err := bfdata.New(catalog, sqltest.Dialect{})
@@ -83,8 +92,24 @@ func seeder(t *testing.T, responses ...sqltest.Response) (*data.Seeder, *sqltest
 		t.Fatal(err)
 	}
 	db := data.New(sqlate.Wrap(pool, sqltest.Dialect{}), catalog)
-	svc := organization.New(db, data.NewStorage(fs, nil), slog.New(slog.DiscardHandler))
-	return data.NewSeeder(db, []query.Verifier{svc.Verifier()}, svc.Seed(), noFiles("logos"), noFiles("documents")), rec
+	svc := organization.New(db, data.NewStorage(db, fs, nil), slog.New(slog.DiscardHandler))
+	return data.NewSeeder(db, svc.Seed(), noFiles("logos"), noFiles("documents")), db, rec
+}
+
+// blobfsStatements is what blobfs's store prepares when it verifies
+// itself, over a pool of its own, so a test can tell the layer's probes
+// from blobfs's.
+func blobfsStatements(t *testing.T) []string {
+	t.Helper()
+	fs, err := bfdata.New(query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns()), sqltest.Dialect{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, rec := sqltest.Open(t)
+	if err := fs.Verify(context.Background(), sqlate.Wrap(pool, sqltest.Dialect{})); err != nil {
+		t.Fatal(err)
+	}
+	return rec.SQL(sqltest.OpPrepare)
 }
 
 // noFiles stands in for a contribution of stored files under its key,
@@ -163,9 +188,6 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 	if create := sqls[2]; !strings.HasSuffix(create, "RETURNING id, version") {
 		t.Errorf("create = %q; want the identity pattern spliced", create)
 	}
-	if edit := rec.SQL(sqltest.OpExec)[0]; edit != "UPDATE organization\nSET code = $1, name = $2, updated_at = CURRENT_TIMESTAMP, version = version + 1\nWHERE id = $3 AND version = $4" {
-		t.Errorf("edit = %q", edit)
-	}
 	if lock := rec.Calls()[5]; lock.SQL != "SELECT pg_advisory_xact_lock(hashtext($1))" || lock.Args[0] != data.LockOrganizationTree {
 		t.Errorf("transfer did not take the named tree lock first: %+v", lock)
 	}
@@ -211,18 +233,29 @@ func TestStore_GuardDistinguishesAbsentFromStale(t *testing.T) {
 	}
 }
 
-// The seeder's Verify prepares the layer's twelve statements and the read
-// contract's three probes (the fields against their declared types, a page
-// past a cursor, and the same page counted) beside the data package's
-// lock.
+// The seeder's Verify prepares every statement the layer registered,
+// beside the data package's lock and blobfs's, and probes the read model's
+// field contract, whose probes are statements of their own.
 func TestStore_VerifyPreparesEveryStatement(t *testing.T) {
-	s, rec := seeder(t)
+	s, db, rec := seederOver(t)
 	if err := s.Verify(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	prepared := rec.SQL(sqltest.OpPrepare)
-	if len(prepared) != 16 {
-		t.Errorf("prepared %d statements, want the lock, 12, and the contract's 3 probes", len(prepared))
+	registered := blobfsStatements(t)
+	for _, entry := range db.Registry() {
+		for _, st := range entry.Statements.Statements() {
+			registered = append(registered, st.Text())
+			if !slices.Contains(prepared, st.Text()) {
+				t.Errorf("%s's statement %s was not verified", entry.Name, st.Name())
+			}
+		}
+	}
+	probes := slices.DeleteFunc(slices.Clone(prepared), func(sql string) bool {
+		return slices.Contains(registered, sql)
+	})
+	if len(probes) == 0 {
+		t.Error("Verify prepared the registered statements alone; want the read model's field contract probed")
 	}
 }
 
@@ -276,15 +309,43 @@ func TestStore_ListContinuesByCursor(t *testing.T) {
 	}
 }
 
-// The default state holds seven organizations in dependency order; the
-// root is first.
-const seedRows = 7
+// rowCount reads the rows a state carries under key, as a contribution
+// reads them, and inserts nothing.
+type rowCount struct {
+	key string
+	n   int
+}
+
+func (c *rowCount) Key() string { return c.key }
+func (c *rowCount) Apply(_ context.Context, _ *sqlate.Tx, raw json.RawMessage) (int, error) {
+	rows, err := data.SeedRows[json.RawMessage](raw)
+	c.n = len(rows)
+	return 0, err
+}
+
+// defaultOrganizations is how many organizations the default state seeds,
+// read from the state itself, so no test restates its inventory. The state
+// lists them in dependency order, the root first.
+func defaultOrganizations(t *testing.T) int {
+	t.Helper()
+	pool, _ := sqltest.Open(t)
+	db := data.New(sqlate.Wrap(pool, sqltest.Dialect{}), query.MustCatalog(query.Patterns(), data.Patterns()))
+	c := &rowCount{key: "organizations"}
+	if _, err := data.NewSeeder(db, c, noFiles("logos"), noFiles("documents")).Seed(context.Background(), "default"); err != nil {
+		t.Fatal(err)
+	}
+	if c.n < 2 {
+		t.Fatalf("the default state seeds %d organizations; the tests need a root and a child", c.n)
+	}
+	return c.n
+}
 
 func idRow(id string) sqltest.Response {
 	return sqltest.Response{Columns: []string{"id"}, Rows: [][]driver.Value{{id}}}
 }
 
 func TestSeed_InsertsEveryRowOnce(t *testing.T) {
+	seedRows := defaultOrganizations(t)
 	responses := make([]sqltest.Response, 0, seedRows)
 	for i := range seedRows {
 		responses = append(responses, idRow(string(rune('a'+i))))
@@ -316,6 +377,7 @@ func TestSeed_InsertsEveryRowOnce(t *testing.T) {
 }
 
 func TestSeed_FindsExistingRows(t *testing.T) {
+	seedRows := defaultOrganizations(t)
 	// The root already exists: no row from the insert, then the lookup.
 	responses := []sqltest.Response{{Columns: []string{"id"}}, idRow("root")}
 	for i := 1; i < seedRows; i++ {

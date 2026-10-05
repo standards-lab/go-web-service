@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/standards-lab/go-core/process/processtest"
@@ -103,7 +104,7 @@ func TestStorageOutage(t *testing.T) {
 			unready = append(unready, check.Name)
 		}
 	}
-	if !equal(unready, []string{"storage"}) {
+	if !slices.Equal(unready, []string{"storage"}) {
 		t.Errorf("readyz's unready checks = %v; want storage alone", unready)
 	}
 	_ = c.Get(t, content).Problem(t, http.StatusServiceUnavailable)

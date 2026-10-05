@@ -1,4 +1,4 @@
-package demo
+package demo_test
 
 import (
 	"bytes"
@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,13 +19,129 @@ import (
 
 	"github.com/standards-lab/go-web-sdk"
 
+	"github.com/standards-lab/go-web-service/tools/slab/admin/database"
+	"github.com/standards-lab/go-web-service/tools/slab/demo"
 	"github.com/standards-lab/go-web-service/tools/slab/domain/document"
 	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
 	"github.com/standards-lab/go-web-service/tools/slab/env"
-	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 	"github.com/standards-lab/go-web-service/tools/slab/input"
+	"github.com/standards-lab/go-web-service/tools/slab/repo"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
+
+// The storage scenario's fixed targets as the service states them: acme,
+// whose logo and tree it walks, finance, the other organization its
+// isolation step names, the seeded file and directory its refusals target,
+// the fixture its logo replacement uploads, and the admin routes it reads.
+const (
+	acmePath           = "/acme"
+	financePath        = "/acme/finance"
+	guardedFilePath    = "/README.txt"
+	takenDirPath       = "/engineering"
+	replacementFixture = "engineering.png"
+	schemaRoute        = database.Database + "/schema"
+	seedRoute          = database.Database + "/seed"
+)
+
+// detailNameTaken is the curated detail of a taken name's 409, the
+// service's data.DetailNameTaken.
+const detailNameTaken = "an entry with that name already exists"
+
+// seedFile is data/seeds/default.json as the fake reads it, decoded here
+// independently of the scenario's own reading so the counts and ids the
+// scenario checks are not the scenario's own arithmetic.
+type seedFile struct {
+	Organizations []json.RawMessage `json:"organizations"`
+	Logos         []json.RawMessage `json:"logos"`
+	Documents     []seedTree        `json:"documents"`
+}
+
+type seedTree struct {
+	Organization string      `json:"organization"`
+	Root         string      `json:"root"`
+	Entries      []seedEntry `json:"entries"`
+}
+
+type seedEntry struct {
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	ContentType string      `json:"content_type"`
+	Entries     []seedEntry `json:"entries"`
+}
+
+// seeded holds the counts the service's seeder reports.
+type seeded struct {
+	Documents     int `json:"documents"`
+	Logos         int `json:"logos"`
+	Organizations int `json:"organizations"`
+}
+
+// loadSeed reads the repository's default seed file.
+func loadSeed(t *testing.T) seedFile {
+	t.Helper()
+	fsys, err := repo.FS(context.Background())
+	if err != nil {
+		t.Fatalf("find the repository: %v", err)
+	}
+	raw, err := fs.ReadFile(fsys, path.Join(demo.SeedsDir, demo.SeedState+".json"))
+	if err != nil {
+		t.Fatalf("read the seed: %v", err)
+	}
+	var s seedFile
+	if err := json.Unmarshal(raw, &s); err != nil {
+		t.Fatalf("decode the seed: %v", err)
+	}
+	return s
+}
+
+// counts is what the service reports seeding for s: every organization,
+// every logo, and every document entry below the roots.
+func (s seedFile) counts() seeded {
+	n := 0
+	var count func([]seedEntry)
+	count = func(entries []seedEntry) {
+		for _, e := range entries {
+			n++
+			count(e.Entries)
+		}
+	}
+	for _, t := range s.Documents {
+		count(t.Entries)
+	}
+	return seeded{Documents: n, Logos: len(s.Logos), Organizations: len(s.Organizations)}
+}
+
+// acme is acme's seeded tree.
+func (s seedFile) acme(t *testing.T) seedTree {
+	t.Helper()
+	for _, tree := range s.Documents {
+		if tree.Organization == acmePath {
+			return tree
+		}
+	}
+	t.Fatalf("the seed has no document tree for %s", acmePath)
+	return seedTree{}
+}
+
+// paths is every entry of t by its path under the root, a directory's with
+// a trailing slash, mapped to its fixed id.
+func (t seedTree) paths() map[string]string {
+	out := make(map[string]string)
+	var walk func(prefix string, entries []seedEntry)
+	walk = func(prefix string, entries []seedEntry) {
+		for _, e := range entries {
+			p := prefix + e.Name
+			if e.ContentType == "" {
+				out[p+"/"] = e.ID
+				walk(p+"/", e.Entries)
+				continue
+			}
+			out[p] = e.ID
+		}
+	}
+	walk("/", t.Entries)
+	return out
+}
 
 // storageFake stands in for the service's storage surface on one listener:
 // the schema status, the additive seed and the reset, the organization
@@ -34,21 +153,34 @@ import (
 // A recursive delete marks the branch, and the branch's read answers
 // deleting for sweepReads reads before the fake sweeps it, so the scenario
 // sees the deleting status and the wait polls at least once. fault names
-// one request line ("METHOD path") the fake answers 500 instead, and
-// takenDetail replaces a taken name's curated detail, for the
-// unexpected-response tests.
+// one request line ("METHOD path") the fake answers 500 instead,
+// takenDetail replaces a taken name's curated detail, miscount adds to the
+// documents a reset reports seeding, and descendingWalk serves a paged
+// directory listing in descending name order whatever its sort says, for
+// the unexpected-response tests.
 type storageFake struct {
-	mu          sync.Mutex
-	seed        seedFile
-	logo        []byte
-	logoTag     int
-	nodes       map[string]*fakeNode
-	deleting    map[string]int
-	serial      int
-	requests    []string
-	fault       string
-	takenDetail string
-	err         error
+	mu             sync.Mutex
+	seed           seedFile
+	acmeTree       seedTree
+	logo           []byte
+	logoTag        int
+	nodes          map[string]*fakeNode
+	deleting       map[string]int
+	serial         int
+	requests       []string
+	fault          string
+	takenDetail    string
+	miscount       int
+	descendingWalk bool
+	err            error
+}
+
+// resetCounts is what a reset reports seeding: the seed file's counts, the
+// documents off by miscount.
+func (f *storageFake) resetCounts() seeded {
+	c := f.seed.counts()
+	c.Documents += f.miscount
+	return c
 }
 
 // fakeNode is one directory or file under acme's root; the root itself is a
@@ -72,11 +204,8 @@ const sweepReads = 2
 
 func newStorageFake(t *testing.T) *storageFake {
 	t.Helper()
-	seed, err := loadSeed(context.Background())
-	if err != nil {
-		t.Fatalf("load the seed: %v", err)
-	}
-	f := &storageFake{seed: seed, takenDetail: detailNameTaken}
+	f := &storageFake{seed: loadSeed(t), takenDetail: detailNameTaken}
+	f.acmeTree = f.seed.acme(t)
 	f.reseed()
 	return f
 }
@@ -85,7 +214,7 @@ func newStorageFake(t *testing.T) *storageFake {
 func (f *storageFake) reseed() {
 	f.logo, f.logoTag = fakeSeedLogo, f.logoTag+1
 	f.nodes, f.deleting = map[string]*fakeNode{}, map[string]int{}
-	tree, _ := f.seed.tree(storageOrgPath)
+	tree := f.acmeTree
 	f.nodes[tree.Root] = &fakeNode{id: tree.Root, name: "/", dir: true, status: document.DirectoryActive, version: 1}
 	var add func(parent string, entries []seedEntry)
 	add = func(parent string, entries []seedEntry) {
@@ -159,13 +288,13 @@ func (f *storageFake) route(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, n)
 	case r.Method == http.MethodPost && p == stateRoute:
 		f.reseed()
-		writeJSON(w, http.StatusOK, map[string]any{"state": SeedState, "schema": fakeSchema, "seeded": f.seed.seedCounts()})
+		writeJSON(w, http.StatusOK, map[string]any{"state": demo.SeedState, "schema": fakeSchema, "seeded": f.resetCounts()})
 	case r.Method == http.MethodGet && p == organization.Organizations+"/lookup":
 		switch r.URL.Query().Get("path") {
-		case storageOrgPath:
-			writeJSON(w, http.StatusOK, organization.Organization{ID: fakeAcmeID, Code: "acme", Version: 1, Path: storageOrgPath})
-		case otherOrgPath:
-			writeJSON(w, http.StatusOK, organization.Organization{ID: fakeFinanceID, Code: "finance", Version: 1, Path: otherOrgPath})
+		case acmePath:
+			writeJSON(w, http.StatusOK, organization.Organization{ID: fakeAcmeID, Code: "acme", Version: 1, Path: acmePath})
+		case financePath:
+			writeJSON(w, http.StatusOK, organization.Organization{ID: fakeFinanceID, Code: "finance", Version: 1, Path: financePath})
 		default:
 			writeProblem(w, http.StatusNotFound, "")
 		}
@@ -404,13 +533,19 @@ func (f *storageFake) list(w http.ResponseWriter, r *http.Request, n *fakeNode, 
 		size, _ = strconv.Atoi(s)
 	}
 	all := f.children(n.id, dirs)
+	// past reports whether name follows after in the order served.
+	past := func(name, after string) bool { return name > after }
+	if f.descendingWalk && dirs && q.Get("size") != "" {
+		slices.Reverse(all)
+		past = func(name, after string) bool { return name < after }
+	}
 	total := len(all)
 	rows, page := all, 1
 	if c := q.Get("cursor"); c != "" {
 		after := strings.TrimPrefix(c, "after:")
 		rows, page = nil, 0
 		for _, n := range all {
-			if n.name > after {
+			if past(n.name, after) {
 				rows = append(rows, n)
 			}
 		}
@@ -447,7 +582,7 @@ func runStorage(t *testing.T, fake *storageFake) (string, error) {
 	t.Cleanup(srv.Close)
 	ctx := env.WithContext(context.Background(), env.Env{Base: srv.URL, Grafana: srv.URL, Tempo: srv.URL})
 	var out bytes.Buffer
-	err := scenario.Run(ctx, Storage(), scenario.NewReporter(&out, false))
+	err := scenario.Run(ctx, demo.Storage(), scenario.NewReporter(&out, false))
 	srv.Close()
 	if fake.err != nil {
 		t.Fatalf("the scenario sent a bad request: %v\n%s", fake.err, out.String())
@@ -491,8 +626,7 @@ func TestStorage_SendsTheScenarioSequence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v\n%s", err, out)
 	}
-	tree, _ := fake.seed.tree(storageOrgPath)
-	paths := tree.paths()
+	paths := fake.acmeTree.paths()
 	logo := organization.Organizations + "/" + fakeAcmeID + "/logo"
 	docs := document.Documents + "/" + fakeAcmeID
 	readme := docs + "/files/" + paths[guardedFilePath]
@@ -553,8 +687,7 @@ func TestStorage_LeavesTheFakeAsTheResetSeededIt(t *testing.T) {
 	if !bytes.Equal(fake.logo, fakeSeedLogo) {
 		t.Error("the run left acme without its seeded logo")
 	}
-	tree, _ := fake.seed.tree(storageOrgPath)
-	if got, want := len(fake.nodes), len(tree.paths())+1; got != want {
+	if got, want := len(fake.nodes), len(fake.acmeTree.paths())+1; got != want {
 		t.Errorf("the run left %d nodes, want the seeded %d", got, want)
 	}
 }
@@ -667,7 +800,7 @@ func TestStorage_SummarizesTheLogoBytesAndShowsItsValidators(t *testing.T) {
 	if strings.Contains(read, "PNG") {
 		t.Errorf("the logo read prints the bytes:\n%s", read)
 	}
-	if replace := step(t, out, "[5/16]"); !strings.Contains(replace, "bytes of "+FixturesDir+"/"+replacementFixture+")") {
+	if replace := step(t, out, "[5/16]"); !strings.Contains(replace, "bytes of "+demo.FixturesDir+"/"+replacementFixture+")") {
 		t.Errorf("the replacement's request does not name its fixture:\n%s", replace)
 	}
 }
@@ -678,8 +811,7 @@ func TestStorage_PrintsTheTreeTheDeletingStatusAndTheSeededCounts(t *testing.T) 
 	if err != nil {
 		t.Fatalf("run: %v\n%s", err, out)
 	}
-	tree, _ := fake.seed.tree(storageOrgPath)
-	paths := tree.paths()
+	paths := fake.acmeTree.paths()
 	treeStep := step(t, out, "[7/16]")
 	if !strings.Contains(treeStep, "  acme's document tree\n") {
 		t.Errorf("the tree step lacks its table:\n%s", treeStep)
@@ -695,7 +827,7 @@ func TestStorage_PrintsTheTreeTheDeletingStatusAndTheSeededCounts(t *testing.T) 
 	if !strings.Contains(step(t, out, "[15/16]"), "· the sweep removed the branch within ") {
 		t.Errorf("the sweep step does not report the wait:\n%s", out)
 	}
-	counts := fake.seed.seedCounts()
+	counts := fake.seed.counts()
 	reset := step(t, out, "[16/16]")
 	for _, row := range []string{
 		fmt.Sprintf("organizations  %d", counts.Organizations),
@@ -726,59 +858,51 @@ func TestStorage_KeepsEveryNoteLineWithinEightyColumns(t *testing.T) {
 	}
 }
 
-func TestSeedFile_CountsAndPathsFromDefault(t *testing.T) {
-	seed, err := loadSeed(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := seed.seedCounts(), (seeded{Documents: 10, Logos: 7, Organizations: 7}); got != want {
-		t.Errorf("seedCounts = %+v, want %+v", got, want)
-	}
-	tree, err := seed.tree(storageOrgPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	paths := tree.paths()
-	for p, id := range map[string]string{
-		guardedFilePath:                     "5eed0002-0000-4000-8000-000000000001",
-		takenDirPath + "/":                  "5eed0002-0000-4000-8000-000000000002",
-		"/engineering/platform/runbook.txt": "5eed0002-0000-4000-8000-000000000005",
-	} {
-		if paths[p] != id {
-			t.Errorf("paths[%s] = %q, want %s", p, paths[p], id)
-		}
-	}
-	if _, err := seed.tree("/nowhere"); err == nil {
-		t.Error("tree(/nowhere) = nil error, want one naming the path")
+func TestStorage_FailsWhenTheResetSeedsOtherThanTheSeedFile(t *testing.T) {
+	fake := newStorageFake(t)
+	fake.miscount = 1
+	out, err := runStorage(t, fake)
+	if err == nil || !strings.Contains(err.Error(), "storage: step 16 (Reset): the reset seeded") {
+		t.Errorf("run error = %v; want the reset's counts check to fail:\n%s", err, out)
 	}
 }
 
-func TestInOrder(t *testing.T) {
-	for _, c := range []struct {
-		got, want []string
-		ok        bool
-	}{
-		{[]string{"a", "b", "c"}, []string{"a", "c"}, true},
-		{[]string{"a", "x", "b"}, []string{"a", "b"}, true},
-		{[]string{"b", "a"}, []string{"a", "b"}, false},
-		{[]string{"a"}, []string{"a", "b"}, false},
-	} {
-		if got := inOrder(c.got, c.want); got != c.ok {
-			t.Errorf("inOrder(%v, %v) = %t, want %t", c.got, c.want, got, c.ok)
-		}
+// A directory beyond the seeded ones, such as a branch an interrupted run
+// left behind, falls wherever its name sorts, and the walk still finds the
+// seeded ones in order among the rest.
+func TestStorage_CursorWalkToleratesAnUnseededDirectory(t *testing.T) {
+	fake := newStorageFake(t)
+	root := fake.acmeTree.Root
+	fake.nodes["left-behind"] = &fakeNode{id: "left-behind", parent: root, name: "f-left-behind", dir: true, status: document.DirectoryActive, version: 1}
+	out, err := runStorage(t, fake)
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	if !strings.Contains(step(t, out, "[8/16]"), `"name": "f-left-behind"`) {
+		t.Errorf("the walk did not page through the extra directory:\n%s", out)
 	}
 }
 
-func TestSummarized(t *testing.T) {
-	bin := &httpx.Response{Status: 200, Header: http.Header{"Content-Type": {"image/png"}}, Body: []byte{0x89, 'P', 'N', 'G'}}
-	if got := string(summarized(bin).Body); got != "(4 bytes of image/png)" {
-		t.Errorf("summarized binary body = %q", got)
+func TestStorage_FailsWhenTheCursorWalkIsOutOfOrder(t *testing.T) {
+	fake := newStorageFake(t)
+	fake.descendingWalk = true
+	out, err := runStorage(t, fake)
+	if err == nil || !strings.Contains(err.Error(), "storage: step 8 (Cursor Walk): the walk visited") {
+		t.Errorf("run error = %v; want the walk's order check to fail:\n%s", err, out)
 	}
-	if string(bin.Body) != "\x89PNG" {
-		t.Error("summarized changed the response it was given")
+}
+
+// A body that is no JSON, a download's bytes, is summarized; a problem
+// document is JSON and prints as it came.
+func TestStorage_PrintsAFailedLogoReadsProblemAsIs(t *testing.T) {
+	fake := newStorageFake(t)
+	fake.fault = http.MethodGet + " " + organization.Organizations + "/" + fakeAcmeID + "/logo"
+	out, err := runStorage(t, fake)
+	if err == nil {
+		t.Fatalf("run = nil, want the logo read's failure:\n%s", out)
 	}
-	js := &httpx.Response{Status: 404, Body: []byte(`{"status":404}`)}
-	if summarized(js) != js {
-		t.Error("summarized replaced a JSON body")
+	read := step(t, out, "[3/16]")
+	if !strings.Contains(read, `"status": 500`) || strings.Contains(read, "bytes of") {
+		t.Errorf("the logo read does not print the problem as it came:\n%s", read)
 	}
 }

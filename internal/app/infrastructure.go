@@ -101,11 +101,12 @@ func newInfrastructure(
 		return nil, fmt.Errorf("blobfs migrations: %w", err)
 	}
 
+	sql := data.New(session, catalog)
 	return &Infrastructure{
 		Logger:      logger,
 		DB:          db,
-		SQL:         data.New(session, catalog),
-		Storage:     data.NewStorage(fs, objects),
+		SQL:         sql,
+		Storage:     data.NewStorage(sql, fs, objects),
 		ObjectStore: objects,
 		Sets:        data.Migrations(blobfsSet),
 	}, nil

@@ -25,7 +25,9 @@ import (
 )
 
 // objects starts a store over the fake, as the composition root starts the
-// real one, and returns the adapter the domains use.
+// real one, and returns the adapter the domains use, grouped with a blobfs
+// store as NewStorage requires, since NewStorage records that store for
+// the seeder to verify.
 func objects(t *testing.T, fake *storagetest.Fake) *data.Objects {
 	t.Helper()
 	cfg := storage.Config{Container: "test"}
@@ -37,7 +39,13 @@ func objects(t *testing.T, fake *storagetest.Fake) *data.Objects {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Shutdown(context.Background()) })
-	return data.NewStorage(nil, store).Objects
+	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
+	fs, err := bfdata.New(catalog, sqltest.Dialect{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, _ := sqltest.Open(t)
+	return data.NewStorage(data.New(sqlate.Wrap(pool, sqltest.Dialect{}), catalog), fs, store).Objects
 }
 
 func TestObjects_PutEchoesTheDeclaredType(t *testing.T) {
@@ -193,7 +201,8 @@ func protocols(t *testing.T, responses ...sqltest.Response) (*data.Storage, *sql
 	t.Helper()
 	pool, rec := sqltest.Open(t, responses...)
 	dialect := sqltest.ReturningDialect{}
-	fs, err := bfdata.New(query.MustCatalog(query.Patterns(), bfdata.Patterns()), dialect)
+	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
+	fs, err := bfdata.New(catalog, dialect)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +216,8 @@ func protocols(t *testing.T, responses ...sqltest.Response) (*data.Storage, *sql
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = objects.Shutdown(context.Background()) })
-	return data.NewStorage(fs, objects), sqlate.Wrap(pool, dialect), rec, fake
+	db := sqlate.Wrap(pool, dialect)
+	return data.NewStorage(data.New(db, catalog), fs, objects), db, rec, fake
 }
 
 // file is a file row at a status and version; an available one carries

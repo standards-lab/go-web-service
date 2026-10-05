@@ -27,16 +27,15 @@ layer:
   request may filter and sort by.
 - `database.go`: the SQL client, the sole importer of the query library. It compiles
   `statements/` against the catalog the `data` package holds, registers the inventory under the
-  domain's name, binds each statement to a typed handle (a projection for the read model, rows
-  for a scan, a guard for a version-checked command), and exposes each operation as a store
-  method that reads as what it does. Translation files are capability-named, one per
+  domain's name with the store as its verifier, binds each statement to a typed handle (a
+  projection for the read model, rows for a scan, a guard for a version-checked command), and
+  exposes each operation as a store method that reads as what it does. Translation files are capability-named, one per
   infrastructure integration (`storage.go` in both domains; `messaging.go` and `ai.go` are planned). A
   service never touches an infrastructure API outside its translation file.
-- `service.go`: the single domain service, a concrete type constructed from the `data` package,
-  exposing its store as `Verifier` for the composition root to hand the seeder, its methods the
-  direct map from endpoint to operation, every operation delegated whole to the store
-  after the command's own validation. A domain declares no lifecycle stage and imports no part of
-  go-core's `lifecycle`.
+- `service.go`: the single domain service, a concrete type constructed from the `data` package.
+  Its methods map endpoints to operations one to one, and each operation delegates whole to the
+  store after the command's own validation. A domain declares no lifecycle stage and imports no
+  part of go-core's `lifecycle`.
 - `handler.go`: the single handler, the layer's route group of error-returning handlers over the
   group's error writer.
 
@@ -94,11 +93,12 @@ contract (`ParseQuery`); the lowering to the read model's header is `data.Direct
 ## Composition wiring
 
 `internal/app/domain.go` constructs each layer's service from the `data` package and never hands the
-`Infrastructure` struct down. A domain declares no lifecycle service. The seeder verifies its
-statements: the composition root hands `data.NewSeeder` the list of every store the service runs
-(each domain's `Verifier` and blobfs's), separate from the seed contributions, so a store that seeds
-nothing is still verified, and `internal/app`'s test fails a store left out. The admin service runs
-the seeder at the schema stage before it seeds. Every stage the process uses is named once in
+`Infrastructure` struct down. A domain declares no lifecycle service. The seeder verifies
+every store that runs statements: `data.Database.Register(name, stmts, verifier)` records each
+domain's store with its statements, and `data.NewStorage(db, …)` records blobfs's store, so
+`Seeder.Verify` checks every recorded store, including one that seeds nothing, and no list in the
+composition root can leave a store out. The admin service runs `Verify` at the schema stage before
+it seeds. Every stage the process uses is named once in
 `internal/app/stages.go`, in dependency order: `stageInfrastructure` (the pool and the object
 store), `stageSchema` (the schema, the statements, and the seed), `stageReactors`, and `stageRoot`
 (the server). Each layer file registers at a stage from that table, so the ordering is the root's

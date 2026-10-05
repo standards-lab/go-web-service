@@ -1,6 +1,6 @@
 services:
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.161.0
+    image: otel/opentelemetry-collector-contrib:0.162.0
     profiles: ["observability"]
     command: ["--config=/etc/otelcol-contrib/otel-collector.yaml"]
     volumes:

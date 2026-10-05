@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -65,7 +66,7 @@ func gatedModule(t *testing.T, gate database.SchemaGate, seed string, responses 
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := admin.New(pdb, sdb, m, catalog, admin.Options{Seed: seed, Seeder: data.NewSeeder(d, nil, organizations{}, files{"logos"}, files{"documents"}), Registry: d})
+	svc := admin.New(pdb, sdb, m, catalog, admin.Options{Seed: seed, Seeder: data.NewSeeder(d, organizations{}, files{"logos"}, files{"documents"}), Registry: d})
 	r := web.NewRouter()
 	r.Mount(web.NewModule(database.Routes(svc, gate, slog.New(slog.DiscardHandler))))
 	return r, rec
@@ -145,8 +146,9 @@ func TestSchema_ReportsAnEmptyHistoryAsPending(t *testing.T) {
 func TestStates_ListsTheDataPackages(t *testing.T) {
 	h, rec := module(t, "")
 	res := send(t, h, "GET", "/database/states", "")
-	if res.Code != 200 || strings.TrimSpace(res.Body.String()) != `["default","empty"]` {
-		t.Errorf("states = %d %s; want default and empty", res.Code, res.Body)
+	var states []string
+	if err := json.Unmarshal(res.Body.Bytes(), &states); err != nil || res.Code != 200 || !slices.Equal(states, defaultSeeder(t).States()) {
+		t.Errorf("states = %d %s; want the data package's states", res.Code, res.Body)
 	}
 	if len(rec.Calls()) != 0 {
 		t.Errorf("the states read touched the database: %v", rec.Ops())
@@ -187,13 +189,29 @@ func (files) Write(_ context.Context, raw json.RawMessage, _ fs.FS) (int, error)
 	return len(rows), err
 }
 
+// defaultSeeder is the seeder module composes, over a pool of its own, so
+// a test reads what the data package's states hold rather than restating
+// them.
+func defaultSeeder(t *testing.T) *data.Seeder {
+	t.Helper()
+	pool, _ := sqltest.Open(t)
+	d := data.New(sqlate.Wrap(pool, dialect{}), query.MustCatalog(query.Patterns(), data.Patterns()))
+	return data.NewSeeder(d, organizations{}, files{"logos"}, files{"documents"})
+}
+
 // A bodyless seed applies the configured set; a body names another. Both
 // answer with the rows inserted by table.
 func TestSeed_AppliesTheConfiguredOrNamedSet(t *testing.T) {
+	want, err := defaultSeeder(t).Seed(t.Context(), "default")
+	if err != nil || len(want) == 0 {
+		t.Fatalf("the default state seeded %v, %v", want, err)
+	}
 	h, rec := module(t, "default")
 	seeded := decode(t, send(t, h, "POST", "/database/seed", ""), 200)
-	if seeded["organizations"] != float64(7) || seeded["logos"] != float64(7) || seeded["documents"] != float64(1) {
-		t.Errorf("seeded = %v; want seven organizations, seven logos, and one tree", seeded)
+	for key, n := range want {
+		if n == 0 || seeded[key] != float64(n) {
+			t.Errorf("seeded = %v; want the default state's %d %s", seeded, n, key)
+		}
 	}
 	seeded = decode(t, send(t, h, "POST", "/database/seed", `{"state":"empty"}`), 200)
 	if seeded["organizations"] != float64(0) || seeded["logos"] != float64(0) || seeded["documents"] != float64(0) {

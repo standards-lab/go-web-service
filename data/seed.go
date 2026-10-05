@@ -70,28 +70,26 @@ type FileSeed interface {
 // owns the policy of which set applies and when; Seeder owns how. Seeder
 // is the admin service's Seeder.
 type Seeder struct {
-	db        *Database
-	verifiers []query.Verifier
-	all       []Contribution
-	rows      []Seed
-	files     []FileSeed
-	fixtures  fs.FS
+	db       *Database
+	all      []Contribution
+	rows     []Seed
+	files    []FileSeed
+	fixtures fs.FS
 }
 
 // NewSeeder composes the seed operation from the domains' contributions,
 // the rows applied in the order given, then the files in the order given,
-// which the composition root makes the tables' dependency order. verifiers
-// lists every store whose statements the service runs (each domain's, and
-// blobfs's), for [Seeder.Verify] to check; the list is separate from the
+// which the composition root makes the tables' dependency order. The
+// stores [Seeder.Verify] checks are the ones registered on db, not the
 // contributions, so a store that seeds nothing is still verified. Two
 // contributions under one key, or one that is neither a Seed nor a
 // FileSeed, or both, are wiring defects and panic.
-func NewSeeder(db *Database, verifiers []query.Verifier, contributions ...Contribution) *Seeder {
+func NewSeeder(db *Database, contributions ...Contribution) *Seeder {
 	fixtures, err := fs.Sub(seedFiles, "seeds/fixtures")
 	if err != nil {
 		panic(fmt.Sprintf("seeds: %v", err)) // the directory is embedded
 	}
-	s := &Seeder{db: db, verifiers: verifiers, all: contributions, fixtures: fixtures}
+	s := &Seeder{db: db, all: contributions, fixtures: fixtures}
 	keys := make(map[string]bool, len(contributions))
 	for _, c := range contributions {
 		if keys[c.Key()] {
@@ -114,12 +112,14 @@ func NewSeeder(db *Database, verifiers []query.Verifier, contributions ...Contri
 	return s
 }
 
-// Verify checks the package's statements and every verifier NewSeeder was
-// given against the live schema. The admin service runs it at startup,
-// before it seeds, and on a verify request; it is the service's only
-// statement check.
+// Verify checks every store recorded on the database when it runs against
+// the live schema: each verifier passed to [Database.Register], the
+// package's own statements among them, and blobfs's store, which
+// [NewStorage] records. The admin service runs it at startup, before it
+// seeds, and on a verify request; it is the service's only statement
+// check.
 func (s *Seeder) Verify(ctx context.Context) error {
-	return query.Verify(ctx, s.db.DB, append([]query.Verifier{s.db.stmts}, s.verifiers...)...)
+	return query.Verify(ctx, s.db.DB, s.db.recorded()...)
 }
 
 // States lists the embedded state files by name, sorted; the fixtures

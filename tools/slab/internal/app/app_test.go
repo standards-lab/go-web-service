@@ -1,4 +1,4 @@
-package app
+package app_test
 
 import (
 	"bytes"
@@ -6,11 +6,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/standards-lab/go-web-sdk"
 
+	"github.com/standards-lab/go-web-service/tools/slab/internal/app"
 	"github.com/standards-lab/go-web-service/tools/slab/internal/termtest"
 	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
@@ -26,13 +28,16 @@ func execute(t *testing.T, args ...string) (stdout, stderr string, code int) {
 
 // executeTo is execute with stdout supplied by the caller, for a test that
 // needs it to be something other than a buffer. It returns what the app
-// wrote to stderr and the exit code.
+// wrote to stderr and the exit code. The app reads its arguments from the
+// process, as cmd/slab runs it, so args stand in for os.Args past the
+// program name for the run; no test here runs in parallel.
 func executeTo(t *testing.T, stdout io.Writer, args ...string) (stderr string, code int) {
 	t.Helper()
+	saved := os.Args
+	os.Args = append([]string{"slab"}, args...)
+	defer func() { os.Args = saved }()
 	var errOut bytes.Buffer
-	a := New(stdout, &errOut)
-	a.root.SetArgs(args)
-	code = a.Run(context.Background())
+	code = app.New(stdout, &errOut).Run(context.Background())
 	return errOut.String(), code
 }
 

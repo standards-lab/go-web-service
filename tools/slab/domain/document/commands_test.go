@@ -124,6 +124,9 @@ func TestCommands_MountsOneSubcommandPerEndpoint(t *testing.T) {
 	}
 }
 
+// Every command sends its one request: the method, the URI with each
+// segment escaped, and the body and headers the flags build. An upload's
+// raw body is covered by the put tests below.
 func TestCommands_SendTheRequestTheirRouteNames(t *testing.T) {
 	base := "/api/documents/" + org
 	for name, tc := range map[string]struct {

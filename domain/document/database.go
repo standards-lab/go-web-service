@@ -72,7 +72,7 @@ func (s *store) organizationExists(ctx context.Context, sess sqlate.Session, org
 // sql.ErrNoRows.
 func (s *store) seedOrganization(ctx context.Context, sess sqlate.Session, path string) (string, error) {
 	var id any
-	for _, code := range strings.Split(strings.TrimPrefix(path, "/"), "/") {
+	for code := range strings.SplitSeq(strings.TrimPrefix(path, "/"), "/") {
 		next, err := s.seedOrgRows.One(ctx, sess, query.Args{"parent": id, "code": code})
 		if err != nil {
 			return "", fmt.Errorf("organization %s: %w", path, err)

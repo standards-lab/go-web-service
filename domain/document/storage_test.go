@@ -476,8 +476,8 @@ func TestStore_ACompletionTheSweepRefusedDeletesTheObject(t *testing.T) {
 		want     error
 		deleting *bool // whose delete refused it: the directory's (true) or the file's (false)
 	}{
-		"marked":    {[]sqltest.Response{deletingRow, datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1)))}, blobfs.ErrDeleting, ptr(true)},
-		"reclaimed": {[]sqltest.Response{deletingRow, datatest.DirectoryRows(directory(dirID, rootID, "reports", 1))}, blobfs.ErrDeleting, ptr(false)},
+		"marked":    {[]sqltest.Response{deletingRow, datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1)))}, blobfs.ErrDeleting, new(true)},
+		"reclaimed": {[]sqltest.Response{deletingRow, datatest.DirectoryRows(directory(dirID, rootID, "reports", 1))}, blobfs.ErrDeleting, new(false)},
 		"removed":   {[]sqltest.Response{datatest.FileRows()}, blobfs.ErrNotFound, nil},
 	}
 	for name, c := range cases {
@@ -505,8 +505,6 @@ func TestStore_ACompletionTheSweepRefusedDeletesTheObject(t *testing.T) {
 		})
 	}
 }
-
-func ptr[T any](v T) *T { return &v }
 
 // wantDeleting fails the test unless err's blobfs.DeletingError names the
 // directory's delete (directory true) or the file's own (false); with

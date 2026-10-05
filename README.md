@@ -338,6 +338,9 @@ mise. `serve`'s full command also needs a shell that understands `/dev/tcp` (bas
 
 | Task | Command | What it does |
 |------|---------|--------------|
+| `mise run check` | per module (`.`, `tools/slab`): build, vet, `gofmt -l`, `go fix -diff`, `go mod tidy -diff`, `go test -race`, `golangci-lint`; then `go tool sqlint` | The one read-only check, run by CI; vet, fix, and lint read the integration suite too |
+| `mise run currency` | `scripts/currency.sh` | Report every requirement, Go version, tool, action pin, and image tag behind its latest; writes nothing |
+| `mise run upgrade` | per module: `go mod edit -go=<current minor> -toolchain=none`, `go get` latest of the direct requirements, `go mod tidy`; then `mise upgrade --bump --local` | Upgrade the go directives, the requirements, and the mise tools; actions and images move by hand from currency's report |
 | `mise run vet` | `go vet -tags integration ./...`, then `go vet ./...` in `tools/slab` | Compile-check and vet, the integration suite and slab included |
 | `mise run serve` | `go run ./cmd/server`, tee'd to the observability collector | Run the service locally |
 | `mise run test` | `go test -race ./...`, then the same in `tools/slab` | Run the unit tier, slab included |
@@ -360,11 +363,11 @@ recursive delete waited out through the sweep.
 
 ## Tests
 
-Two tiers. The unit tier, `mise run test`, runs on every pull request and touches no service,
-network, or disk: a package that runs SQL proves it over sqlate's scripted driver, and one that
-stores objects over go-storage's fake. The integration tier, `mise run integration`, runs the
-composed service black-box through its API against the compose stack, in CI on every merge to
-main and on demand from the Actions tab.
+Two tiers. The unit tier, `mise run test`, runs on every pull request inside `mise run check`
+and touches no service, network, or disk: a package that runs SQL proves it over sqlate's
+scripted driver, and one that stores objects over go-storage's fake. The integration tier,
+`mise run integration`, runs the composed service black-box through its API against the compose
+stack, in CI on every merge to main and on demand from the Actions tab.
 
 The suite lives in the `integration` package under the `integration` build tag. Each file is
 named for the surface it asserts (`organization_test.go`, `document_test.go`, `logo_test.go`,

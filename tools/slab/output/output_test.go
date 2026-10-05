@@ -258,8 +258,7 @@ func TestExpect_FallsBackToTheStatusAndBodyForANonProblemResponse(t *testing.T) 
 		"disagreeing status": problemResponse(http.StatusInternalServerError, `{"status":400,"title":"Bad Request"}`),
 	} {
 		err := output.Expect(res, http.StatusOK)
-		var p web.Problem
-		if errors.As(err, &p) {
+		if _, ok := errors.AsType[web.Problem](err); ok {
 			t.Errorf("%s: Expect = %v, want a plain error", name, err)
 			continue
 		}

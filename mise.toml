@@ -1,9 +1,64 @@
 [tools]
-go = "1.27"
-golangci-lint = "2.13.2"
+go = "1.27.1"
+golangci-lint = "2.14.0"
+jq = "1.8.2"
+"aqua:google/go-containerregistry" = "0.22.1"
 
 [env]
 APP_ENV = "local"
+# The repository's Go modules, as directories; tasks run in each one. slab is
+# its own module under tools/ (see the slab task).
+GO_MODULES = ". tools/slab"
+
+# The one check: read-only and deterministic, stopping at the first failure.
+# vet, fix, and lint read the integration suite too (-tags integration), as
+# the vet and lint tasks do; go test runs the unit tier only, the integration
+# tier staying behind its build tag. sqlint then reads the SQL files against
+# the base module's requirements.
+[tasks.check]
+description = "Build, vet, format, fix, tidy, test, and lint every module, then sqlint the SQL files; writes nothing"
+run = '''
+set -eu
+export GOWORK=off
+for mod in $GO_MODULES; do
+  echo "check: $mod"
+  cd "$MISE_PROJECT_ROOT/$mod"
+  go build ./...
+  go vet -tags integration ./...
+  unformatted=$(gofmt -l .)
+  if [ -n "$unformatted" ]; then echo "gofmt: unformatted files:"; echo "$unformatted"; exit 1; fi
+  go fix -tags integration -diff ./...
+  go mod tidy -diff
+  go test -race ./...
+  golangci-lint run --build-tags integration ./...
+done
+echo "check: sqlint"
+cd "$MISE_PROJECT_ROOT"
+go tool sqlint
+'''
+
+# Currency: report what trails its latest, and the convenience that upgrades it.
+[tasks.currency]
+description = "Report every requirement, Go version, tool, action pin, and image tag behind its latest; writes nothing"
+run = "scripts/currency.sh"
+
+[tasks.upgrade]
+description = "Upgrade every module's go directive and direct requirements and the local mise tools to their latest, rewriting go.mod and mise.toml"
+run = '''
+set -eu
+export GOWORK=off
+# The go directive follows the current Go minor, with no toolchain line.
+go_minor=$(mise latest go | cut -d. -f1,2)
+for mod in $GO_MODULES; do
+  cd "$MISE_PROJECT_ROOT/$mod"
+  go mod edit -go="$go_minor" -toolchain=none
+  direct=$(go mod edit -json | jq -r '.Require[]? | select(.Indirect | not) | .Path')
+  [ -z "$direct" ] || go get $(printf '%s@latest ' $direct)
+  go mod tidy
+done
+cd "$MISE_PROJECT_ROOT"
+mise upgrade --bump --local
+'''
 
 [tasks.vet]
 description = "Run go vet, the integration suite and the slab module included"

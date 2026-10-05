@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -541,7 +542,7 @@ func TestScenario_SendsTheQueryWithLiteralBrackets(t *testing.T) {
 	if !strings.Contains(out, "  "+line+"\n") {
 		t.Errorf("output lacks the request line %q:\n%s", line, out)
 	}
-	if !contains(fake.requests, line) {
+	if !slices.Contains(fake.requests, line) {
 		t.Errorf("the fake did not receive %q; got:\n%s", line, strings.Join(fake.requests, "\n"))
 	}
 	if strings.Contains(out, "%5B") || strings.Contains(out, "%5D") {
@@ -564,7 +565,7 @@ func TestScenario_TargetsThreeDifferentRowsEachAtItsOwnVersion(t *testing.T) {
 		"GET /api/organizations",
 		"DELETE /api/organizations/" + sales + ` If-Match: "1"`,
 	} {
-		if !contains(fake.requests, want) {
+		if !slices.Contains(fake.requests, want) {
 			t.Errorf("the fake did not receive %q; got:\n%s", want, strings.Join(fake.requests, "\n"))
 		}
 	}
@@ -593,20 +594,11 @@ func TestScenario_TargetsThreeDifferentRowsEachAtItsOwnVersion(t *testing.T) {
 
 func TestScenario_KeepsEveryNoteLineWithinEightyColumns(t *testing.T) {
 	_, out := runDomain(t)
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "    ") && len(line) > 80 {
 			t.Errorf("line is %d columns: %q", len(line), line)
 		}
 	}
-}
-
-func contains(lines []string, want string) bool {
-	for _, l := range lines {
-		if l == want {
-			return true
-		}
-	}
-	return false
 }
 
 func TestScenario_StopsAtTheServiceNeedWhenNothingListens(t *testing.T) {

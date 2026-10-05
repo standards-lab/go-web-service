@@ -713,7 +713,7 @@ func TestStorage_KeepsEveryNoteLineWithinEightyColumns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v\n%s", err, out)
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		// A note line is indented two spaces; a request or status line
 		// shares the indent but carries a path, which may run past 80.
 		if !strings.HasPrefix(line, "  ") || strings.HasPrefix(line, "    ") || len(line) <= 80 {

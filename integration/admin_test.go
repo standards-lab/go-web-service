@@ -5,6 +5,7 @@ package integration_test
 import (
 	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -81,7 +82,7 @@ func TestAdmin(t *testing.T) {
 		if d.Dialect != "postgres" || d.Ping <= 0 || !strings.HasPrefix(d.ServerVersion, "PostgreSQL 18") || d.Pool.Open < 1 {
 			t.Errorf("diagnostics = %+v", d)
 		}
-		if !equal(d.Namespaces, []string{"app", "blobfs", "sql"}) {
+		if !slices.Equal(d.Namespaces, []string{"app", "blobfs", "sql"}) {
 			t.Errorf("namespaces = %v", d.Namespaces)
 		}
 	})
@@ -105,7 +106,7 @@ func TestAdmin(t *testing.T) {
 
 	t.Run("patterns", func(t *testing.T) {
 		cat := webtest.Decode[catalog](t, c.Get(t, admin+"/patterns"), http.StatusOK)
-		if !equal(cat.Namespaces, []string{"app", "blobfs", "sql"}) {
+		if !slices.Equal(cat.Namespaces, []string{"app", "blobfs", "sql"}) {
 			t.Errorf("namespaces = %v", cat.Namespaces)
 		}
 		found := false
@@ -128,7 +129,7 @@ func TestAdmin(t *testing.T) {
 		for i, d := range inv.Domains {
 			names[i] = d.Name
 		}
-		if !equal(names, []string{"data", "document", "organization"}) {
+		if !slices.Equal(names, []string{"data", "document", "organization"}) {
 			t.Fatalf("domains = %v", names)
 		}
 		byName := map[string]map[string]struct {
@@ -216,7 +217,7 @@ func TestAdmin(t *testing.T) {
 	})
 
 	t.Run("states", func(t *testing.T) {
-		if got := integration.States(t, c); !equal(got, []string{"default", "empty"}) {
+		if got := integration.States(t, c); !slices.Equal(got, []string{"default", "empty"}) {
 			t.Errorf("states = %v, want default and empty", got)
 		}
 	})
@@ -224,7 +225,7 @@ func TestAdmin(t *testing.T) {
 	t.Run("state", func(t *testing.T) {
 		total := func(t *testing.T) int {
 			t.Helper()
-			return webtest.Decode[page](t, c.Get(t, organizations), http.StatusOK).total()
+			return webtest.Decode[organizationPage](t, c.Get(t, organizations), http.StatusOK).total()
 		}
 		// A reset without its confirmation is refused before it touches the
 		// schema.

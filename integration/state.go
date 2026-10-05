@@ -2,6 +2,7 @@ package integration
 
 import (
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/standards-lab/go-web-sdk/webtest"
@@ -89,11 +90,11 @@ func States(t testing.TB, c *webtest.Client) []string {
 func Revert(t testing.TB, c *webtest.Client) {
 	t.Helper()
 	sets := Schema(t, c).Sets
-	for i := len(sets) - 1; i >= 0; i-- {
-		if sets[i].Version == 0 {
+	for _, set := range slices.Backward(sets) {
+		if set.Version == 0 {
 			continue
 		}
-		body := map[string]any{"set": sets[i].Name, "steps": sets[i].Version}
+		body := map[string]any{"set": set.Name, "steps": set.Version}
 		webtest.Decode[SchemaStatus](t, c.Post(t, pathSchemaDown, body), http.StatusOK)
 	}
 }

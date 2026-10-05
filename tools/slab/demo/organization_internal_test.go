@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -593,7 +594,7 @@ func TestScenario_TargetsThreeDifferentRowsEachAtItsOwnVersion(t *testing.T) {
 
 func TestScenario_KeepsEveryNoteLineWithinEightyColumns(t *testing.T) {
 	_, out := runDomain(t)
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "    ") && len(line) > 80 {
 			t.Errorf("line is %d columns: %q", len(line), line)
 		}
@@ -601,12 +602,7 @@ func TestScenario_KeepsEveryNoteLineWithinEightyColumns(t *testing.T) {
 }
 
 func contains(lines []string, want string) bool {
-	for _, l := range lines {
-		if l == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(lines, want)
 }
 
 func TestScenario_StopsAtTheServiceNeedWhenNothingListens(t *testing.T) {

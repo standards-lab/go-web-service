@@ -161,7 +161,7 @@ func TestProblems_WritesNoRow(t *testing.T) {
 
 func TestProblems_KeepsEveryNoteLineWithinEightyColumns(t *testing.T) {
 	_, out := runProblems(t)
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "    ") && len(line) > 80 {
 			t.Errorf("line is %d columns: %q", len(line), line)
 		}

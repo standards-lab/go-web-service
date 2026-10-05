@@ -237,7 +237,7 @@ func hasHeader(headers []httpx.Header, name string) bool {
 
 // block prints text with every line indented one level past a caption.
 func (r *Reporter) block(text string) {
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		r.printf("%s%s%s\n", indent, indent, line)
 	}
 }

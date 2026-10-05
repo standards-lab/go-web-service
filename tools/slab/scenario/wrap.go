@@ -8,7 +8,7 @@ import "strings"
 // paragraph wraps on its own and an empty line between two stays empty.
 func wrap(text string, width int) []string {
 	var lines []string
-	for _, para := range strings.Split(text, "\n") {
+	for para := range strings.SplitSeq(text, "\n") {
 		lines = append(lines, wrapParagraph(para, width)...)
 	}
 	return lines

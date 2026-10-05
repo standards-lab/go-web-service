@@ -1,6 +1,6 @@
 services:
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.160.0
+    image: otel/opentelemetry-collector-contrib:0.161.0
     profiles: ["observability"]
     command: ["--config=/etc/otelcol-contrib/otel-collector.yaml"]
     volumes:
@@ -25,7 +25,7 @@ services:
     # retry with backoff, so a backend that is still starting costs nothing but delay.
 
   loki:
-    image: grafana/loki:3.7.7
+    image: grafana/loki:3.7.8
     profiles: ["observability"]
     command: ["-config.file=/etc/loki/loki.yaml"]
     volumes:
@@ -38,7 +38,7 @@ services:
     # wait on service_started.
 
   tempo:
-    image: grafana/tempo:3.0.3
+    image: grafana/tempo:3.1.0
     profiles: ["observability"]
     command: ["-config.file=/etc/tempo/tempo.yaml"]
     volumes:
@@ -65,7 +65,7 @@ services:
     # within a couple of seconds of that.
 
   grafana:
-    image: grafana/grafana:13.2.2
+    image: grafana/grafana:13.2.3
     profiles: ["observability"]
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"

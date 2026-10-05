@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -192,8 +193,9 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 	}
 }
 
-// The seeder's Verify prepares the layer's four statements, blobfs's, and
-// the data package's lock, as the composition root lists the stores.
+// The seeder's Verify prepares every statement the layer and the data
+// package registered, and blobfs's, as the composition root lists the
+// stores.
 func TestSeed_VerifiesTheListedStores(t *testing.T) {
 	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
 	fs, err := bfdata.New(catalog, sqltest.Dialect{})
@@ -210,8 +212,17 @@ func TestSeed_VerifiesTheListedStores(t *testing.T) {
 	if err := data.NewSeeder(db, []query.Verifier{svc.Verifier(), fs}, svc.Seed()).Verify(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	want := 1 + 4 + len(blobfsRec.SQL(sqltest.OpPrepare))
-	if prepared := rec.SQL(sqltest.OpPrepare); len(prepared) != want {
-		t.Errorf("prepared %d statements, want %d: the lock, the layer's 4, and blobfs's", len(prepared), want)
+	prepared := rec.SQL(sqltest.OpPrepare)
+	for _, entry := range db.Registry() {
+		for _, st := range entry.Statements.Statements() {
+			if !slices.Contains(prepared, st.Text()) {
+				t.Errorf("%s's statement %s was not verified", entry.Name, st.Name())
+			}
+		}
+	}
+	for _, sql := range blobfsRec.SQL(sqltest.OpPrepare) {
+		if !slices.Contains(prepared, sql) {
+			t.Errorf("blobfs's statement %q was not verified", sql)
+		}
 	}
 }

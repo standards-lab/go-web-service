@@ -21,9 +21,6 @@ import (
 	"github.com/standards-lab/go-web-service/data"
 )
 
-// The default state holds seven organizations.
-const seedRows = 7
-
 func newDatabase(t *testing.T, responses ...sqltest.Response) (*data.Database, *sqltest.Recorder) {
 	t.Helper()
 	pool, rec := sqltest.Open(t, responses...)
@@ -34,10 +31,13 @@ func newDatabase(t *testing.T, responses ...sqltest.Response) (*data.Database, *
 // contribution is a domain's seed contribution as the seeder sees it: it
 // records the rows it was handed, in the order the seeder applied it, and
 // reports each row inserted, running one statement per row so the
-// transaction's shape shows, unless err refuses the apply.
+// transaction's shape shows, unless err refuses the apply. It scripts its
+// own statements on rec as it runs, so no test restates how many rows a
+// state carries.
 type contribution struct {
 	key   string
 	order *[]string
+	rec   *sqltest.Recorder
 	rows  []json.RawMessage
 	err   error
 }
@@ -51,6 +51,7 @@ func (c *contribution) Apply(ctx context.Context, tx *sqlate.Tx, raw json.RawMes
 		return 0, err
 	}
 	c.rows = rows
+	c.rec.Queue(make([]sqltest.Response, len(rows))...)
 	for range rows {
 		if _, err := tx.ExecContext(ctx, "SELECT 1"); err != nil {
 			return 0, err
@@ -76,15 +77,15 @@ type fileContribution struct {
 
 func (c *fileContribution) Key() string { return c.key }
 
-// verifier counts its runs and fails with err, standing in for a domain's
-// store or blobfs's.
+// verifier records that it ran and fails with err, standing in for a
+// domain's store or blobfs's.
 type verifier struct {
-	runs int
-	err  error
+	ran bool
+	err error
 }
 
 func (v *verifier) Verify(context.Context, sqlate.Session) error {
-	v.runs++
+	v.ran = true
 	return v.err
 }
 
@@ -102,8 +103,9 @@ func (c *fileContribution) Write(_ context.Context, raw json.RawMessage, fixture
 	return len(rows), c.err
 }
 
-// Every listed store is verified, including a store that seeds nothing:
-// the verifiers are the root's list, not the contributions'.
+// The seeder verifies the package's own statements and every listed
+// store, including a store that seeds nothing: the verifiers are the
+// root's list, not the contributions'.
 func TestSeeder_VerifiesItsOwnAndEveryListedStore(t *testing.T) {
 	db, rec := newDatabase(t)
 	var order []string
@@ -111,15 +113,16 @@ func TestSeeder_VerifiesItsOwnAndEveryListedStore(t *testing.T) {
 	c := &contribution{key: "organizations", order: &order}
 	s := data.NewSeeder(db, []query.Verifier{store, unseeded}, c)
 
-	reg := db.Registry()
-	if len(reg) != 1 || reg[0].Name != "data" || len(reg[0].Statements.Statements()) != 1 {
-		t.Fatalf("registry = %+v; want the lock alone under data", reg)
+	if err := s.Verify(context.Background()); err != nil || !store.ran || !unseeded.ran {
+		t.Fatalf("Verify: %v, verifiers ran %t and %t; want both", err, store.ran, unseeded.ran)
 	}
-	if err := s.Verify(context.Background()); err != nil || store.runs != 1 || unseeded.runs != 1 {
-		t.Fatalf("Verify: %v, verifiers ran %d and %d times; want once each", err, store.runs, unseeded.runs)
-	}
-	if got := len(rec.SQL(sqltest.OpPrepare)); got != 1 {
-		t.Fatalf("prepared %d statements; want the lock", got)
+	prepared := rec.SQL(sqltest.OpPrepare)
+	for _, entry := range db.Registry() {
+		for _, st := range entry.Statements.Statements() {
+			if !slices.Contains(prepared, st.Text()) {
+				t.Errorf("%s's statement %s was not verified", entry.Name, st.Name())
+			}
+		}
 	}
 	unseeded.err = errBoom
 	if err := s.Verify(context.Background()); !errors.Is(err, errBoom) {
@@ -168,11 +171,19 @@ type both struct{ neither }
 func (both) Apply(context.Context, *sqlate.Tx, json.RawMessage) (int, error) { return 0, nil }
 func (both) Write(context.Context, json.RawMessage, fs.FS) (int, error)      { return 0, nil }
 
-// The states are the embedded files, by name, sorted.
+// The states are the embedded files, by name, sorted, and each one listed
+// is a state Seed knows.
 func TestSeeder_States_ListsTheFiles(t *testing.T) {
 	db, _ := newDatabase(t)
-	if got := data.NewSeeder(db, nil).States(); !slices.Equal(got, []string{"default", "empty"}) {
-		t.Fatalf("States = %v; want default and empty", got)
+	s := data.NewSeeder(db, nil)
+	got := s.States()
+	if !slices.IsSorted(got) || !slices.Contains(got, "default") || !slices.Contains(got, "empty") {
+		t.Fatalf("States = %v; want the files sorted, default and empty among them", got)
+	}
+	for _, name := range got {
+		if _, err := s.Seed(context.Background(), name); errors.Is(err, admin.ErrUnknownState) {
+			t.Errorf("Seed(%q) = %v; want a listed state known", name, err)
+		}
 	}
 }
 
@@ -222,10 +233,10 @@ func TestSeeder_Seed_AnUnreadKeyIsRefused(t *testing.T) {
 	}
 }
 
-// The default state's contributions: seven organizations, a logo for
-// each, and one document tree.
+// The default state's contributions: its organizations, their logos, and
+// its document trees.
 func defaultContributions(order *[]string, rec *sqltest.Recorder) (*contribution, *fileContribution, *fileContribution) {
-	return &contribution{key: "organizations", order: order},
+	return &contribution{key: "organizations", order: order, rec: rec},
 		&fileContribution{key: "logos", order: order, rec: rec},
 		&fileContribution{key: "documents", order: order, rec: rec}
 }
@@ -235,7 +246,7 @@ func defaultContributions(order *[]string, rec *sqltest.Recorder) (*contribution
 // fixtures; the counts carry every key, and one the state does not carry
 // reports zero.
 func TestSeeder_Seed_AppliesRowsThenFilesInOrder(t *testing.T) {
-	db, rec := newDatabase(t, make([]sqltest.Response, seedRows)...)
+	db, rec := newDatabase(t)
 	var order []string
 	orgs, logos, docs := defaultContributions(&order, rec)
 	absent := &contribution{key: "people", order: &order}
@@ -244,11 +255,14 @@ func TestSeeder_Seed_AppliesRowsThenFilesInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Seed: %v", err)
 	}
-	if n["organizations"] != seedRows || n["logos"] != seedRows || n["documents"] != 1 || n["people"] != 0 || len(n) != 4 {
-		t.Fatalf("Seeded = %v; want %d organizations and logos, one tree, people at zero", n, seedRows)
+	if len(orgs.rows) == 0 || len(logos.rows) == 0 || len(docs.rows) == 0 {
+		t.Fatalf("handed %d organizations, %d logos, %d trees; want the default state's rows under each key", len(orgs.rows), len(logos.rows), len(docs.rows))
 	}
-	if !slices.Equal(order, []string{"organizations", "logos", "documents"}) || len(orgs.rows) != seedRows {
-		t.Fatalf("applied %v with %d rows; want the rows, then logos, then documents", order, len(orgs.rows))
+	if n["organizations"] != len(orgs.rows) || n["logos"] != len(logos.rows) || n["documents"] != len(docs.rows) || n["people"] != 0 || len(n) != 4 {
+		t.Fatalf("Seeded = %v; want each contribution's count, people at zero", n)
+	}
+	if !slices.Equal(order, []string{"organizations", "logos", "documents"}) {
+		t.Fatalf("applied %v; want the rows, then logos, then documents", order)
 	}
 	for _, f := range []*fileContribution{logos, docs} {
 		if last := f.opsAtRun[len(f.opsAtRun)-1]; last != sqltest.OpCommit {
@@ -259,14 +273,14 @@ func TestSeeder_Seed_AppliesRowsThenFilesInOrder(t *testing.T) {
 		}
 	}
 	ops := rec.Ops()
-	if ops[0] != sqltest.OpBegin || ops[len(ops)-1] != sqltest.OpCommit || len(ops) != seedRows+2 {
+	if ops[0] != sqltest.OpBegin || ops[len(ops)-1] != sqltest.OpCommit || len(ops) != len(orgs.rows)+2 {
 		t.Fatalf("ops = %v; want every row in one transaction", ops)
 	}
 }
 
 // A row that fails rolls the transaction back, and no file is written.
 func TestSeeder_Seed_RollsBackOnFailure(t *testing.T) {
-	db, rec := newDatabase(t, make([]sqltest.Response, seedRows)...)
+	db, rec := newDatabase(t)
 	var order []string
 	orgs, logos, docs := defaultContributions(&order, rec)
 	orgs.err = errBoom
@@ -282,7 +296,7 @@ func TestSeeder_Seed_RollsBackOnFailure(t *testing.T) {
 // A file contribution that fails leaves the committed rows and stops the
 // seed there, its key named and the counts so far returned beside it.
 func TestSeeder_Seed_AFailedFileWriteStopsAfterTheCommit(t *testing.T) {
-	db, rec := newDatabase(t, make([]sqltest.Response, seedRows)...)
+	db, rec := newDatabase(t)
 	var order []string
 	orgs, logos, docs := defaultContributions(&order, rec)
 	logos.err = errBoom
@@ -290,7 +304,7 @@ func TestSeeder_Seed_AFailedFileWriteStopsAfterTheCommit(t *testing.T) {
 	if !errors.Is(err, errBoom) || !strings.Contains(err.Error(), "logos") {
 		t.Fatalf("err = %v; want the logos' failure, named", err)
 	}
-	if n["organizations"] != seedRows || !slices.Equal(order, []string{"organizations", "logos"}) {
+	if n["organizations"] != len(orgs.rows) || !slices.Equal(order, []string{"organizations", "logos"}) {
 		t.Fatalf("Seeded = %v, applied %v; want the rows counted and documents not run", n, order)
 	}
 	if ops := rec.Ops(); ops[len(ops)-1] != sqltest.OpCommit {
@@ -302,15 +316,15 @@ func TestSeeder_Seed_AFailedFileWriteStopsAfterTheCommit(t *testing.T) {
 // within its 1 MiB bound, one for each organization the default state
 // seeds.
 func TestSeedFixtures_AreLogosTheUploadAccepts(t *testing.T) {
-	db, rec := newDatabase(t, make([]sqltest.Response, seedRows)...)
+	db, rec := newDatabase(t)
 	var order []string
 	orgs, _, docs := defaultContributions(&order, rec)
 	logos := &fixtureReader{}
 	if _, err := data.NewSeeder(db, nil, orgs, logos, docs).Seed(context.Background(), "default"); err != nil {
 		t.Fatal(err)
 	}
-	if len(logos.sizes) != seedRows {
-		t.Fatalf("read %d fixtures; want %d", len(logos.sizes), seedRows)
+	if len(logos.sizes) == 0 || len(logos.sizes) != len(orgs.rows) {
+		t.Fatalf("read %d fixtures; want one for each of the %d organizations", len(logos.sizes), len(orgs.rows))
 	}
 	for name, size := range logos.sizes {
 		if size > 1<<20 {

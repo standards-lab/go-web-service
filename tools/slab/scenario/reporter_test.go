@@ -1,4 +1,4 @@
-package scenario
+package scenario_test
 
 import (
 	"bytes"
@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
+	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
@@ -17,7 +18,7 @@ func strip(s string) string { return ansi.ReplaceAllString(s, "") }
 
 func TestReporter_RequestPrintsLineHeadersAndEncodedBody(t *testing.T) {
 	var out bytes.Buffer
-	r := NewReporter(&out, false)
+	r := scenario.NewReporter(&out, false)
 	r.Request(http.MethodPut, "/organizations/1", []httpx.Header{{Name: "If-Match", Value: `"3"`}}, map[string]string{"code": "acme"})
 	want := "\n" +
 		"  PUT /organizations/1\n" +
@@ -35,7 +36,7 @@ func TestReporter_RequestPrintsLineHeadersAndEncodedBody(t *testing.T) {
 
 func TestReporter_RequestWithNoBodyPrintsNoContentType(t *testing.T) {
 	var out bytes.Buffer
-	r := NewReporter(&out, false)
+	r := scenario.NewReporter(&out, false)
 	r.Request(http.MethodDelete, "/organizations/1", []httpx.Header{{Name: "If-Match", Value: `"3"`}}, nil)
 	want := "\n  DELETE /organizations/1\n    If-Match: \"3\"\n\n"
 	if out.String() != want {
@@ -50,7 +51,7 @@ func TestReporter_RequestWithNoBodyPrintsNoContentType(t *testing.T) {
 
 func TestReporter_RequestPrintsARawBodyAsIsAndKeepsACallerContentType(t *testing.T) {
 	var out bytes.Buffer
-	r := NewReporter(&out, false)
+	r := scenario.NewReporter(&out, false)
 	r.Request(http.MethodPost, "/x", []httpx.Header{{Name: "content-type", Value: "text/plain"}}, "not json")
 	want := "\n  POST /x\n    content-type: text/plain\n\n    not json\n\n"
 	if out.String() != want {
@@ -65,7 +66,7 @@ func TestReporter_RequestPrintsARawBodyAsIsAndKeepsACallerContentType(t *testing
 
 func TestReporter_ResponsePrintsStatusBodyThenChosenHeaders(t *testing.T) {
 	var out bytes.Buffer
-	r := NewReporter(&out, false)
+	r := scenario.NewReporter(&out, false)
 	res := &httpx.Response{
 		Status: http.StatusCreated,
 		Header: http.Header{
@@ -94,7 +95,7 @@ func TestReporter_ResponsePrintsStatusBodyThenChosenHeaders(t *testing.T) {
 
 func TestReporter_ResponsePrintsAnObjectsValidators(t *testing.T) {
 	var out bytes.Buffer
-	r := NewReporter(&out, false)
+	r := scenario.NewReporter(&out, false)
 	r.Response(&httpx.Response{
 		Status: http.StatusNotModified,
 		Header: http.Header{
@@ -116,7 +117,7 @@ func TestReporter_ResponsePrintsAnObjectsValidators(t *testing.T) {
 
 func TestReporter_ResponseWithNoBodyOrHeadersPrintsTheStatusAlone(t *testing.T) {
 	var out bytes.Buffer
-	r := NewReporter(&out, false)
+	r := scenario.NewReporter(&out, false)
 	r.Response(&httpx.Response{Status: http.StatusNoContent, Header: http.Header{"Date": {"never"}}})
 	if want := "\n  HTTP 204 No Content\n\n"; out.String() != want {
 		t.Errorf("Response printed:\n%s\nwant:\n%s", out.String(), want)
@@ -125,7 +126,7 @@ func TestReporter_ResponseWithNoBodyOrHeadersPrintsTheStatusAlone(t *testing.T) 
 
 func TestReporter_ResponsePrintsANonJSONBodyAsIs(t *testing.T) {
 	var out bytes.Buffer
-	r := NewReporter(&out, false)
+	r := scenario.NewReporter(&out, false)
 	r.Response(&httpx.Response{Status: 200, Body: []byte("not json")})
 	if !strings.Contains(out.String(), "    not json\n") {
 		t.Errorf("Response printed:\n%s", out.String())
@@ -134,7 +135,7 @@ func TestReporter_ResponsePrintsANonJSONBodyAsIs(t *testing.T) {
 
 func TestReporter_TracePrintsThreeAlignedLinesAndNoQuery(t *testing.T) {
 	var out bytes.Buffer
-	r := NewReporter(&out, false)
+	r := scenario.NewReporter(&out, false)
 	r.Trace("http://localhost:3000/", "go-web-service", "4bf92f3577b34da6a3ce929d0e0e4736")
 	want := "\n" +
 		"  Observability\n" +
@@ -149,7 +150,7 @@ func TestReporter_TracePrintsThreeAlignedLinesAndNoQuery(t *testing.T) {
 
 func TestReporter_TableAlignsNames(t *testing.T) {
 	var out bytes.Buffer
-	r := NewReporter(&out, false)
+	r := scenario.NewReporter(&out, false)
 	r.Table("fields", [][2]string{{"id", "1"}, {"parent_id", "none"}})
 	want := "  fields\n    id         1\n    parent_id  none\n"
 	if out.String() != want {
@@ -159,7 +160,7 @@ func TestReporter_TableAlignsNames(t *testing.T) {
 
 func TestReporter_ColorOnWrapsEveryChannel(t *testing.T) {
 	var out bytes.Buffer
-	r := NewReporter(&out, true)
+	r := scenario.NewReporter(&out, true)
 	r.Intent(1, 2, "do a thing")
 	r.SQL("the statement", "SELECT 1")
 	r.Request(http.MethodPost, "/x", []httpx.Header{{Name: "If-Match", Value: `"1"`}}, map[string]int{"n": 1})
@@ -197,5 +198,39 @@ func TestReporter_ColorOnWrapsEveryChannel(t *testing.T) {
 		"\n    · tick 1\n"
 	if strip(got) != want {
 		t.Errorf("text under the escapes:\n%q\nwant:\n%q", strip(got), want)
+	}
+}
+
+func TestReporter_JSONPrintsACaptionedColoredBlockAsAuthored(t *testing.T) {
+	var out bytes.Buffer
+	r := scenario.NewReporter(&out, false)
+	r.JSON("data/seeds/default.json", []byte("{\"organizations\": [{\"code\": \"acme\"}]}\n"))
+	want := "\n" +
+		"  data/seeds/default.json\n" +
+		"    {\"organizations\": [{\"code\": \"acme\"}]}\n" +
+		"\n"
+	if out.String() != want {
+		t.Errorf("JSON printed:\n%s\nwant:\n%s", out.String(), want)
+	}
+
+	out.Reset()
+	r2 := scenario.NewReporter(&out, true)
+	r2.JSON("caption", []byte(`{"code": "acme"}`))
+	got := out.String()
+	st := style.New(true)
+	if !strings.Contains(got, st.Caption("caption")) {
+		t.Error("the caption is not styled as a caption")
+	}
+	if !strings.Contains(got, st.Key(`"code"`)+": "+st.Value(`"acme"`)) {
+		t.Errorf("the body is not colored as JSON:\n%q", got)
+	}
+}
+
+func TestReporter_JSONPrintsANonJSONDocumentAsIs(t *testing.T) {
+	var out bytes.Buffer
+	r := scenario.NewReporter(&out, false)
+	r.JSON("a file", []byte("not json"))
+	if want := "\n  a file\n    not json\n\n"; out.String() != want {
+		t.Errorf("JSON printed %q, want %q", out.String(), want)
 	}
 }

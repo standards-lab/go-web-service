@@ -157,6 +157,8 @@ accumulate under [Unreleased] until the first cut.
 - A directory read and an empty directory's delete run their scope check in their own
   transaction. The logo's organization check is a key lookup.
 - CI runs slab's vet, `go mod tidy -diff`, tests, and golangci-lint.
+- golangci-lint's `testpackage` check fails on any white-box test file except `export_test.go`,
+  which may only export a clock or probe hook; every test drives the exported API from `<pkg>_test`.
 - The storage libraries this service validated before them: blobfs v0.4.0 with postgres/v0.3.0,
   go-storage v0.2.1 with azureblob/v0.2.0, go-web-sdk v0.12.0, and go-database v0.6.2, the
   promotions and resolution items of `v1.storage.suite`:

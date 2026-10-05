@@ -20,9 +20,9 @@ var files embed.FS
 // DB; it defines no patterns of its own. It also keeps the statements
 // registry: every domain registers its compiled inventory at wiring, so
 // the admin service can walk the whole service's SQL the way the catalog
-// lists its patterns. Each registration, and [NewStorage]'s for blobfs's
-// store, also records the store's verifier, which [Seeder.Verify] runs, so
-// a store that runs statements cannot be left out of the startup check.
+// lists its patterns. Each [Database.Register] call, and [NewStorage] for
+// blobfs's store, also records the store's verifier for [Seeder.Verify], so
+// no store that runs statements is left out of the startup check.
 // The package's own statement, under statements/, is the lock; it compiles
 // once here and registers under "data". The seed's statements are the
 // domains' own (Seed).
@@ -49,11 +49,12 @@ func New(db *sqlate.DB, catalog *query.Catalog) *Database {
 	return d
 }
 
-// Register records stmts under name, a domain's, at wiring, and verifier,
-// the store that checks them (and any projection over them) against the
-// live schema, for [Seeder.Verify]. Registration never closes: a store
-// registered after the seeder is built is verified by its next Verify.
-// Registering a name twice is a wiring defect and panics.
+// Register records a domain's stmts under name at wiring, together with
+// verifier, the store that checks those statements (and any projection
+// over them) against the live schema when [Seeder.Verify] runs.
+// Registration stays open: the next Verify also checks a store registered
+// after the seeder is built. Registering a name twice is a wiring defect
+// and panics.
 func (d *Database) Register(name string, stmts *query.Statements, verifier query.Verifier) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -64,8 +65,8 @@ func (d *Database) Register(name string, stmts *query.Statements, verifier query
 	d.verifiers = append(d.verifiers, verifier)
 }
 
-// record adds v to the verifiers [Seeder.Verify] runs, for a store with no
-// statements registry entry, as blobfs's, whose statements are its own.
+// record adds v to the verifiers [Seeder.Verify] runs without a registry
+// entry, for a store such as blobfs's that owns its statements.
 func (d *Database) record(v query.Verifier) {
 	d.mu.Lock()
 	defer d.mu.Unlock()

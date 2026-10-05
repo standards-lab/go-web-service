@@ -112,9 +112,9 @@ func NewSeeder(db *Database, contributions ...Contribution) *Seeder {
 	return s
 }
 
-// Verify checks every store registered on the database by the time it
-// runs, the package's own statements among them, against the live schema:
-// each [Database.Register]'s verifier and blobfs's store, which
+// Verify checks every store recorded on the database when it runs against
+// the live schema: each verifier passed to [Database.Register], the
+// package's own statements among them, and blobfs's store, which
 // [NewStorage] records. The admin service runs it at startup, before it
 // seeds, and on a verify request; it is the service's only statement
 // check.

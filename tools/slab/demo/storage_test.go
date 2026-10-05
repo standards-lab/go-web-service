@@ -69,7 +69,7 @@ type seedEntry struct {
 	Entries     []seedEntry `json:"entries"`
 }
 
-// seeded is the counts the service's seeder reports.
+// seeded holds the counts the service's seeder reports.
 type seeded struct {
 	Documents     int `json:"documents"`
 	Logos         int `json:"logos"`

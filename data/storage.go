@@ -26,8 +26,8 @@ type Storage struct {
 }
 
 // NewStorage groups blobfs's store with the object store it keys into and
-// records the store on db, whose session runs its rows, for
-// [Seeder.Verify] to check its statements. No I/O happens here.
+// records the store on db, whose session runs the store's rows, so
+// [Seeder.Verify] checks its statements. No I/O happens here.
 func NewStorage(db *Database, fs *bfdata.Store, objects *storage.Store) *Storage {
 	db.record(fs)
 	return &Storage{FS: fs, Objects: &Objects{store: objects}}

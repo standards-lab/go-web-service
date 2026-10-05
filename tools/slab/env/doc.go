@@ -2,4 +2,9 @@
 // read from the context: the URLs slab targets and the repository root
 // override. It imports no other slab package, so every layer, including
 // httpx and repo below scenario, can read it without an import cycle.
+//
+// The package exports:
+//
+//   - [Env], the run configuration
+//   - [WithContext] and [FromContext], which carry an Env on a context
 package env

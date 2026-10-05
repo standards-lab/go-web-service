@@ -316,9 +316,9 @@ which runs blobfs's sweep in bounded passes while a pass reports more. Once the 
 drain, the sweep finishes the pass in flight and runs no further one, whatever remains, so a
 large backlog never holds the drain; the next start's wake finds what is left.
 
-A Reactor, in the architecture's sense, calls a Domain Service. The sweep calls none, so it is
-not one; it is the exception the composition root stages as a reactor anyway, since the reactor
-is the process's one runner for work that lasts the process lifetime.
+The sweep is a Reactor in the architecture's sense, one that dispatches to no Domain Service: the
+composition root stages it on a reactor, the process's one runner for work driven by an
+occurrence for the process lifetime.
 
 It wakes on each recursive delete, on an interval (`sweep.interval`, 30 seconds) for work no
 delete announced, and once at startup, so a branch marked before a restart is swept at the

@@ -5,17 +5,15 @@
 // --body <json> escape hatch sent verbatim; cobra's mutual exclusion keeps
 // the two apart before any function here runs. The families resolve
 // identically, so the resolution belongs to none of them; it lives here,
-// beside output, for each to import.
+// beside output, for each to import. Neither body function touches the
+// request; a command passes what it returns to its client.
 //
-// [Body] is the unguarded case: the --body bytes as given, or the value
-// the command builds from its flags, marshaled. [GuardedBody] is the case
-// under a precondition header: the same body, and the version its If-Match
-// carries, which the --version flag supplies or, on the --body path, a
-// top-level "version" number in the JSON stands in for. Neither function
-// touches the request; a command passes what they return to its client.
+// The package exports:
 //
-// [ReadFlags] is the read grammar a collection read's command binds
-// ([ReadFlags.Bind]) and turns into its query pairs ([ReadFlags.Query]).
-// [DefaultPageSize] is the page size the service gives a read that names
-// none.
+//   - [Body], the body of an unguarded command
+//   - [GuardedBody], the body of a command under a precondition header, and
+//     the version its If-Match carries
+//   - [ReadFlags], the read grammar a collection read's command binds
+//   - [DefaultPageSize], the page size the service gives a read that names
+//     none
 package input

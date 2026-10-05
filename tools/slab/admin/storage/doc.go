@@ -5,6 +5,12 @@
 // HTTP surface, and the one-to-one name across the two trees is for
 // navigation.
 //
+// The package exports:
+//
+//   - [Storage], the route the admin service is mounted at
+//   - [Client] and [NewClient], one request per endpoint
+//   - [Commands], which builds the storage command over a Client
+//
 // Neither endpoint takes a body, so the package has no entities.go.
 // client.go names the route and sends one request per endpoint through
 // httpx; commands.go builds the storage command and its two leaf

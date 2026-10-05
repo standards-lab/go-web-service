@@ -8,6 +8,13 @@
 // a sibling of slab's domain tree, not a member of it, the way the service
 // keeps admin/ and domain/ as separate root-level trees.
 //
+// The package exports:
+//
+//   - [Database], the route the admin service is mounted at
+//   - [Client] and [NewClient], one request per endpoint
+//   - [Down], [Force], [Reset], [State], and [Steps], the request bodies
+//   - [Commands], which builds the database command over a Client
+//
 // The package has one file per role. entities.go restates the request bodies
 // the service defines, with the same json tags, so a server-side rename
 // breaks slab rather than being followed silently; the response types are not

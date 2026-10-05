@@ -10,6 +10,18 @@
 // with an additive seed rather than a reset, and names what it creates for
 // the run, so it runs twice in a row without a reset between.
 //
+// The package exports:
+//
+//   - [Compile], [Organization], [Problems], and [Storage], the scenarios
+//   - [Scenarios], the ordered list, and [Commands], the demo subtree
+//   - [SeedState], [SeedsDir], and [FixturesDir], the seeded state and where
+//     the service's states and fixtures live
+//   - [ServiceName], the service name a trace is indexed under
+//   - [Reset] and [List], the narrated calls two scenarios make identically
+//   - [Tree], the seeded organizations by code
+//   - [IdentityOf] and [ExpectVersion], the checks on a command's reply
+//   - [OversizedBody], a command body over the service's limit
+//
 // Each file holds one scenario: its literal and the step methods that run
 // it. A scenario file exports its constructor (Compile, Organization,
 // Problems, Storage) and registers nothing: commands.go holds Scenarios,

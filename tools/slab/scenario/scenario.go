@@ -19,6 +19,8 @@ type Scenario struct {
 
 // Need is one precondition a scenario states and checks for itself: what has
 // to be reachable, the mise task that makes it so, and the probe that decides.
+// The probe receives the run's context, so a Check that only reads the run
+// configuration can be a bare function reference such as httpx.Live.
 type Need struct {
 	What  string
 	Task  string

@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -107,7 +108,7 @@ func TestProblems_PrintsTheOversizedBodyAsItsStandIn(t *testing.T) {
 	if strings.Contains(out, strings.Repeat("a", 64)) {
 		t.Errorf("output prints the filler itself:\n%s", out)
 	}
-	if !contains(fake.requests, "POST /api/organizations") {
+	if !slices.Contains(fake.requests, "POST /api/organizations") {
 		t.Errorf("the fake did not receive the oversized create; got:\n%s", strings.Join(fake.requests, "\n"))
 	}
 }
@@ -132,7 +133,7 @@ func TestProblems_SendsEachConditionsRequestAsNarrated(t *testing.T) {
 		"GET /api/organizations/" + absentID,
 		"POST /api/organizations/" + acme + `/transfer If-Match: "1"`,
 	} {
-		if !contains(fake.requests, want) {
+		if !slices.Contains(fake.requests, want) {
 			t.Errorf("the fake did not receive %q; got:\n%s", want, strings.Join(fake.requests, "\n"))
 		}
 	}

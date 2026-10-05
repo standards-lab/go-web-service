@@ -143,20 +143,6 @@ any Go around a statement: would it change the SQL I would have written by hand?
 A library change is worth pausing a session for only when the consumer cannot correctly express
 the operation through exported API; an inelegant-but-expressible shape stages in `sdk`.
 
-## Promotion candidates
-
-The document layer is the second domain layer, and it proves three rules, recorded for promotion
-to the architecture repository at the storage lane's fold:
-
-- The domain layer as a compositional grouping (one package, one Domain Service, one handler)
-  is a candidate Go Elemental expression.
-- The capability-named translation file is the in-package counterpart of the Elemental
-  Architecture's downward-dependency rule; both domains' `storage.go` hold it.
-- Cross-domain coupling runs two ways: downward as an SQL check in the consumer's transaction
-  (the document layer's `organization_exists` inside the root's transaction, a foreign key the
-  backstop), upward as an interface the consuming domain declares and the composition root
-  injects (`document.Sweeper`, satisfied by the sweep's waker).
-
 ## Deferred by design
 
 Multi-entity role refinements belong to the first multi-entity layer. Soft delete as the

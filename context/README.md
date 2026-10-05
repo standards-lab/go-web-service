@@ -16,7 +16,7 @@ section). The workspace roadmap in the coordinator repository, standards-lab, de
 - `domain-architecture.md` holds the rules every domain layer is built by.
 - `integration-tier.md` holds what the integration tier adds next.
 
-`CLAUDE.md` states the change and release discipline.
+`STANDARDS.md` states the change discipline and the domain layer's judgement calls.
 
 ## Capability map
 

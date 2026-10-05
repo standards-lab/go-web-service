@@ -1,56 +1,7 @@
 # go-web-service
 
-The reference web service of Go Elemental, the Standards Lab organization's Go implementation of
-the Elemental Architecture: a production web service composed from go-core, go-web-sdk,
-go-database, sqlate, go-storage, blobfs, and go-observability on the go-web-sdk-template
-baseline, on one declared stack (Postgres for SQL, Azure Blob Storage for objects). Managed with
-the marathon workflow; start from `context/README.md`.
+The reference web service of Go Elemental, a `code` project managed with the marathon workflow.
 
-## Repository specifics
-
-- **Module layout.** One module at the root, `github.com/standards-lab/go-web-service`, with
-  one binary, `cmd/server`, composing on go-core's `process` package for the pre-infrastructure
-  main sequence. The composition root is `internal/app`, one file per layer (telemetry,
-  infrastructure, admin, domain, reactors) with `stages.go` the one stage table and `routes.go`
-  the list of mounts. The base layers are root-level packages:
-  - `data` — the infrastructure as the domains see it: the session with the pattern catalog and
-    the statements registry, the migration sets (blobfs's beneath the application's), the
-    application's patterns, the seeder composed from the domains' contributions, the lock-name
-    registry, the directives lowering, the shared status matcher, and `Storage`: blobfs's store
-    over the object-store adapter, whose file protocols the domains run, with the read of an
-    available file and the sweep worker
-  - `domain/<layer>` — one package per domain, its SQL under `statements/`
-  - `admin/<service>` — the HTTP half of an admin service, mounted under `/admin`
-  - `sdk` — promotion candidates staged for the libraries
-- **Dependencies.** go-core, go-web-sdk, go-database with go-database/postgres, sqlate with
-  sqlate/postgres, go-storage with go-storage/azureblob, blobfs with blobfs/postgres, and
-  go-observability at pinned releases, on Go 1.27; sqlate's `sqlint` is a `tool` directive. The
-  pins are the committed steady state; a gitignored local `go.work` serves sibling development.
-- **SQL.** Every statement is an authored `.sql` file with a `--|` tier header, compiled by
-  sqlate against the catalog at construction and verified against the live schema at startup.
-  Schema migrations live under `data/migrations` and apply at startup, above blobfs's own set,
-  through the database admin service; `sqlint.toml` at the root names the sources and roles the
-  lint checks.
-- **Stack.** Postgres is the declared SQL engine and Azure Blob Storage the declared object
-  store, run locally through `compose.yml` (Azurite for the store). A provider variant is never
-  a switch inside this service; it would be a separate focused reference.
-- **Documented layers.** The documented layer is the unit of change: a capability lands its
-  code, its README section, and its tests in one change, and is complete before the next
-  begins. A documentation section that no longer matches the code is a defect, fixed in the same
-  change. A change is additive (a new layer) or modifying (a new provider, a CQRS change), and it
-  also touches the boundaries the layer shares with other layers. Every change runs as a
-  marathon session.
-- **Releases.** The service is the repository's only releasable artifact. It has no version
-  until its first release: no tag exists, and `CHANGELOG.md` accumulates under `[Unreleased]`
-  until the first cut, which `release.yml` turns into a GitHub release. The architecture
-  repository's
-  [release-and-ci](https://github.com/standards-lab/architecture/blob/main/standards/go-elemental/principles/release-and-ci.md)
-  and [independent-releases](https://github.com/standards-lab/architecture/blob/main/principles/independent-releases.md)
-  principles set the release discipline: coherent snapshots with their pins, prerelease tags,
-  and a library change released together with the service change that proves it.
-- **Tests.** Two tiers, documented in the README: the unit tier hermetic over sqlate's
-  scripted driver, with `internal/config/configtest` the single source of valid test
-  configuration, and the integration tier in the root `integration` package over the SDKs'
-  toolkit, run by `mise run integration` and by CI on merge to main. The runtime carries
-  nothing for the tests' sake.
-- **Public repo.** This repository is public on GitHub.
+- [`context/README.md`](context/README.md): the working context.
+- [`STANDARDS.md`](STANDARDS.md): the judgement calls the standards-reviewer applies.
+- `mise run check`: the check.

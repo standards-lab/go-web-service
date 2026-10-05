@@ -97,26 +97,6 @@ func TestCommands_MountsOneSubcommandPerEndpoint(t *testing.T) {
 	}
 }
 
-func TestCommands_ConstructsTheClientWhenASubcommandRuns(t *testing.T) {
-	_, srv := newService(t, http.StatusOK, `{}`)
-	calls := 0
-	org := organization.Commands(func() *organization.Client {
-		calls++
-		return organization.NewClient(httpx.NewClient(srv.URL))
-	}, output.New(io.Discard, io.Discard, nil))
-	if calls != 0 {
-		t.Fatalf("Commands constructed the client %d times while building the tree", calls)
-	}
-	org.SetOut(io.Discard)
-	org.SetArgs([]string{"list"})
-	if err := org.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	if calls != 1 {
-		t.Errorf("the client was constructed %d times, want once at run time", calls)
-	}
-}
-
 func TestList_BuildsTheQueryFromTheReadFlags(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args []string

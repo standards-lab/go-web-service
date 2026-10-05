@@ -68,7 +68,7 @@ func serviceLogging(t *testing.T, logger *slog.Logger, dialect sqlate.Dialect, r
 	}
 	t.Cleanup(func() { _ = objects.Shutdown(context.Background()) })
 	db := data.New(sqlate.Wrap(pool, dialect), catalog)
-	return organization.New(db, data.NewStorage(fs, objects), logger), rec, fake
+	return organization.New(db, data.NewStorage(db, fs, objects), logger), rec, fake
 }
 
 // seeder composes the data package's seeder over the layer's row
@@ -92,8 +92,24 @@ func seederOver(t *testing.T, responses ...sqltest.Response) (*data.Seeder, *dat
 		t.Fatal(err)
 	}
 	db := data.New(sqlate.Wrap(pool, sqltest.Dialect{}), catalog)
-	svc := organization.New(db, data.NewStorage(fs, nil), slog.New(slog.DiscardHandler))
-	return data.NewSeeder(db, []query.Verifier{svc.Verifier()}, svc.Seed(), noFiles("logos"), noFiles("documents")), db, rec
+	svc := organization.New(db, data.NewStorage(db, fs, nil), slog.New(slog.DiscardHandler))
+	return data.NewSeeder(db, svc.Seed(), noFiles("logos"), noFiles("documents")), db, rec
+}
+
+// blobfsStatements is what blobfs's store prepares when it verifies
+// itself, over a pool of its own, so a test can tell the layer's probes
+// from blobfs's.
+func blobfsStatements(t *testing.T) []string {
+	t.Helper()
+	fs, err := bfdata.New(query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns()), sqltest.Dialect{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, rec := sqltest.Open(t)
+	if err := fs.Verify(context.Background(), sqlate.Wrap(pool, sqltest.Dialect{})); err != nil {
+		t.Fatal(err)
+	}
+	return rec.SQL(sqltest.OpPrepare)
 }
 
 // noFiles stands in for a contribution of stored files under its key,
@@ -218,15 +234,15 @@ func TestStore_GuardDistinguishesAbsentFromStale(t *testing.T) {
 }
 
 // The seeder's Verify prepares every statement the layer registered,
-// beside the data package's lock, and probes the read model's field
-// contract, whose probes are statements of their own.
+// beside the data package's lock and blobfs's, and probes the read model's
+// field contract, whose probes are statements of their own.
 func TestStore_VerifyPreparesEveryStatement(t *testing.T) {
 	s, db, rec := seederOver(t)
 	if err := s.Verify(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	prepared := rec.SQL(sqltest.OpPrepare)
-	var registered []string
+	registered := blobfsStatements(t)
 	for _, entry := range db.Registry() {
 		for _, st := range entry.Statements.Statements() {
 			registered = append(registered, st.Text())
@@ -315,7 +331,7 @@ func defaultOrganizations(t *testing.T) int {
 	pool, _ := sqltest.Open(t)
 	db := data.New(sqlate.Wrap(pool, sqltest.Dialect{}), query.MustCatalog(query.Patterns(), data.Patterns()))
 	c := &rowCount{key: "organizations"}
-	if _, err := data.NewSeeder(db, nil, c, noFiles("logos"), noFiles("documents")).Seed(context.Background(), "default"); err != nil {
+	if _, err := data.NewSeeder(db, c, noFiles("logos"), noFiles("documents")).Seed(context.Background(), "default"); err != nil {
 		t.Fatal(err)
 	}
 	if c.n < 2 {

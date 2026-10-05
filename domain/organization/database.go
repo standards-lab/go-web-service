@@ -48,14 +48,14 @@ type store struct {
 	findSeededRows query.Rows[string]
 }
 
-// newStore compiles the statements against the service's catalog, registers
-// the inventory under the domain's name, and binds the handles. A compile
+// newStore compiles the statements against the service's catalog, binds the
+// handles, and registers the inventory under the domain's name with the
+// store as its verifier, so the seeder's Verify checks it. A compile
 // failure is a wiring defect and panics; no I/O happens here.
 func newStore(db *data.Database, st *data.Storage, logger *slog.Logger) *store {
 	stmts := db.Catalog.MustCompile(files, "statements", db.Dialect())
-	db.Register("organization", stmts)
 	check := stmts.Statement("version")
-	return &store{
+	s := &store{
 		db:             db,
 		storage:        st,
 		logger:         logger,
@@ -73,6 +73,8 @@ func newStore(db *data.Database, st *data.Storage, logger *slog.Logger) *store {
 		seedRows:       stmts.Statement("seed").Scan(query.Scalar[string]),
 		findSeededRows: stmts.Statement("find_seeded").Scan(query.Scalar[string]),
 	}
+	db.Register("organization", stmts, s)
+	return s
 }
 
 // Verify prepares every statement and the projection's field contract

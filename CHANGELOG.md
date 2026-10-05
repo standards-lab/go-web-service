@@ -147,8 +147,11 @@ accumulate under [Unreleased] until the first cut.
   (`30s`) cuts off a store that stops sending. A store that stalls on every try is refused with
   a 503 after about 26s, inside `write_timeout`. `max_retries: 1` moves from `config.json` to the
   `local` overlay and the integration harness.
-- The seeder verifies every store the composition root lists, including a store that seeds
-  nothing; `Contribution.Verifiers` is removed.
+- The seeder verifies every store registered on the database, including a store that seeds
+  nothing: `data.Database.Register` takes the store's verifier beside its statements, and
+  `data.NewStorage` takes the database and records blobfs's store, so no store can be left out
+  of the check. `NewSeeder` takes no verifier list; `Contribution.Verifiers` and the domains'
+  `Service.Verifier` are removed.
 - Before its first write, a document root's alias refuses a bad sort, filter, or cursor with 400,
   as a real root does.
 - A directory read and an empty directory's delete run their scope check in their own

@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/standards-lab/go-web-sdk"
-	"github.com/standards-lab/sqlate/query"
 
 	"github.com/standards-lab/go-web-service/data"
 )
@@ -37,11 +36,6 @@ type Sweeper interface {
 func New(db *data.Database, st *data.Storage, sweep Sweeper) *Service {
 	return &Service{store: newStore(db, st), sweep: sweep}
 }
-
-// Verifier returns the layer's store, which the composition root hands the
-// seeder to verify the store's statements, the seed's among them, against
-// the live schema.
-func (s *Service) Verifier() query.Verifier { return s.store }
 
 // Seed is the layer's seed contribution, a file seed, to the named states
 // the data package's seeder applies: the document hierarchies a state

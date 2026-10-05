@@ -66,7 +66,7 @@ func gatedModule(t *testing.T, gate database.SchemaGate, seed string, responses 
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := admin.New(pdb, sdb, m, catalog, admin.Options{Seed: seed, Seeder: data.NewSeeder(d, nil, organizations{}, files{"logos"}, files{"documents"}), Registry: d})
+	svc := admin.New(pdb, sdb, m, catalog, admin.Options{Seed: seed, Seeder: data.NewSeeder(d, organizations{}, files{"logos"}, files{"documents"}), Registry: d})
 	r := web.NewRouter()
 	r.Mount(web.NewModule(database.Routes(svc, gate, slog.New(slog.DiscardHandler))))
 	return r, rec
@@ -196,7 +196,7 @@ func defaultSeeder(t *testing.T) *data.Seeder {
 	t.Helper()
 	pool, _ := sqltest.Open(t)
 	d := data.New(sqlate.Wrap(pool, dialect{}), query.MustCatalog(query.Patterns(), data.Patterns()))
-	return data.NewSeeder(d, nil, organizations{}, files{"logos"}, files{"documents"})
+	return data.NewSeeder(d, organizations{}, files{"logos"}, files{"documents"})
 }
 
 // A bodyless seed applies the configured set; a body names another. Both

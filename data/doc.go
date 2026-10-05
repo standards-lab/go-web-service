@@ -10,18 +10,21 @@
 // The package's API:
 //
 //   - [Database], built by [New]: the session, the catalog, and the
-//     statements registry; [Database.Lock] takes an advisory lock named in
-//     the lock registry ([LockOrganizationTree]).
+//     statements registry, which records each registered store's verifier;
+//     [Database.Lock] takes an advisory lock named in the lock registry
+//     ([LockOrganizationTree]).
 //   - [Storage], built by [NewStorage]: blobfs's store over [Objects], the
-//     adapter over the object store. [Storage.Serve] describes an
-//     available file as a [Download], and [Storage.SweepWorker] is the
-//     sweep, each pass holding a [SweepGate].
+//     adapter over the object store, the store recorded on the [Database]
+//     for verification. [Storage.Serve] describes an available file as a
+//     [Download], and [Storage.SweepWorker] is the sweep, each pass
+//     holding a [SweepGate].
 //   - [Migrations] and [AppSet]: the migration sets, blobfs's beneath the
 //     service's own.
 //   - [Patterns] and [Namespace]: the application's pattern namespace.
-//   - [Seeder], built by [NewSeeder] from the stores it verifies and each
-//     domain's [Contribution], a [Seed] of rows or a [FileSeed] of stored
-//     files; [SeedRows] decodes a contribution's rows strictly.
+//   - [Seeder], built by [NewSeeder] from each domain's [Contribution], a
+//     [Seed] of rows or a [FileSeed] of stored files; [Seeder.Verify]
+//     checks every store registered on the [Database]. [SeedRows] decodes
+//     a contribution's rows strictly.
 //   - [Directives], [Read], [ReadListing], and [Paging]: the lowering of a
 //     request's query onto the library's reads and back.
 //   - [Status]: the problem matcher over the libraries' errors. [Conflict]

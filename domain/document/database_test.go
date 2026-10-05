@@ -73,7 +73,7 @@ func serviceNudged(t *testing.T, responses ...sqltest.Response) (*document.Servi
 	t.Cleanup(func() { _ = objects.Shutdown(context.Background()) })
 	db := data.New(sqlate.Wrap(pool, dialect), catalog)
 	sweep := &nudges{rec: rec}
-	return document.New(db, data.NewStorage(fs, objects), sweep), rec, fake, sweep
+	return document.New(db, data.NewStorage(db, fs, objects), sweep), rec, fake, sweep
 }
 
 // root scripts the owner row's read: the organization's document root, or
@@ -194,9 +194,9 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 }
 
 // The seeder's Verify prepares every statement the layer and the data
-// package registered, and blobfs's, as the composition root lists the
-// stores.
-func TestSeed_VerifiesTheListedStores(t *testing.T) {
+// package registered, and blobfs's, which the storage the layer runs over
+// recorded: the layer's store registers itself.
+func TestSeed_VerifiesTheRegisteredStores(t *testing.T) {
 	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
 	fs, err := bfdata.New(catalog, sqltest.Dialect{})
 	if err != nil {
@@ -208,8 +208,8 @@ func TestSeed_VerifiesTheListedStores(t *testing.T) {
 	}
 	pool, rec := sqltest.Open(t)
 	db := data.New(sqlate.Wrap(pool, sqltest.Dialect{}), catalog)
-	svc := document.New(db, data.NewStorage(fs, nil), nil)
-	if err := data.NewSeeder(db, []query.Verifier{svc.Verifier(), fs}, svc.Seed()).Verify(context.Background()); err != nil {
+	svc := document.New(db, data.NewStorage(db, fs, nil), nil)
+	if err := data.NewSeeder(db, svc.Seed()).Verify(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	prepared := rec.SQL(sqltest.OpPrepare)

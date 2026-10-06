@@ -37,6 +37,7 @@ const (
 	takenDirPath    = "/engineering"
 )
 
+// FixturesDir is the seeded fixtures' directory under SeedsDir.
 // replacementFixture is the seeded fixture the logo step uploads in place
 // of acme's own: another organization's logo, a PNG that passes the
 // upload's sniffed-type rule, under FixturesDir.

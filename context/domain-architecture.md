@@ -1,20 +1,15 @@
 # Domain architecture
 
-This note holds the rules every domain layer is built by. The organization and document packages
-are the domain layers; a rule leaves this note once it lands in the architecture repository.
-
-## The domain layer
-
-The domain **layer**, one feature layer of the web service, is the architectural unit, not the
-entity. Each layer is one Go package under `domain/`, at the module's base package layer,
-encapsulated by exactly one domain service and one handler regardless of how many entities or
-infrastructure integrations the layer comes to hold. `internal/` remains the composition root
-only. A domain package imports the `data` package for the database and never a provider.
+This note holds the design of the domain layers, the organization and document packages.
+`STANDARDS.md` holds the judgement calls the standards-reviewer applies to them: the layer as a
+compositional grouping, the capability-named translation file, and cross-domain coupling. A rule
+leaves this note once `STANDARDS.md` or the architecture repository holds it.
 
 ## Role-aggregated files
 
-A domain package holds the whole layer in role-named files, each aggregating its role for the
-layer:
+Each layer is one Go package under `domain/`, at the module's base package layer; `internal/`
+remains the composition root only. The package holds the whole layer in role-named files, each
+aggregating its role for the layer:
 
 - `doc.go`: the layer's architectural statement.
 - `entities.go`: every data structure of the layer, the commands included. Each command owns
@@ -29,9 +24,8 @@ layer:
   `statements/` against the catalog the `data` package holds, registers the inventory under the
   domain's name with the store as its verifier, binds each statement to a typed handle (a
   projection for the read model, rows for a scan, a guard for a version-checked command), and
-  exposes each operation as a store method that reads as what it does. Translation files are capability-named, one per
-  infrastructure integration (`storage.go` in both domains; `messaging.go` and `ai.go` are planned). A
-  service never touches an infrastructure API outside its translation file.
+  exposes each operation as a store method that reads as what it does. Both domains also
+  hold `storage.go`, the blobfs translation file; `messaging.go` and `ai.go` are planned.
 - `service.go`: the single domain service, a concrete type constructed from the `data` package.
   Its methods map endpoints to operations one to one, and each operation delegates whole to the
   store after the command's own validation. A domain declares no lifecycle stage and imports no

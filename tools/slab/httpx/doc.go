@@ -1,10 +1,12 @@
 // Package httpx is the HTTP client slab's scenarios call the service
 // through. It holds everything about HTTP that is not specific to the
-// service: the Client that sends a request, the Response the reporter
-// renders, IfMatch, RawQuery, Problem, TraceID, and the Live probes a
-// scenario's Need checks the service with.
+// service.
 //
-// The Client treats an empty []byte or string body like nil: it sets no
-// Content-Type and sends nothing, so a caller with an optional body passes
-// what it has without converting it.
+// The package exports:
+//
+//   - [Client] and [NewClient], which send a request to the service
+//   - [Response], one exchange as observed, which the reporter renders
+//   - [Header] and [IfMatch], a request header and the precondition one
+//   - [RawQuery], which joins query pairs as the printed request shows them
+//   - [Live] and [GrafanaLive], the probes a scenario's Need checks with
 package httpx

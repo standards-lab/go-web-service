@@ -7,16 +7,17 @@
 // commands.go is the list of mounts. Extending slab means editing a layer
 // file's body; the signatures, cmd/slab, and [App.Run] stay untouched.
 //
-// [New] is the cold start, with no I/O: it builds the root command with its
-// persistent flags, the infrastructure over the resolved config, the domain
-// and admin layers over the infrastructure, and mounts each layer's commands
-// on the root. One thing differs from a server's composition root: the
-// values the layers depend on (the base URL above all) are persistent flags,
-// and cobra parses those during execution, after the tree is built. So the
-// infrastructure constructs the client on demand rather than at New, and each
-// layer closes a client constructor over it that a subcommand's RunE calls
-// when it runs. Nothing below the root reads a flag before then.
+// The package exports:
 //
-// [App.Run] is the hot start: it executes the tree under ctx, renders the
-// error a command returns, and returns the process exit code.
+//   - [App] and [New], which assemble the command tree and run the process
+//   - [Config], the root's persistent flags as resolved
+//   - [Infrastructure], [Domain], and [Admin], the layers the layer files
+//     build
+//
+// One thing differs from a server's composition root: the values the layers
+// depend on (the base URL above all) are persistent flags, and cobra parses
+// those during execution, after the tree is built. So the infrastructure
+// constructs the client on demand rather than at New, and each layer closes
+// a client constructor over it that a subcommand's RunE calls when it runs.
+// Nothing below the root reads a flag before then.
 package app

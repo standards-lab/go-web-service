@@ -10,10 +10,10 @@
 //
 // A stage is the root's decision: no domain declares one or imports the
 // lifecycle. Telemetry holds no stage; its startup and shutdown hooks
-// bracket every stage. Routes and reactors are the two ways a domain
-// service enters the running process: a caller drives a route, and an
-// occurrence drives a reactor. The sweep runs on a reactor though it calls
-// no domain service (the README's Sweep section). Wiring mistakes panic at
+// bracket every stage. Routes and reactors are the two ways work enters
+// the running process: a caller drives a route, and an occurrence drives a
+// reactor. A reactor commonly dispatches to a domain service; the sweep's
+// dispatches to none (the README's Sweep section). Wiring mistakes panic at
 // construction.
 //
 // The package's API:

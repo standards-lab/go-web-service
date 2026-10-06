@@ -13,10 +13,10 @@ section). The workspace roadmap in the coordinator repository, standards-lab, de
 1.0 and the path to it (goal `v1`). The notes here carry each layer's design direction:
 
 - `data-layer.md` holds the data composition and CQRS layer's strategy and planned domain model.
-- `domain-architecture.md` holds the rules every domain layer is built by.
+- `domain-architecture.md` holds the domain layers' design.
 - `integration-tier.md` holds what the integration tier adds next.
 
-`CLAUDE.md` states the change and release discipline.
+`STANDARDS.md` states the change discipline and the domain layer's judgement calls.
 
 ## Capability map
 

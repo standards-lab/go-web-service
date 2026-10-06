@@ -6,6 +6,15 @@
 // presents nothing, so the one-to-one name across the two trees is for
 // navigation, not a claim that slab has a domain of its own.
 //
+// The package exports:
+//
+//   - [Organizations], the route the organization group is mounted at
+//   - [Client] and [NewClient], one request per endpoint
+//   - [CreateOrganization], [EditOrganization], and [TransferOrganization],
+//     the command bodies
+//   - [Organization], [Page], and [Identity], the replies
+//   - [Commands], which builds the org command over a Client
+//
 // The package has one file per role. entities.go restates the wire types the
 // service defines, with the same json tags, so a server-side rename breaks
 // slab rather than being followed silently. client.go names the routes and

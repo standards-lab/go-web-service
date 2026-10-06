@@ -5,6 +5,18 @@
 // the HTTP surface, and the one-to-one name across the two trees is for
 // navigation.
 //
+// The package exports:
+//
+//   - [Documents], the route the document group is mounted at, and
+//     [RootAlias], the id segment that names an organization's root
+//   - [DirectoryActive] and [DirectoryDeleting], the directory statuses
+//   - [Client] and [NewClient], one request per endpoint
+//   - [CreateDirectory], [MoveDirectory], and [MoveFile], the command bodies
+//   - [Directory], [DirectoryPage], [File], [FilePage], and [Identity], the
+//     replies
+//   - [AwaitSweep], which waits out a recursive delete
+//   - [Commands], which builds the docs command over a Client
+//
 // Every route sits under an organization's id, and a directory's id may be
 // the root alias, so each command takes the organization first and a
 // directory as an id or root. The commands group by what they address: dirs

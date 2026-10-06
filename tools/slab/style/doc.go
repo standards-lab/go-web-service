@@ -1,8 +1,9 @@
 // Package style is the one place slab's ANSI terminal styling lives.
-// ColorEnabled decides whether a run should emit color at all; New builds a
-// Style carrying that decision, and every method on it returns its input
-// unchanged when color is off, so the same code path serves a pipe and a
-// terminal.
+//
+// The package exports:
+//
+//   - [ColorEnabled], which decides whether a run emits color at all
+//   - [Style] and [New], the styling that carries that decision
 //
 // style.go holds the styling core: the semantic wrappers (Bold, Heading,
 // Key, Value, ...) every format builds on. A format's own coloring lives in

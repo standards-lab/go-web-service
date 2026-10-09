@@ -7,7 +7,7 @@ import (
 
 	bfdata "github.com/standards-lab/blobfs/data"
 	blobfspg "github.com/standards-lab/blobfs/postgres"
-	"github.com/standards-lab/go-core/lifecycle"
+	"github.com/standards-lab/go-core/graph"
 	"github.com/standards-lab/go-core/logging"
 	"github.com/standards-lab/go-database"
 	"github.com/standards-lab/go-database/postgres"
@@ -15,7 +15,6 @@ import (
 	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-storage/azureblob"
 	"github.com/standards-lab/sqlate"
-	"github.com/standards-lab/sqlate/migrate"
 	pgdialect "github.com/standards-lab/sqlate/postgres"
 	"github.com/standards-lab/sqlate/query"
 
@@ -23,91 +22,91 @@ import (
 	"github.com/standards-lab/go-web-service/internal/config"
 )
 
-// Infrastructure holds the services the application is composed on, one
-// concrete field per service. DB is the database's lifecycle object, the
-// provider's pool with its start, readiness, and shutdown, which the admin
-// service administers; the domains never see it. SQL is the database as
-// the domains see it: the session over the same pool with the dialect,
-// grouped with the pattern catalog every statement compiles against.
-// Storage is the object store as the domains see it: blobfs's store over
-// the same session, and the data package's adapter over the started object
-// store its keys name. ObjectStore is that store itself, which the storage
-// admin domain administers. Sets are the migration sets the admin
-// service's migrator runs, blobfs's beneath the service's own. The struct
-// stops at the composition root: the layer files read its fields, and a
-// package receives its dependencies as constructor parameters, never the
-// struct itself.
-type Infrastructure struct {
-	Logger      *slog.Logger
-	DB          *database.DB
-	SQL         *data.Database
-	Storage     *data.Storage
-	ObjectStore *storage.Store
-	Sets        []migrate.Set
+// defineInfrastructure defines the infrastructure nodes on g into n: the
+// configuration cfg, the logger written to w, and the services the
+// application is composed on. database is the database's lifecycle object,
+// the provider's pool with its start, readiness, and shutdown, which the
+// schema node administers; the domains never see it. storage is the object
+// store itself, a lifecycle participant too, which the storage admin
+// domain administers. sql is the database as the domains see it: the
+// session over the same pool with the dialect, grouped with the pattern
+// catalog every statement compiles against. files is the object storage as
+// the domains see it: blobfs's store over that session, and the data
+// package's adapter over the object store its keys name. The database is
+// defined before the object store: the two share a layer, and the readiness
+// probe reports a layer's checks in definition order.
+//
+// It constructs nothing, and no constructor opens a connection:
+// connectivity belongs to each participant's Start, so a failed Build leaks
+// none. This file is the one place a provider is named: the database's,
+// the object store's, and blobfs's engine.
+func defineInfrastructure(g *graph.Graph, n *Nodes, cfg *config.Config, w io.Writer) {
+	n.Config = g.Define("config", func(*graph.Scope) (*config.Config, error) {
+		return cfg, nil
+	})
+	n.Logger = g.Define("logger", newLogger(n, w))
+	n.Database = g.Define("database", newDatabase(n))
+	n.Storage = g.Define("storage", newStorage(n))
+	n.SQL = g.Define("sql", newSQL(n))
+	n.Files = g.Define("files", newFiles(n))
 }
 
-// newInfrastructure constructs the infrastructure services in dependency
-// order, each registering on lc where it is built, at its stage from the
-// stage table, so a service cannot exist without its startup, shutdown, and
-// readiness declaration. The database and the object store register at
-// stageInfrastructure, before the schema stage seeds objects. Construction
-// opens nothing. The pattern catalog is built here, once: the library's
-// namespace, blobfs's, and the application's. This file is the one place a
-// provider is named: the database's, the object store's, and blobfs's
-// engine with its migration set.
-func newInfrastructure(
-	w io.Writer,
-	cfg *config.Config,
-	lc *lifecycle.Coordinator,
-) (*Infrastructure, error) {
-	// The trace handler passes records through unchanged outside a span, so
-	// the wrap is unconditional and costs nothing when no trace is live.
-	logger := slog.New(observability.NewTraceHandler(logging.New(w, cfg.Log).Handler()))
-
-	db, err := postgres.New(cfg.Database)
-	if err != nil {
-		return nil, fmt.Errorf("database: %w", err)
+// newLogger constructs the service's logger over w from the config node's
+// log block. The trace handler passes records through unchanged outside a
+// span, so the wrap is unconditional and costs nothing when no trace is
+// live.
+func newLogger(n *Nodes, w io.Writer) func(*graph.Scope) (*slog.Logger, error) {
+	return func(s *graph.Scope) (*slog.Logger, error) {
+		return slog.New(observability.NewTraceHandler(logging.New(w, s.Use(n.Config).Log).Handler())), nil
 	}
-	lc.Add(lifecycle.Service{
-		Name:     "database",
-		Stage:    stageInfrastructure,
-		Start:    db.Start,
-		Shutdown: db.Shutdown,
-		Check:    db,
-	})
+}
 
-	client, err := azureblob.New(cfg.Storage)
-	if err != nil {
-		return nil, fmt.Errorf("storage: %w", err)
+// newDatabase constructs the database pool from the config node's database
+// block. It orders itself after telemetry, so the providers are installed
+// before the pool starts and flushed after it closes.
+func newDatabase(n *Nodes) func(*graph.Scope) (*database.DB, error) {
+	return func(s *graph.Scope) (*database.DB, error) {
+		s.After(n.Telemetry)
+		return postgres.New(s.Use(n.Config).Database)
 	}
-	objects := storage.New(client, cfg.Storage)
-	lc.Add(lifecycle.Service{
-		Name:     "storage",
-		Stage:    stageInfrastructure,
-		Start:    objects.Start,
-		Shutdown: objects.Shutdown,
-		Check:    objects,
-	})
+}
 
-	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
-	session := sqlate.Wrap(db.Conn(), pgdialect.Dialect{})
-
-	fs, err := bfdata.New(catalog, session.Dialect(), bfdata.WithEngine(blobfspg.Engine))
-	if err != nil {
-		return nil, fmt.Errorf("blobfs: %w", err)
+// newStorage constructs the object store over its provider's client from
+// the config node's storage block, ordered after telemetry as the database
+// is.
+func newStorage(n *Nodes) func(*graph.Scope) (*storage.Store, error) {
+	return func(s *graph.Scope) (*storage.Store, error) {
+		s.After(n.Telemetry)
+		cfg := s.Use(n.Config).Storage
+		client, err := azureblob.New(cfg)
+		if err != nil {
+			return nil, err
+		}
+		return storage.New(client, cfg), nil
 	}
-	blobfsSet, err := blobfspg.Migrations()
-	if err != nil {
-		return nil, fmt.Errorf("blobfs migrations: %w", err)
-	}
+}
 
-	sql := data.New(session, catalog)
-	return &Infrastructure{
-		Logger:      logger,
-		DB:          db,
-		SQL:         sql,
-		Storage:     data.NewStorage(sql, fs, objects),
-		ObjectStore: objects,
-		Sets:        data.Migrations(blobfsSet),
-	}, nil
+// newSQL groups the session over the database pool with the pattern
+// catalog, built here, once: the library's namespace, blobfs's, and the
+// application's.
+func newSQL(n *Nodes) func(*graph.Scope) (*data.Database, error) {
+	return func(s *graph.Scope) (*data.Database, error) {
+		catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
+		session := sqlate.Wrap(s.Use(n.Database).Conn(), pgdialect.Dialect{})
+		return data.New(session, catalog), nil
+	}
+}
+
+// newFiles constructs blobfs's store on the sql node's catalog and dialect,
+// with its Postgres engine, and groups it with the object store its keys
+// name.
+func newFiles(n *Nodes) func(*graph.Scope) (*data.Storage, error) {
+	return func(s *graph.Scope) (*data.Storage, error) {
+		sql := s.Use(n.SQL)
+		fs, err := bfdata.New(sql.Catalog, sql.Dialect(), bfdata.WithEngine(blobfspg.Engine))
+		if err != nil {
+			return nil, fmt.Errorf("blobfs: %w", err)
+		}
+		return data.NewStorage(sql, fs, s.Use(n.Storage)), nil
+	}
 }

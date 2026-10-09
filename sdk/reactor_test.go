@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	libconfig "github.com/standards-lab/go-core/config"
+	"github.com/standards-lab/go-core/graph"
 	"github.com/standards-lab/go-core/lifecycle"
 
 	"github.com/standards-lab/go-web-service/sdk"
@@ -386,39 +388,60 @@ func TestReactor_HandlerKeepsSourceDeadline(t *testing.T) {
 	}
 }
 
-// The composition root's adapter is lifecycle.Coordinator.Add plus
-// Monitor on Err: a handler's failure while running ends the run with the
-// failure in Run's result, and the drain still shuts the reactor down.
+// A reactor joins a graph-backed coordinator as a node's value with no
+// adapter: the coordinator infers from its methods that it starts, drains,
+// reports readiness, and is monitored.
+var _ interface {
+	lifecycle.Subsystem
+	lifecycle.ReadinessChecker
+	lifecycle.Monitored
+} = (*sdk.Reactor[time.Time])(nil)
+
+// coordinate builds a one-node graph whose value is r and returns a
+// coordinator over it, which shuts down within failsafe.
+func coordinate(t *testing.T, r *sdk.Reactor[time.Time]) *lifecycle.Coordinator {
+	t.Helper()
+	g := graph.New()
+	node := g.Define("reactor", func(*graph.Scope) (*sdk.Reactor[time.Time], error) {
+		return r, nil
+	})
+	sys, err := g.Build(node)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	return lifecycle.New(sys, lifecycle.Config{ShutdownTimeout: libconfig.Duration(failsafe)})
+}
+
+// As a graph node's value, with no Monitor call, a handler's failure while
+// running ends the run with the failure in Run's result, and the drain
+// still shuts the reactor down.
 func TestReactor_CoordinatorAdapter(t *testing.T) {
 	boom := errors.New("boom")
 	r := sdk.New(sdk.Every(time.Millisecond), func(context.Context, time.Time) error {
 		return boom
 	}, sdk.Grace(10*time.Millisecond))
-	lc := lifecycle.New()
-	lc.Add(lifecycle.Service{Name: "reactor", Stage: 0, Start: r.Start, Shutdown: r.Shutdown, Check: r})
-	lc.Monitor(r.Err())
+	lc := coordinate(t, r)
 
 	done := make(chan error, 1)
-	go func() { done <- lc.Run(context.Background(), failsafe) }()
+	go func() { done <- lc.Run(context.Background()) }()
 	if err := recvOrFail(t, done, "Run to end on the reactor's failure"); !errors.Is(err, boom) {
 		t.Fatalf("Run = %v, want the handler's failure", err)
 	}
 }
 
-// A clean signal drains a registered reactor to a nil Run result.
+// A clean signal drains a reactor that is a graph node's value to a nil
+// Run result.
 func TestReactor_CoordinatorDrainsClean(t *testing.T) {
 	r := sdk.New(sdk.Every(time.Millisecond), func(context.Context, time.Time) error {
 		return nil
 	}, sdk.Grace(10*time.Millisecond))
-	lc := lifecycle.New()
-	lc.Add(lifecycle.Service{Name: "reactor", Stage: 0, Start: r.Start, Shutdown: r.Shutdown, Check: r})
-	lc.Monitor(r.Err())
+	lc := coordinate(t, r)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ready := make(chan struct{})
 	lc.OnReady(func() { close(ready) })
 	done := make(chan error, 1)
-	go func() { done <- lc.Run(ctx, failsafe) }()
+	go func() { done <- lc.Run(ctx) }()
 	recvOrFail(t, ready, "the coordinator's readiness")
 	cancel()
 	if err := recvOrFail(t, done, "Run to drain"); err != nil {

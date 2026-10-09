@@ -2,84 +2,86 @@ package app
 
 import (
 	"fmt"
-	"log/slog"
 
-	"github.com/standards-lab/go-core/lifecycle"
+	blobfspg "github.com/standards-lab/blobfs/postgres"
+	"github.com/standards-lab/go-core/graph"
 	"github.com/standards-lab/go-database/admin"
-	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate/migrate"
 
 	dbadmin "github.com/standards-lab/go-web-service/admin/database"
 	storageadmin "github.com/standards-lab/go-web-service/admin/storage"
 	"github.com/standards-lab/go-web-service/data"
-	"github.com/standards-lab/go-web-service/internal/config"
 	"github.com/standards-lab/go-web-service/sdk"
 )
 
-// Admin composes the administrative services, one field per admin domain:
-// the administrative counterpart of Domain, each service administering one
-// infrastructure service over the library mechanisms it triggers. Gate is
-// the process's quiesce gate, which the database admin domain holds
+// defineAdmin defines the administrative nodes on g into n: the
+// administrative counterpart of the domain layer, each service
+// administering one infrastructure service over the library mechanisms it
+// triggers. It constructs nothing.
+//
+// gate is the process's quiesce gate, which the database admin domain holds
 // exclusively around every verb that changes the schema, so the sweep's
-// passes, which hold it shared, never run under one.
-type Admin struct {
-	Database *admin.Service
-	Storage  *storage.Store
-	Gate     *sdk.Gate
+// passes, which hold it shared, never run under one. schema is go-database's
+// admin service, a lifecycle participant whose Start verifies and corrects
+// the schema, checks every statement against it, and seeds, and which is
+// its own readiness check. The storage admin domain administers the storage
+// node's object store itself, read with Use: the same store as a second
+// node would start and be checked twice.
+func defineAdmin(g *graph.Graph, n *Nodes) {
+	n.Gate = g.Define("gate", func(*graph.Scope) (*sdk.Gate, error) {
+		return new(sdk.Gate), nil
+	})
+	n.Schema = g.Define("schema", newSchema(n))
 }
 
-// newAdmin wires the admin layer over infra, each admin service handed its
-// switches from cfg. It declares the database admin service on lc at
-// stageSchema, with the service as its own readiness check. The service
-// administers the data package's content: the migration sets, the
-// catalog, the statements registry, and the seeder newSeeder composes over
-// infra and dom. gate is the
-// quiesce gate the database admin routes hold around a schema change;
-// startup's own correction takes none, since it runs before the sweep's
-// stage starts.
-func newAdmin(
-	infra *Infrastructure,
-	dom *Domain,
-	cfg *config.Config,
-	gate *sdk.Gate,
-	lc *lifecycle.Coordinator,
-) (*Admin, error) {
-	migrator, err := migrate.New(infra.SQL.DB, infra.Sets, migrate.Options{Logger: infra.Logger})
-	if err != nil {
-		return nil, fmt.Errorf("migrate: %w", err)
+// newSchema constructs the database admin service over the database node's
+// pool and the sql node's session and catalog. It administers the data
+// package's content: the migration sets, blobfs's beneath the service's
+// own; the statements registry, which is the sql node; and the seeder,
+// composed here from the domain nodes' seed contributions in the tables'
+// dependency order. The stores the seeder verifies are the ones registered
+// on the sql node (each domain's and blobfs's), not a list kept here; using
+// the domain nodes builds them, and so registers them, first. Startup's own
+// correction takes no gate, since it runs before the sweeper, which orders
+// itself after the schema, starts.
+func newSchema(n *Nodes) func(*graph.Scope) (*admin.Service, error) {
+	return func(s *graph.Scope) (*admin.Service, error) {
+		sql := s.Use(n.SQL)
+		logger := s.Use(n.Logger)
+
+		blobfsSet, err := blobfspg.Migrations()
+		if err != nil {
+			return nil, fmt.Errorf("blobfs migrations: %w", err)
+		}
+		migrator, err := migrate.New(sql.DB, data.Migrations(blobfsSet), migrate.Options{Logger: logger})
+		if err != nil {
+			return nil, fmt.Errorf("migrate: %w", err)
+		}
+
+		org, doc := s.Use(n.Organization), s.Use(n.Document)
+		seeder := data.NewSeeder(sql, org.Seed(), org.LogoSeed(), doc.Seed())
+
+		return admin.New(s.Use(n.Database), sql.DB, migrator, sql.Catalog, admin.Options{
+			Seed:     s.Use(n.Config).Admin.SeedState(),
+			Seeder:   seeder,
+			Registry: sql,
+			Logger:   logger,
+		}), nil
 	}
-	db := admin.New(infra.DB, infra.SQL.DB, migrator, infra.SQL.Catalog, admin.Options{
-		Seed:     cfg.Admin.SeedState(),
-		Seeder:   newSeeder(infra, dom),
-		Registry: infra.SQL,
-		Logger:   infra.Logger,
-	})
-	lc.Add(lifecycle.Service{
-		Name:  "schema",
-		Stage: stageSchema,
-		Start: db.Start,
-		Check: db,
-	})
-	return &Admin{Database: db, Storage: infra.ObjectStore, Gate: gate}, nil
-}
-
-// newSeeder composes the seeder from dom's seed contributions in the
-// tables' dependency order. The stores it verifies are the ones registered
-// on infra.SQL (each domain's and blobfs's), not a list kept here.
-func newSeeder(infra *Infrastructure, dom *Domain) *data.Seeder {
-	return data.NewSeeder(infra.SQL,
-		dom.Organization.Seed(), dom.Organization.LogoSeed(), dom.Document.Seed())
 }
 
 // mountAdmin builds the admin mount, /admin, with each admin domain's route
-// group mounted into it. In production the mount belongs on its own
+// group mounted into it: the schema's under the gate, and the storage
+// node's object store. In production the mount belongs on its own
 // listener, authenticated and unreachable from the public API's network
 // path. Until the planned management listener exists, the mount serves on
-// the API listener. Each group's error writer logs through logger.
-func mountAdmin(adm *Admin, logger *slog.Logger) *web.Group {
+// the API listener. Each group's error writer logs through the logger
+// node.
+func mountAdmin(s *graph.Scope, n *Nodes) *web.Group {
+	logger := s.Use(n.Logger)
 	g := web.NewGroup("/admin")
-	g.Mount(dbadmin.Routes(adm.Database, adm.Gate, logger))
-	g.Mount(storageadmin.Routes(adm.Storage, logger))
+	g.Mount(dbadmin.Routes(s.Use(n.Schema), s.Use(n.Gate), logger))
+	g.Mount(storageadmin.Routes(s.Use(n.Storage), logger))
 	return g
 }

@@ -2,10 +2,9 @@ package config
 
 import (
 	"fmt"
-	"os"
-	"time"
 
 	libconfig "github.com/standards-lab/go-core/config"
+	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-core/logging"
 	"github.com/standards-lab/go-database"
 	"github.com/standards-lab/go-observability"
@@ -18,22 +17,25 @@ import (
 // APP_LOG_LEVEL); a seeded service renames its whole namespace here.
 const envPrefix = "app"
 
-const defaultShutdownTimeout = 10 * time.Second
-
 // Config is the service's root configuration: the library capability blocks
 // (the object store among them) plus the service-owned reads policy, the
-// admin switches, the sweep's schedule, and the shutdown timeout.
+// admin switches, and the sweep's schedule. It embeds the lifecycle
+// Coordinator's configuration by value and untagged, so its
+// shutdown_timeout is a top-level key and ShutdownTimeout a promoted field;
+// Config.Config is that lifecycle block, the one the composition root hands
+// the Coordinator.
 type Config struct {
-	Log             logging.Config       `json:"log"`
-	Server          web.Config           `json:"server"`
-	Database        database.Config      `json:"database"`
-	Storage         storage.Config       `json:"storage"`
-	Observability   observability.Config `json:"observability"`
-	RateLimit       ratelimit.Config     `json:"rate_limit"`
-	Reads           ReadsConfig          `json:"reads"`
-	Admin           AdminConfig          `json:"admin"`
-	Sweep           SweepConfig          `json:"sweep"`
-	ShutdownTimeout libconfig.Duration   `json:"shutdown_timeout"`
+	lifecycle.Config
+
+	Log           logging.Config       `json:"log"`
+	Server        web.Config           `json:"server"`
+	Database      database.Config      `json:"database"`
+	Storage       storage.Config       `json:"storage"`
+	Observability observability.Config `json:"observability"`
+	RateLimit     ratelimit.Config     `json:"rate_limit"`
+	Reads         ReadsConfig          `json:"reads"`
+	Admin         AdminConfig          `json:"admin"`
+	Sweep         SweepConfig          `json:"sweep"`
 }
 
 // Merge overlays src's set fields onto the receiver, delegating each block
@@ -42,9 +44,7 @@ func (c *Config) Merge(src *Config) {
 	if src == nil {
 		return
 	}
-	if src.ShutdownTimeout != 0 {
-		c.ShutdownTimeout = src.ShutdownTimeout
-	}
+	c.Config.Merge(&src.Config)
 	c.Log.Merge(&src.Log)
 	c.Server.Merge(&src.Server)
 	c.Database.Merge(&src.Database)
@@ -56,25 +56,18 @@ func (c *Config) Merge(src *Config) {
 	c.Sweep.Merge(&src.Sweep)
 }
 
-// Finalize applies the root default, reads the root's own environment
-// override, validates, and finalizes each block under the same prefix. It
-// satisfies the config package's Load contract; an empty prefix composes no
+// Finalize finalizes each block under the same prefix, the lifecycle block
+// first, and validates. It satisfies the config package's Load contract.
+// The lifecycle block's error returns as it is, unlabelled, since it names
+// its own key or variable: it applies the 10s default shutdown timeout,
+// reads <PREFIX>_SHUTDOWN_TIMEOUT, and rejects a non-positive timeout, on
+// which the lifecycle coordinator panics. An empty prefix composes no
 // variable name, so it disables every environment override — the hermetic
 // form tests use.
 func (c *Config) Finalize(envPrefix string) error {
-	if c.ShutdownTimeout == 0 {
-		c.ShutdownTimeout = libconfig.Duration(defaultShutdownTimeout)
+	if err := c.Config.Finalize(envPrefix); err != nil {
+		return err
 	}
-
-	name := libconfig.EnvName(envPrefix, "shutdown_timeout")
-	if err := c.ShutdownTimeout.Set(os.Getenv(name)); err != nil {
-		return fmt.Errorf("%s: %w", name, err)
-	}
-
-	if c.ShutdownTimeout <= 0 {
-		return fmt.Errorf("shutdown_timeout must be positive, got %s", c.ShutdownTimeout)
-	}
-
 	if err := c.Log.Finalize(envPrefix); err != nil {
 		return fmt.Errorf("log: %w", err)
 	}

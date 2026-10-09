@@ -43,10 +43,10 @@ func Problems() scenario.Scenario {
 		Name:    "problems",
 		Summary: "The service's problem-response contract (RFC 9457) across its real error conditions, one request each against the running service, with every response's trace located in Grafana (needs the full compose stack)",
 		Needs: []scenario.Need{
-			{What: "postgres", Task: "db-up"},
-			{What: "the observability profile", Task: "otel-up"},
+			{What: "postgres", Task: "db:up"},
+			{What: "the observability profile", Task: "otel:up"},
 			{What: "the service", Task: "serve", Check: httpx.Live},
-			{What: "Grafana", Task: "otel-up", Check: httpx.GrafanaLive},
+			{What: "Grafana", Task: "otel:up", Check: httpx.GrafanaLive},
 		},
 		Steps: []scenario.Step{
 			{Intent: "Initialization", Action: s.initialization},

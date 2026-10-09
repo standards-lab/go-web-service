@@ -81,7 +81,7 @@ accumulate under [Unreleased] until the first cut.
   applied, the state seeded, and answers with the transition; `POST /admin/database/seed`
   takes an optional `{"state": "…"}` to apply a named set over what is there. Both answer with
   what they stored by seed contribution: the rows commit in one transaction, then the files are
-  written. `mise run db-state <state>` runs the reset against the local service.
+  written. `mise run db:state <state>` runs the reset against the local service.
 - The integration tier: the root `integration` package, a harness that runs the built service as
   a subprocess against the compose stack and a `//go:build integration` suite asserting the
   lifecycle, the organization API, the admin mount, and the 503 on a database outage through
@@ -103,7 +103,7 @@ accumulate under [Unreleased] until the first cut.
 - Filter operators on the collection read, `field[op]=value`, and membership from a repeated
   parameter; a malformed filter value answers 400.
 - `sqlint.toml` and the `sqlint` tool: `mise run lint` and CI lint the SQL files.
-- The observability compose profile (`mise run otel-up`/`otel-down`): an OpenTelemetry Collector
+- The observability compose profile (`mise run otel:up`/`otel:down`): an OpenTelemetry Collector
   alongside a local Loki, Tempo, and Mimir stack and Grafana, provisioned with cross-linked
   datasources (log-to-trace, trace-to-logs, trace-to-metrics, and exemplars once something emits
   them) and a first dashboard of the collector's own pipeline health. `mise run serve` streams
@@ -122,6 +122,32 @@ accumulate under [Unreleased] until the first cut.
 
 ### Changed
 
+- Every time the API's JSON carries (an organization's, a directory's, and a file's
+  `created_at` and `updated_at`) is in UTC, ending in `Z`, whatever zone the process runs in. It
+  carried the host's offset before. The UTC guarantee comes from the libraries' releases, which
+  both modules now require: go-core v0.7.0, sqlate v0.5.0 with postgres/v0.5.0 and
+  sqlint/v0.3.0, go-database v0.8.0 with postgres/v0.5.0, go-web-sdk v0.15.1 with
+  middleware/rate-limit v0.3.0, go-observability v0.2.0 with otlp/v0.2.0, go-storage v0.6.0
+  with azureblob/v0.5.0, and blobfs v0.6.0 with postgres/v0.4.0; their own breaking changes are
+  in their CHANGELOGs.
+  - The log records' times are in UTC too, through go-core's logger.
+  - The migration history's `applied_at` becomes `timestamp with time zone`, altered in place
+    by sqlate's postgres dialect on the first schema run after the upgrade.
+  - The telemetry node's shutdown releases the exporters when its start failed or never ran,
+    through go-observability's own `Shutdown`, where it skipped them before.
+  - The rate limit keys an IPv4-mapped IPv6 client by its IPv4 address (httprate v0.16.1,
+    through rate-limit v0.3.0), where every such client shared one counter.
+  - The integration tier runs every service process in `Asia/Kolkata`, +05:30 all year
+    (`integration.ServiceZone`), and `TestJSONTimesUTC` asserts the API's times end in `Z`.
+- The compose stack builds every service from its own `compose/<service>/Dockerfile`, whose
+  `FROM` line is the service's one image pin, with its configuration (the observability YAML and
+  Grafana's provisioning) baked in and, for Postgres, Azurite, and Grafana, its `HEALTHCHECK`.
+  Stacks start with `up -d --wait --build`. The mise service tasks are renamed group first:
+  `db:up`, `db:down`, `db:reset`, `db:state`, `otel:*`, and `stack:*`. Postgres's user,
+  password, and database are fixed at `app` in its Dockerfile, so `POSTGRES_USER`,
+  `POSTGRES_PASSWORD`, and `POSTGRES_DB` no longer override them. CI's `integration` job runs
+  `mise run integration`, which prints the stack's logs on a failure. `mise run currency` reports
+  a `FROM` line behind its image's latest tag.
 - The composition root runs on go-core v0.6.0's dependency graph, which it requires with
   go-web-sdk v0.15.0 and go-storage v0.5.0; those libraries' own breaking changes are in their
   CHANGELOGs. `internal/app` describes the service as one graph, with a handle on each node in

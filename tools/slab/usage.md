@@ -8,7 +8,7 @@ copyable as written; a few need a value from the previous block's output substit
 
 ```sh
 cd /path/to/go-web-service
-mise run stack-up
+mise run stack:up
 mise run serve &   # or run it in another terminal
 ```
 
@@ -187,5 +187,5 @@ the step by its number and intent, as in `storage: step 6 (Logo Delete): status 
 
 ```sh
 kill %1   # or Ctrl-C the terminal running `mise run serve`
-mise run stack-down
+mise run stack:down
 ```

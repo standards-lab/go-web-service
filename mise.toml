@@ -64,7 +64,7 @@ mise upgrade --bump --local
 description = "Run go vet, the integration suite and the slab module included"
 run = "go vet -tags integration ./... && cd tools/slab && go vet ./..."
 
-# Start the observability profile first (`mise run otel-up`): the task opens a
+# Start the observability profile first (`mise run otel:up`): the task opens a
 # TCP connection to the collector's log port before it builds anything and
 # exits when nothing answers. tee then copies every stdout line to the terminal
 # and to that socket. If the collector goes away while the service runs, the
@@ -91,15 +91,16 @@ description = "Run the unit tier, the slab module included"
 run = "go test -race ./... && cd tools/slab && go test -race ./..."
 
 # The integration tier runs the same compose definition as its own project on
-# its own port, so the developer's stack and data are never touched, and tears
-# it down with its volume when the suite ends, pass or fail.
+# its own ports, so the developer's stack and data are never touched, and tears
+# it down with its volumes when the suite ends, pass or fail, printing the
+# stack's logs first on a failure. CI runs this task as it is.
 [tasks.integration]
 description = "Start an isolated compose stack, run the integration tier against it, and tear it down"
 run = '''
 set -e
 export COMPOSE_PROJECT_NAME=go-web-service-integration POSTGRES_PORT=5433 AZURITE_BLOB_PORT=10001
-trap 'docker compose down -v' EXIT
-docker compose up -d --wait
+trap 'rc=$?; [ $rc -eq 0 ] || docker compose logs; docker compose down -v; exit $rc' EXIT
+docker compose up -d --wait --build
 APP_DATABASE_PORT=5433 APP_STORAGE_ENDPOINT=http://127.0.0.1:10001/devstoreaccount1 go test -race -count=1 -tags integration ./integration/
 '''
 
@@ -124,29 +125,32 @@ description = "Run slab, the narrated-scenario runner (`mise run slab -- list`)"
 dir = "tools/slab"
 run = "go run ./cmd/slab"
 
-# services
-[tasks.db-up]
-description = "Start the local postgres and azurite and wait for health"
-run = "docker compose up -d --wait"
+# The development stacks: compose.yml's PostgreSQL and Azurite (db:) and its
+# observability profile (otel:), whose data lives in named volumes that each
+# group's down keeps and its reset drops.
+[tasks."db:up"]
+description = "Build and start the compose PostgreSQL and Azurite and wait until they are healthy"
+run = "docker compose up -d --wait --build"
 
-[tasks.db-down]
-description = "Stop the local postgres and azurite (keep data)"
+[tasks."db:down"]
+description = "Stop the compose PostgreSQL and Azurite, keeping their volumes"
 run = "docker compose down"
 
-[tasks.db-reset]
-description = "Stop the local postgres and azurite and drop their data"
+[tasks."db:reset"]
+description = "Stop the compose PostgreSQL and Azurite and drop their volumes"
 run = "docker compose down -v"
 
 # `up` always starts the unprofiled services alongside an activated profile,
 # so naming the five services here keeps it from also starting postgres.
 # Mimir's HTTP endpoint answers ready before its querier ring finishes joining
-# (compose/README.md), and it has no shell for a real compose healthcheck, so
+# (compose/README.md), and its image has no shell for a HEALTHCHECK, so
 # --wait alone does not cover it. Poll a synthetic query (no series to read,
 # just the query path itself) until it succeeds instead of trusting /ready.
-[tasks.otel-up]
-description = "Start the observability profile (collector, Loki, Tempo, Mimir, Grafana) and wait for health"
+[tasks."otel:up"]
+description = "Build and start the observability profile (collector, Loki, Tempo, Mimir, Grafana) and wait for health"
 run = '''
-docker compose --profile observability up -d --wait otel-collector loki tempo mimir grafana
+set -e
+docker compose --profile observability up -d --wait --build otel-collector loki tempo mimir grafana
 for i in $(seq 1 30); do
   curl -sf "http://127.0.0.1:${MIMIR_PORT:-9009}/prometheus/api/v1/query?query=vector(1)" >/dev/null && exit 0
   sleep 1
@@ -156,34 +160,33 @@ exit 1
 '''
 
 # `down` is project-wide by default; naming the five services here keeps it
-# from also stopping the postgres db-up started.
-[tasks.otel-down]
+# from also stopping the postgres db:up started.
+[tasks."otel:down"]
 description = "Stop the observability profile (keep data)"
 run = "docker compose --profile observability down otel-collector loki tempo mimir grafana"
 
-[tasks.otel-reset]
+[tasks."otel:reset"]
 description = "Stop the observability profile and drop its data"
 run = "docker compose --profile observability down -v otel-collector loki tempo mimir grafana"
 
-# The whole local stack, postgres and the observability profile together.
+# The whole local stack, PostgreSQL and Azurite and the observability profile together.
 # Neither half depends on the other, so mise runs each pair in parallel.
-[tasks.stack-up]
-description = "Start postgres and the observability profile and wait for health"
-depends = ["db-up", "otel-up"]
+[tasks."stack:up"]
+description = "Build and start PostgreSQL and Azurite and the observability profile and wait for health"
+depends = ["db:up", "otel:up"]
 
-[tasks.stack-down]
-description = "Stop postgres and the observability profile (keep data)"
-depends = ["db-down", "otel-down"]
+[tasks."stack:down"]
+description = "Stop PostgreSQL and Azurite and the observability profile (keep data)"
+depends = ["db:down", "otel:down"]
 
-[tasks.stack-reset]
-description = "Stop postgres and the observability profile and drop their data"
-depends = ["db-reset", "otel-reset"]
+[tasks."stack:reset"]
+description = "Stop PostgreSQL and Azurite and the observability profile and drop their data"
+depends = ["db:reset", "otel:reset"]
 
 # The running service does the work through its admin mount, confirmed as it
 # requires: every migration set reverted, the sets applied, the named state
 # seeded.
-[tasks.db-state]
+[tasks."db:state"]
 description = "Reset the running service's database to a named state"
 usage = 'arg "<state>" help="The state to reset to, one of GET /admin/database/states"'
 run = 'curl -sS --fail-with-body -H "Content-Type: application/json" -d "{\"state\":\"$usage_state\",\"confirm\":true}" http://127.0.0.1:8080/admin/database/state && echo'
-

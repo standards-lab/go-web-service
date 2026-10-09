@@ -1,3 +1,11 @@
+# go-web-service's development stack: PostgreSQL and Azurite, which the service
+# and the integration tier run against, and the observability profile. Each
+# service builds from compose/<service>/Dockerfile, which pins its image and
+# carries its configuration and, where the image can run a probe, its health
+# check. The named volumes keep the data across each group's down task
+# (`mise run db:down`, `otel:down`); its reset task drops them.
+name: go-web-service
+
 include:
   - compose/postgres.yml
   - compose/azurite.yml

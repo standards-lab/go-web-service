@@ -197,7 +197,7 @@ func Storage() scenario.Scenario {
 		Name:    "storage",
 		Summary: "Storage end to end against the running service: the migration sets, a logo's replace cycle, acme's document tree and a cursor walk, the scoped refusals, a recursive delete swept to 404, and a reset (needs postgres, azurite, and the service)",
 		Needs: []scenario.Need{
-			{What: "postgres and azurite", Task: "db-up"},
+			{What: "postgres and azurite", Task: "db:up"},
 			{What: "the service", Task: "serve", Check: httpx.Live},
 		},
 		Steps: []scenario.Step{

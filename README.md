@@ -21,7 +21,7 @@ this one.
   [go-storage](https://github.com/standards-lab/go-storage) and its `azureblob` provider, with
   [blobfs](https://github.com/standards-lab/blobfs) and its `postgres` engine keeping the file
   tree's rows in the same Postgres. Locally it runs Azurite from the compose file.
-- Observability: OpenTelemetry, reached through a `docker compose` profile (`mise run otel-up`)
+- Observability: OpenTelemetry, reached through a `docker compose` profile (`mise run otel:up`)
   that runs the collector and a local Loki, Tempo, Mimir, and Grafana stack — see
   [`compose/README.md`](compose/README.md). The service exports traces and metrics over OTLP and
   structured JSON logs correlated to them by trace id, all through
@@ -102,12 +102,12 @@ this step comes first:
 mise trust && mise install
 cp secrets.example.json secrets.json
 
-mise run db-up      # start the local Postgres and Azurite and wait for health
-mise run otel-up    # start the observability collector and stack
+mise run db:up      # start the local Postgres and Azurite and wait for health
+mise run otel:up    # start the observability collector and stack
 mise run serve      # run the service
 ```
 
-`serve` streams its stdout to the collector over TCP and exits immediately if `otel-up` has not
+`serve` streams its stdout to the collector over TCP and exits immediately if `otel:up` has not
 run first — see [`compose/README.md`](compose/README.md) for the mechanism and its one accepted
 limitation.
 
@@ -289,7 +289,7 @@ the run stored under the same keys. The rows commit in one transaction first, an
 written after it commits, since a file's object is put outside any transaction.
 
 The state operation is destructive, in the class of `down` and `force`, and
-`mise run db-state <state>` runs it against the local service. A reset reverts blobfs's tables
+`mise run db:state <state>` runs it against the local service. A reset reverts blobfs's tables
 but leaves the objects in the container, which is accepted in development: a seeded file carries
 a fixed id (the `5eed…` ids in the state file), so the reseed writes it again under the same key
 and replaces the object left there.
@@ -315,7 +315,7 @@ A container deleted while the service runs makes every storage operation a 503, 
 read included, and takes the storage check on `/readyz` down; the rows are untouched. `POST
 /admin/storage/container` creates it again, empty, and readiness recovers, but each stored
 file's row now names an object that no longer exists, and its download answers 404. In
-development, a reset to a seeded state (`mise run db-state default`) writes the seeded files
+development, a reset to a seeded state (`mise run db:state default`) writes the seeded files
 again; anything else is uploaded again. The service does not reconcile rows against the store:
 blobfs defers that reconciler to the event flow `v1.messaging` brings.
 
@@ -357,17 +357,20 @@ mise. `serve`'s full command also needs a shell that understands `/dev/tcp` (bas
 | `mise run vet` | `go vet -tags integration ./...`, then `go vet ./...` in `tools/slab` | Compile-check and vet, the integration suite and slab included |
 | `mise run serve` | `go run ./cmd/server`, tee'd to the observability collector | Run the service locally |
 | `mise run test` | `go test -race ./...`, then the same in `tools/slab` | Run the unit tier, slab included |
-| `mise run integration` | an isolated `docker compose up`, `go test -tags integration ./integration/`, `down -v` | Run the integration tier against its own stack |
+| `mise run integration` | an isolated `docker compose up --build`, `go test -tags integration ./integration/`, the stack's logs on a failure, `down -v` | Run the integration tier against its own stack |
 | `mise run fmt` | `gofmt -w .` | Format the source |
 | `mise run tidy` | `go mod tidy` | Reconcile module requirements |
 | `mise run lint` | `golangci-lint run --build-tags integration ./... && go tool sqlint`, then `golangci-lint run ./...` in `tools/slab` | Lint the Go and the SQL, slab included |
-| `mise run db-up` | `docker compose up -d --wait` | Start the local Postgres and Azurite |
-| `mise run db-down` | `docker compose down` | Stop the local Postgres and Azurite (keep data) |
-| `mise run db-reset` | `docker compose down -v` | Stop the local Postgres and Azurite and drop their data |
-| `mise run otel-up` | `docker compose ... up -d --wait`, then polls Mimir until it can query | Start the collector, Loki, Tempo, Mimir, and Grafana |
-| `mise run otel-down` | `docker compose --profile observability down …` | Stop the observability profile (keep data) |
-| `mise run otel-reset` | `docker compose --profile observability down -v …` | Stop the observability profile and drop its data |
-| `mise run db-state <state>` | `curl -d '{"state":"<state>","confirm":true}' localhost:8080/admin/database/state` | Reset the running service's database to a named state |
+| `mise run db:up` | `docker compose up -d --wait --build` | Start the local Postgres and Azurite |
+| `mise run db:down` | `docker compose down` | Stop the local Postgres and Azurite (keep data) |
+| `mise run db:reset` | `docker compose down -v` | Stop the local Postgres and Azurite and drop their data |
+| `mise run otel:up` | `docker compose ... up -d --wait --build`, then polls Mimir until it can query | Start the collector, Loki, Tempo, Mimir, and Grafana |
+| `mise run otel:down` | `docker compose --profile observability down …` | Stop the observability profile (keep data) |
+| `mise run otel:reset` | `docker compose --profile observability down -v …` | Stop the observability profile and drop its data |
+| `mise run stack:up` | `db:up` and `otel:up` | Start the local Postgres and Azurite and the observability profile |
+| `mise run stack:down` | `db:down` and `otel:down` | Stop the local Postgres and Azurite and the observability profile (keep data) |
+| `mise run stack:reset` | `db:reset` and `otel:reset` | Stop the local Postgres and Azurite and the observability profile and drop their data |
+| `mise run db:state <state>` | `curl -d '{"state":"<state>","confirm":true}' localhost:8080/admin/database/state` | Reset the running service's database to a named state |
 | `mise run slab -- list` | `cd tools/slab && go run ./cmd/slab` | Run the narrated demo scenarios — see [`tools/slab/README.md`](tools/slab/README.md) |
 
 `mise run slab -- demo storage` narrates the storage end to end against the running service: the
@@ -397,9 +400,10 @@ the admin mount; nothing in the service exists for the tests' sake.
 The task runs the same `compose.yml` as its own project (`go-web-service-integration`, Postgres
 on 5433 and Azurite on 10001), so the development stack and its data are never touched, and
 tears the stack down with its volumes when the suite ends, so every run starts from an empty
-database and container. The harness honors `APP_DATABASE_HOST`, `APP_DATABASE_PORT`,
-`APP_DATABASE_PASSWORD`, `APP_STORAGE_ENDPOINT`, `APP_STORAGE_ACCOUNT`, and `APP_STORAGE_KEY` for
-a stack elsewhere.
+database and container. A failing run prints the stack's logs before the teardown; CI's
+`integration` job runs the task as it is. The harness honors `APP_DATABASE_HOST`,
+`APP_DATABASE_PORT`, `APP_DATABASE_PASSWORD`, `APP_STORAGE_ENDPOINT`, `APP_STORAGE_ACCOUNT`, and
+`APP_STORAGE_KEY` for a stack elsewhere.
 
 ## Configuration
 
@@ -464,11 +468,12 @@ The `sweep` block schedules the [sweep](#sweep): `interval` (`APP_SWEEP_INTERVAL
 backstop wake; `batch` (`APP_SWEEP_BATCH`, 100), the records one pass handles; and `stale_age`
 (`APP_SWEEP_STALE_AGE`, `1h`), the age past which a pass reclaims an unfinished upload or delete.
 
-The compose file honors `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_DB`, and
-`POSTGRES_PASSWORD` for the Postgres container and `AZURITE_BLOB_PORT` for Azurite's, but the
-service does not read them: moving a container off the defaults splits the two until the
-matching `APP_DATABASE_*` or `APP_STORAGE_ENDPOINT` variable (or secrets entry) follows. The
-defaults pair with `config.json` and `secrets.example.json`; change both sides together.
+The compose file honors `POSTGRES_PORT` for the Postgres container's published port and
+`AZURITE_BLOB_PORT` for Azurite's, but the service does not read them: moving a port off its
+default splits the two until the matching `APP_DATABASE_PORT` or `APP_STORAGE_ENDPOINT` variable
+follows. Postgres's user, password, and database (`app` each) are baked into
+`compose/postgres/Dockerfile`; they pair with `config.json` and `secrets.example.json`, so change
+both sides together.
 
 ## License
 

@@ -17,9 +17,8 @@ providers:
     allowUiUpdates: false
     updateIntervalSeconds: 30
     options:
-      # The mount point of compose/observability/grafana/provisioning in
-      # compose/observability.yml, plus this directory. Grafana only treats
-      # *.json here as dashboards, so this provider file is not mistaken for
-      # one.
+      # Where compose/grafana/Dockerfile copies compose/grafana/provisioning,
+      # plus this directory. Grafana only treats *.json here as dashboards, so
+      # this provider file is not mistaken for one.
       path: /etc/grafana/provisioning/dashboards
       foldersFromFilesStructure: false

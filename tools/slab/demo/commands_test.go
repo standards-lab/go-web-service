@@ -48,17 +48,17 @@ func TestScenarios_ListEachWithItsNeeds(t *testing.T) {
 	var out bytes.Buffer
 	scenario.WriteListing(&out, demo.Scenarios())
 	fullStack := []string{
-		"needs postgres (mise run db-up)",
-		"needs the observability profile (mise run otel-up)",
+		"needs postgres (mise run db:up)",
+		"needs the observability profile (mise run otel:up)",
 		"needs the service (mise run serve)",
-		"needs Grafana (mise run otel-up)",
+		"needs Grafana (mise run otel:up)",
 	}
 	for name, want := range map[string][]string{
 		"sqlate":   nil,
 		"domain":   fullStack,
 		"problems": fullStack,
 		"storage": {
-			"needs postgres and azurite (mise run db-up)",
+			"needs postgres and azurite (mise run db:up)",
 			"needs the service (mise run serve)",
 		},
 	} {

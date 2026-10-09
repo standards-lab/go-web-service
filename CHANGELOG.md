@@ -122,6 +122,23 @@ accumulate under [Unreleased] until the first cut.
 
 ### Changed
 
+- Every time the API's JSON carries (an organization's, a directory's, and a file's
+  `created_at` and `updated_at`) is in UTC, ending in `Z`, whatever zone the process runs in. It
+  carried the host's offset before. The UTC guarantee comes from the libraries' releases, which
+  both modules now require: go-core v0.7.0, sqlate v0.5.0 with postgres/v0.5.0 and
+  sqlint/v0.3.0, go-database v0.8.0 with postgres/v0.5.0, go-web-sdk v0.15.1 with
+  middleware/rate-limit v0.3.0, go-observability v0.2.0 with otlp/v0.2.0, go-storage v0.6.0
+  with azureblob/v0.5.0, and blobfs v0.6.0 with postgres/v0.4.0; their own breaking changes are
+  in their CHANGELOGs.
+  - The log records' times are in UTC too, through go-core's logger.
+  - The migration history's `applied_at` becomes `timestamp with time zone`, altered in place
+    by sqlate's postgres dialect on the first schema run after the upgrade.
+  - The telemetry node's shutdown releases the exporters when its start failed or never ran,
+    through go-observability's own `Shutdown`, where it skipped them before.
+  - The rate limit keys an IPv4-mapped IPv6 client by its IPv4 address (httprate v0.16.1,
+    through rate-limit v0.3.0), where every such client shared one counter.
+  - The integration tier runs every service process in `Europe/London`
+    (`integration.ServiceZone`), and `TestJSONTimesUTC` asserts the API's times end in `Z`.
 - The compose stack builds every service from its own `compose/<service>/Dockerfile`, whose
   `FROM` line is the service's one image pin, with its configuration (the observability YAML and
   Grafana's provisioning) baked in and, for Postgres, Azurite, and Grafana, its `HEALTHCHECK`.

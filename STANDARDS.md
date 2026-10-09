@@ -14,6 +14,7 @@ The judgement calls the standards-reviewer applies to go-web-service, beyond wha
 - `architecture/standards/go-elemental/principles/timeouts.md`: each body-moving route's `web.Transfer` from `Config.Transfer` at its body limit (`maxLogoBody`, `maxFileBody`), and `TestConfig_BaseStorageBoundsFitTheServer`.
 - `architecture/standards/go-elemental/principles/dsl-driven-services.md`: every `.sql` file under `domain/*/statements` and `data/patterns`, and `sqlint.toml`; a domain defines no pattern of its own.
 - `architecture/standards/go-elemental/principles/baseline-standards.md`: `"version"` passed to `Statement.Guarded`, and the reads configuration's `web.Limits` handed to every handler.
+- `architecture/standards/go-elemental/principles/utc-times.md`: the times the API returns, which its integration tier proves end in `Z`.
 - `architecture/principles/service-tiers.md`: provider imports confined to `internal/app/infrastructure.go` and the integration harness, and the README's Stack section as the declared boundary and port list.
 - `architecture/principles/composition-root.md`: `internal/app` builds each domain service from the infrastructure nodes it uses, never from `Nodes` itself.
 - `architecture/principles/validation-first.md`: the configuration's Finalize, each command's `Validate` before its store call, and `Seeder.Verify` in the schema's startup.

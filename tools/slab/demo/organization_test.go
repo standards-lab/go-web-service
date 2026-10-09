@@ -638,7 +638,7 @@ func TestScenario_StopsAtTheGrafanaNeedWhenOnlyTheServiceAnswers(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), `need "Grafana"`) {
 		t.Fatalf("run = %v, want the Grafana need to fail:\n%s", err, out.String())
 	}
-	if !strings.Contains(out.String(), "start it with: mise run otel-up") {
+	if !strings.Contains(out.String(), "start it with: mise run otel:up") {
 		t.Errorf("output does not name the task:\n%s", out.String())
 	}
 }

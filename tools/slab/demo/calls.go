@@ -27,7 +27,7 @@ const (
 // which Tempo and Loki index the trace under. The same string is stated in
 // two other places: internal/app/telemetry.go's serviceName constant, which
 // is unexported and so not importable, and
-// compose/observability/otel-collector.yaml.
+// compose/otel-collector/otel-collector.yaml.
 const ServiceName = "go-web-service"
 
 // maxCommandBody is the byte limit domain/organization/handler.go's

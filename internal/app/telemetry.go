@@ -17,7 +17,7 @@ import (
 )
 
 // serviceName is the service.name resource attribute every signal carries.
-// compose/observability/otel-collector.yaml hardcodes the same value for the
+// compose/otel-collector/otel-collector.yaml hardcodes the same value for the
 // collector's log correlation, so the two must match character for
 // character.
 const serviceName = "go-web-service"

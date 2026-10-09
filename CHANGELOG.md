@@ -81,7 +81,7 @@ accumulate under [Unreleased] until the first cut.
   applied, the state seeded, and answers with the transition; `POST /admin/database/seed`
   takes an optional `{"state": "…"}` to apply a named set over what is there. Both answer with
   what they stored by seed contribution: the rows commit in one transaction, then the files are
-  written. `mise run db-state <state>` runs the reset against the local service.
+  written. `mise run db:state <state>` runs the reset against the local service.
 - The integration tier: the root `integration` package, a harness that runs the built service as
   a subprocess against the compose stack and a `//go:build integration` suite asserting the
   lifecycle, the organization API, the admin mount, and the 503 on a database outage through
@@ -103,7 +103,7 @@ accumulate under [Unreleased] until the first cut.
 - Filter operators on the collection read, `field[op]=value`, and membership from a repeated
   parameter; a malformed filter value answers 400.
 - `sqlint.toml` and the `sqlint` tool: `mise run lint` and CI lint the SQL files.
-- The observability compose profile (`mise run otel-up`/`otel-down`): an OpenTelemetry Collector
+- The observability compose profile (`mise run otel:up`/`otel:down`): an OpenTelemetry Collector
   alongside a local Loki, Tempo, and Mimir stack and Grafana, provisioned with cross-linked
   datasources (log-to-trace, trace-to-logs, trace-to-metrics, and exemplars once something emits
   them) and a first dashboard of the collector's own pipeline health. `mise run serve` streams
@@ -122,6 +122,15 @@ accumulate under [Unreleased] until the first cut.
 
 ### Changed
 
+- The compose stack builds every service from its own `compose/<service>/Dockerfile`, whose
+  `FROM` line is the service's one image pin, with its configuration (the observability YAML and
+  Grafana's provisioning) baked in and, for Postgres, Azurite, and Grafana, its `HEALTHCHECK`.
+  Stacks start with `up -d --wait --build`. The mise service tasks are renamed group first:
+  `db:up`, `db:down`, `db:reset`, `db:state`, `otel:*`, and `stack:*`. Postgres's user,
+  password, and database are fixed at `app` in its Dockerfile, so `POSTGRES_USER`,
+  `POSTGRES_PASSWORD`, and `POSTGRES_DB` no longer override them. CI's `integration` job runs
+  `mise run integration`, which prints the stack's logs on a failure. `mise run currency` reports
+  a `FROM` line behind its image's latest tag.
 - The composition root runs on go-core v0.6.0's dependency graph, which it requires with
   go-web-sdk v0.15.0 and go-storage v0.5.0; those libraries' own breaking changes are in their
   CHANGELOGs. `internal/app` describes the service as one graph, with a handle on each node in

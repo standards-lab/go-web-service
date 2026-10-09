@@ -32,7 +32,7 @@ Everything but `demo sqlate` needs the compose stack and the service (`demo stor
 traces, so it needs no Grafana, but `mise run serve` streams its logs to the collector):
 
 ```sh
-mise run db-up && mise run otel-up
+mise run db:up && mise run otel:up
 mise run serve   # in another shell
 ```
 

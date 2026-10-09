@@ -1,3 +1,8 @@
+# The service's local development stack. Each service builds from
+# compose/<service>/Dockerfile, which pins its image and carries its
+# configuration and, where the image can run a probe, its health check.
+name: go-web-service
+
 include:
   - compose/postgres.yml
   - compose/azurite.yml

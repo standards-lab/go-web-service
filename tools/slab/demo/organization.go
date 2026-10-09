@@ -48,10 +48,10 @@ func Organization() scenario.Scenario {
 		Name:    "domain",
 		Summary: "The organization domain's full CRUD surface against the running service, reseeded from a known fixture each run, with the create request's trace located in Grafana (needs the full compose stack)",
 		Needs: []scenario.Need{
-			{What: "postgres", Task: "db-up"},
-			{What: "the observability profile", Task: "otel-up"},
+			{What: "postgres", Task: "db:up"},
+			{What: "the observability profile", Task: "otel:up"},
 			{What: "the service", Task: "serve", Check: httpx.Live},
-			{What: "Grafana", Task: "otel-up", Check: httpx.GrafanaLive},
+			{What: "Grafana", Task: "otel:up", Check: httpx.GrafanaLive},
 		},
 		Steps: []scenario.Step{
 			{Intent: "Initialization", Action: s.initialization},

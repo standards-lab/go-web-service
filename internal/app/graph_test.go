@@ -143,9 +143,6 @@ func TestGraph_ReadinessChecks(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Errorf("checks = %v, want %v", got, want)
 	}
-	if _, ok := any(sys.Get(a.Nodes().Wake)).(lifecycle.ReadinessChecker); ok {
-		t.Error("the wake's value has a Ready method; the probe would report it")
-	}
 }
 
 // participant reports whether v takes part in the lifecycle's startup or

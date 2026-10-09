@@ -99,9 +99,9 @@ func TestStorageOutage(t *testing.T) {
 		t.Errorf("readyz checks = %v, want %v", names, readyChecks)
 	}
 	var unready []string
-	for _, check := range report.Checks {
-		if !check.Ready {
-			unready = append(unready, check.Name)
+	for _, ch := range report.Checks {
+		if !ch.Ready {
+			unready = append(unready, ch.Name)
 		}
 	}
 	if !slices.Equal(unready, []string{"storage"}) {

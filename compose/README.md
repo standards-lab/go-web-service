@@ -5,15 +5,15 @@ files under this directory, one file per service group. `compose.yml` names the 
 (`go-web-service`) and lists `include:` entries; each included file owns one group's services,
 ports, volumes, and, where it applies, its `profiles:` gate.
 
-Every service builds from its own `compose/<service>/Dockerfile`. The Dockerfile's `FROM` line is
-the service's one image pin (no `image:` line names one anywhere, CI included, and
-`mise run currency` reads the `FROM` lines); its configuration, environment, and command are
-baked into the image beside it rather than bind-mounted; and its readiness is a `HEALTHCHECK`
-wherever the base image can run a probe (Postgres, Azurite, Grafana). The collector, Loki, Tempo,
-and Mimir images ship no shell, so their Dockerfiles carry no `HEALTHCHECK` and compose waits on
-them as running. Every `up` passes `--build`, so an edited Dockerfile or configuration file takes
-effect on the next start. These are development stacks: data lives in named volumes, each
-group's `down` task keeps it, and its `reset` task deletes it.
+Every service builds from its own `compose/<service>/Dockerfile`, whose `FROM` line is the
+service's one image pin. No `image:` line names an image, in compose or in CI, and
+`mise run currency` reads the `FROM` lines. The Dockerfile bakes in the service's configuration,
+environment, and command, so compose bind-mounts no configuration. Where the base image can run
+a probe (Postgres, Azurite, Grafana), a `HEALTHCHECK` in the Dockerfile defines readiness. The
+collector, Loki, Tempo, and Mimir images ship no shell, so their Dockerfiles have no
+`HEALTHCHECK`, and compose waits on them as running. Every `up` passes `--build`, so an edited
+Dockerfile or configuration file takes effect on the next start. These are development stacks:
+data lives in named volumes, which each group's `down` task keeps and its `reset` task deletes.
 
 ## Postgres
 
@@ -159,7 +159,6 @@ compose.yml                                the project name and the included gro
 compose/postgres.yml, azurite.yml          the database and object store, no profile
 compose/observability.yml                  the five observability services, the profile gate
 compose/<service>/Dockerfile               each service's image pin, configuration, and health check
-compose/postgres/, azurite/                a Dockerfile each
 compose/otel-collector/otel-collector.yaml receivers, processors, exporters, pipelines
 compose/loki/, tempo/, mimir/              each backend's own single-binary, local-storage config
 compose/grafana/provisioning/datasources/… the three datasources and their cross-links

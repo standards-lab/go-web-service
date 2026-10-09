@@ -169,18 +169,18 @@ run = "docker compose --profile observability down otel-collector loki tempo mim
 description = "Stop the observability profile and drop its data"
 run = "docker compose --profile observability down -v otel-collector loki tempo mimir grafana"
 
-# The whole local stack, postgres and the observability profile together.
+# The whole local stack, PostgreSQL and Azurite and the observability profile together.
 # Neither half depends on the other, so mise runs each pair in parallel.
 [tasks."stack:up"]
-description = "Build and start postgres and the observability profile and wait for health"
+description = "Build and start PostgreSQL and Azurite and the observability profile and wait for health"
 depends = ["db:up", "otel:up"]
 
 [tasks."stack:down"]
-description = "Stop postgres and the observability profile (keep data)"
+description = "Stop PostgreSQL and Azurite and the observability profile (keep data)"
 depends = ["db:down", "otel:down"]
 
 [tasks."stack:reset"]
-description = "Stop postgres and the observability profile and drop their data"
+description = "Stop PostgreSQL and Azurite and the observability profile and drop their data"
 depends = ["db:reset", "otel:reset"]
 
 # The running service does the work through its admin mount, confirmed as it

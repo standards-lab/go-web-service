@@ -51,7 +51,7 @@ services:
     # service_started.
 
   mimir:
-    image: grafana/mimir:3.2.1
+    image: grafana/mimir:3.2.2
     profiles: ["observability"]
     command: ["-config.file=/etc/mimir/mimir.yaml", "-target=all"]
     volumes:

@@ -112,9 +112,8 @@ latest_tag() {
 }
 
 # Compose and CI images pinned on an image: line below their latest. A
-# workflow names each image on an image: line, even one it starts with docker
-# run. A compose service that builds from compose/<service>/Dockerfile has no
-# image: line; its pin is the Dockerfile's FROM line, scanned below.
+# compose service that builds from compose/<service>/Dockerfile has no image:
+# line; its pin is the Dockerfile's FROM line, scanned below.
 images=$(matches '^ *image: *[^ ]*' compose.yml compose/*.yml "${workflows[@]}" |
 	sed 's/^ *image: *//' | tr -d "\"'" | sort -u)
 for ref in $images; do

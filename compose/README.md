@@ -25,20 +25,21 @@ profile, so every compose invocation starts it.
 
 ## Azurite
 
-`compose/azurite.yml` runs Azurite (`compose/azurite/`), Azure's blob storage emulator, as the service's local object
-store (see [Stack](../README.md#stack)). Like Postgres it carries no profile, so `mise run db:up`
-starts both and `db:down` and `db:reset` stop them. Its blob endpoint listens on
-`127.0.0.1:10000` (`AZURITE_BLOB_PORT` to change it) under Azurite's well-known development
-account, `devstoreaccount1`. `secrets.example.json` carries that account's published key, which
-is never a production credential. Azurite runs with `--skipApiVersionCheck`, because the Azure
-SDK the service's provider pins sends a service version newer than the image accepts by
-default. The service creates its container on start. Data persists in the
-`go-web-service-azurite` volume.
+`compose/azurite.yml` runs Azurite (`compose/azurite/`), Azure's blob storage emulator, as the
+service's local object store (see [Stack](../README.md#stack)). Like Postgres it carries no
+profile, so `mise run db:up` starts both and `db:down` and `db:reset` stop them. Its blob
+endpoint listens on `127.0.0.1:10000` (`AZURITE_BLOB_PORT` to change it) under Azurite's
+well-known development account, `devstoreaccount1`. `secrets.example.json` carries that
+account's published key, which is never a production credential. Azurite runs with
+`--skipApiVersionCheck`, because the Azure SDK the service's provider pins sends a service
+version newer than the image accepts by default. The service creates its container on start.
+Data persists in the `go-web-service-azurite` volume.
 
 ## The observability profile
 
 `compose/observability.yml` and the five service directories it builds (`compose/otel-collector/`,
-`loki/`, `tempo/`, `mimir/`, and `grafana/`) run an OpenTelemetry Collector alongside a local Loki, Tempo, Mimir, and Grafana stack (LGTM). All five services carry
+`loki/`, `tempo/`, `mimir/`, and `grafana/`) run an OpenTelemetry Collector alongside a local
+Loki, Tempo, Mimir, and Grafana stack (LGTM). All five services carry
 `profiles: ["observability"]`, so no ordinary compose invocation starts them: `mise run db:up` and
 the `integration` task both omit `--profile` and stay unaffected. `mise run otel:up` brings the
 profile up and waits for health; `mise run otel:down` stops it, naming the five services so it
@@ -117,7 +118,8 @@ containerizes the service and its own runtime captures stdout.
 
 `compose/grafana/provisioning/` holds Grafana's provisioning tree, copied by
 `compose/grafana/Dockerfile` onto the image's own provisioning path so the on-disk layout matches
-what Grafana reads. `datasources/datasources.yaml` declares the three backends, cross-linked by explicit uid:
+what Grafana reads. `datasources/datasources.yaml` declares the three backends, cross-linked by
+explicit uid:
 
 - Loki's derived field opens a log's trace in Tempo. It matches on the structured-metadata label
   `trace_id` directly, not a regex over the log line, because the log line's visible text is only

@@ -125,18 +125,19 @@ description = "Run slab, the narrated-scenario runner (`mise run slab -- list`)"
 dir = "tools/slab"
 run = "go run ./cmd/slab"
 
-# services: development stacks whose data persists in named volumes. Each
-# group's down keeps the data; its reset deletes it.
+# The development stacks: compose.yml's PostgreSQL and Azurite (db:) and its
+# observability profile (otel:), whose data lives in named volumes that each
+# group's down keeps and its reset drops.
 [tasks."db:up"]
-description = "Build and start the local postgres and azurite and wait for health"
+description = "Build and start the compose PostgreSQL and Azurite and wait until they are healthy"
 run = "docker compose up -d --wait --build"
 
 [tasks."db:down"]
-description = "Stop the local postgres and azurite (keep data)"
+description = "Stop the compose PostgreSQL and Azurite, keeping their volumes"
 run = "docker compose down"
 
 [tasks."db:reset"]
-description = "Stop the local postgres and azurite and drop their data"
+description = "Stop the compose PostgreSQL and Azurite and drop their volumes"
 run = "docker compose down -v"
 
 # `up` always starts the unprofiled services alongside an activated profile,
@@ -148,6 +149,7 @@ run = "docker compose down -v"
 [tasks."otel:up"]
 description = "Build and start the observability profile (collector, Loki, Tempo, Mimir, Grafana) and wait for health"
 run = '''
+set -e
 docker compose --profile observability up -d --wait --build otel-collector loki tempo mimir grafana
 for i in $(seq 1 30); do
   curl -sf "http://127.0.0.1:${MIMIR_PORT:-9009}/prometheus/api/v1/query?query=vector(1)" >/dev/null && exit 0

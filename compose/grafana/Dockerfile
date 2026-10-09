@@ -9,5 +9,7 @@ ENV GF_AUTH_ANONYMOUS_ENABLED=true \
 # datasources/ and dashboards/ beneath it at startup.
 COPY provisioning /etc/grafana/provisioning
 
-HEALTHCHECK --start-period=60s --start-interval=1s --interval=5s --timeout=3s --retries=5 \
+# Healthy once Grafana's health endpoint answers, which it does only when its
+# database is reachable.
+HEALTHCHECK --start-period=30s --start-interval=1s --interval=5s --timeout=3s --retries=5 \
     CMD ["wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]

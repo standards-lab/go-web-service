@@ -398,9 +398,9 @@ The task runs the same `compose.yml` as its own project (`go-web-service-integra
 on 5433 and Azurite on 10001), so the development stack and its data are never touched, and
 tears the stack down with its volumes when the suite ends, so every run starts from an empty
 database and container. A failing run prints the stack's logs before the teardown; CI's
-`integration` job runs the task as it is. The harness honors `APP_DATABASE_HOST`, `APP_DATABASE_PORT`,
-`APP_DATABASE_PASSWORD`, `APP_STORAGE_ENDPOINT`, `APP_STORAGE_ACCOUNT`, and `APP_STORAGE_KEY` for
-a stack elsewhere.
+`integration` job runs the task as it is. The harness honors `APP_DATABASE_HOST`,
+`APP_DATABASE_PORT`, `APP_DATABASE_PASSWORD`, `APP_STORAGE_ENDPOINT`, `APP_STORAGE_ACCOUNT`, and
+`APP_STORAGE_KEY` for a stack elsewhere.
 
 ## Configuration
 

@@ -111,12 +111,15 @@ mise run serve      # run the service
 run first — see [`compose/README.md`](compose/README.md) for the mechanism and its one accepted
 limitation.
 
-Startup connects the database and the object store, applies any pending migration, checks every
-statement against the schema, seeds the configured state (the `local` overlay names `default`),
-starts the [sweep](#sweep), and starts the server last. The drain runs in reverse. The stage
-table in `internal/app/stages.go` is the one declaration of that order. The service then logs
-`server ready` on `localhost:8080` (the `local` overlay binds loopback and runs debug logging).
-From a second shell:
+The service is one dependency graph, described in `internal/app`, and startup runs it in layer
+order. Telemetry starts first, so its providers are installed before anything they record. The
+database and the object store connect next, together in one layer. The schema starts after
+both: it applies any pending migration, checks every statement against the schema, and seeds the
+configured state (the `local` overlay names `default`). The [sweep](#sweep) starts after the
+schema, and the server starts last, alone in the top layer. The drain runs in reverse: the server
+drains first, so in-flight requests complete before what they run on closes, and telemetry
+flushes last. The service then logs `server ready` on `localhost:8080` (the `local` overlay binds
+loopback and runs debug logging). From a second shell:
 
 ```sh
 curl localhost:8080/healthz   # 200 {"status":"ok"}
@@ -126,6 +129,16 @@ curl localhost:8080/readyz    # 200 {"status":"ready","checks":[...]}  — lifec
 Ctrl-C drains in-flight requests and exits with `server stopped`. That serve, probe, and
 drain sequence is the one check a change to the composition root is verified by hand with;
 everything the running service does is asserted by the integration tier below.
+
+### Adding a service
+
+A service is a node in the graph. Define it in its layer's define function, in that layer's file
+in `internal/app` (`defineDomain` in `domain.go` for a domain service, for example), and add its
+handle to `Nodes`. Its part in the lifecycle is inferred from its value's methods: a `Start` or
+`Shutdown` makes it a participant, a `Ready` adds its check to `/readyz`, and an `Err` channel
+has its runtime failure watched, so nothing registers it. Its place in the order follows from the
+nodes it uses. A reactor's node also joins `Nodes.Reactors`, which `Run` builds as roots and the
+server orders itself after.
 
 ## API
 
@@ -317,7 +330,7 @@ drain, the sweep finishes the pass in flight and runs no further one, whatever r
 large backlog never holds the drain; the next start's wake finds what is left.
 
 The sweep is a Reactor in the architecture's sense, one that dispatches to no Domain Service: the
-composition root stages it on a reactor, the process's one runner for work driven by an
+composition root runs it on a reactor, the process's one runner for work driven by an
 occurrence for the process lifetime.
 
 It wakes on each recursive delete, on an interval (`sweep.interval`, 30 seconds) for work no

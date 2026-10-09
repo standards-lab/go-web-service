@@ -13,13 +13,14 @@ import (
 // joins one source of occurrences to one function for the process
 // lifetime. It is a lifecycle component with the Start, Shutdown, and Ready
 // methods other infrastructure exposes, plus Err for a failure while
-// running. It knows nothing of the coordinator: the composition root
-// registers it with lifecycle.Coordinator.Add at the stage it chooses and
-// passes its Err to Coordinator.Monitor.
+// running: a lifecycle.Subsystem, ReadinessChecker, and Monitored. It knows
+// nothing of the coordinator: the composition root makes it a graph node's
+// value, and the coordinator infers from those methods that it starts,
+// drains, reports readiness, and ends the run on its failure.
 //
 // Start detaches the reactor from the context it is given, so cancelling
 // the run context at a signal does not interrupt handling before the
-// reactor's stage drains. Shutdown drains in two phases: it stops the
+// reactor's layer drains. Shutdown drains in two phases: it stops the
 // source from taking new occurrences and waits for the handling in flight,
 // then, once the Grace period passes, cancels the handlers' contexts and
 // waits for them to unwind. Without Grace, a handler's context is
@@ -263,8 +264,9 @@ func (r *Reactor[T]) Ready() bool {
 }
 
 // Err yields the error that ends the source while the reactor is running,
-// then closes when the source returns. A composition root passes it to the
-// coordinator's Monitor, so a dead reactor ends the process.
+// then closes when the source returns. It makes the reactor a
+// lifecycle.Monitored, which the coordinator watches, so a dead reactor
+// ends the process.
 func (r *Reactor[T]) Err() <-chan error {
 	return r.errs
 }

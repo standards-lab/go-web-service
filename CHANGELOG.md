@@ -12,7 +12,7 @@ accumulate under [Unreleased] until the first cut.
 - Object storage: the `storage` configuration block (`APP_STORAGE_*`, go-storage's), an Azure
   Blob Storage provider through `go-storage/azureblob`, Azurite in the compose file, and blobfs
   with `blobfs/postgres` for the file tree's rows, its migration set (`blobfs`) run beneath the
-  service's own (`app`). The object store starts at the infrastructure stage beside the pool.
+  service's own (`app`). The object store starts in the pool's layer, beside it.
   `/readyz` lists the `storage` check.
 - The storage admin service under `/admin/storage`: `GET /diagnostics` (whether a live probe
   succeeds, the container, the provider's longest key) and `POST /container`, which creates the
@@ -36,7 +36,7 @@ accumulate under [Unreleased] until the first cut.
   directory's read as its `Location`, its listings 404 and its writes 409 until the sweep removes
   it.
 - The sweep: data's background worker (`data.Storage.SweepWorker`), blobfs's sweep in bounded
-  passes, staged on the reactor the composition root runs at its `reactors` stage. It finishes
+  passes, run on the reactor the composition root defines as the `sweeper` node. It finishes
   the branches a recursive delete marks and reclaims uploads and deletes left unfinished past
   the stale age; it wakes on each recursive delete, on an interval, and once at startup, and
   logs a refused pass at warn without failing the service. Once the service drains, it finishes
@@ -110,18 +110,38 @@ accumulate under [Unreleased] until the first cut.
   its stdout to the collector's log receiver over TCP whenever the profile is running, a hard
   dependency accepted as a known limitation and documented in `compose/README.md`, which also
   covers the full stack's wiring.
-- The observability configuration block and a composition-root telemetry layer wiring the
-  service to `go-observability`: a startup hook installs the tracer and meter providers ahead of
-  every lifecycle stage and a shutdown hook flushes them, bounded to a short timeout, after the
-  last one drains; the resource carries `service.name` (a literal, matching the collector's own
-  configuration) and `service.version` from the build's VCS revision. The middleware chain gains
-  tracing outermost and a request-id source drawn from the request's trace id, so the id in a
-  problem document's `request_id` extension, the request logger's record, and the correlating
-  log handler's `trace_id`/`span_id` attributes are all the same value. `log.format` defaults to
-  `json`, which the collector's log pipeline needed all along.
+- The observability configuration block and a composition-root telemetry node wiring the
+  service to `go-observability`: its start installs the tracer and meter providers ahead of
+  every other lifecycle participant and its shutdown flushes them, bounded to a short timeout,
+  after the last one drains; the resource carries `service.name` (a literal, matching the
+  collector's own configuration) and `service.version` from the build's VCS revision. The
+  middleware chain gains tracing outermost and a request-id source drawn from the request's
+  trace id, so the id in a problem document's `request_id` extension, the request logger's
+  record, and the correlating log handler's `trace_id`/`span_id` attributes are all the same
+  value. `log.format` defaults to `json`, which the collector's log pipeline needed all along.
 
 ### Changed
 
+- The composition root runs on go-core v0.6.0's dependency graph, which it requires with
+  go-web-sdk v0.15.0 and go-storage v0.5.0; those libraries' own breaking changes are in their
+  CHANGELOGs. `internal/app` describes the service as one graph, with a handle on each node in
+  the exported `Nodes` value; each layer file defines its nodes in its define function. A node's
+  part in the lifecycle is inferred from its value's methods, so nothing registers with the
+  coordinator, and its order from the nodes it uses: telemetry first, the database and the object
+  store together, the schema after both, the sweeper after the schema, and the server last, alone
+  in the top layer. The drain runs in reverse, so the server drains first. `app.New` only
+  describes the graph and cannot fail, so `cmd/server` no longer reports `app init failed`;
+  `App.Run` builds it, and a constructor's error exits 1 as `service failed`, naming the node.
+  `App.Graph` and `App.Nodes` let a caller observe the build or replace a node before `Run`.
+  Adding a service is defining a node in its layer's define function; a reactor's node also
+  joins `Nodes.Reactors`.
+  - The configuration embeds go-core's `lifecycle.Config`, so `shutdown_timeout`
+    (`APP_SHUTDOWN_TIMEOUT`, 10s) keeps its key, default, and error texts.
+  - Telemetry is a graph node beneath every other lifecycle participant: its start installs
+    the providers before any starts, and its shutdown flushes them after all have stopped.
+  - The sweep's wake has no readiness of its own, so `/readyz` gains no check for it.
+  - `/healthz` and `/readyz` are unchanged: `/readyz` reports `lifecycle`, `database`,
+    `storage`, `schema`, and `sweeper`, in that order.
 - The storage suite's closing releases, validated together: go-core v0.5.0, go-web-sdk v0.14.0
   with middleware/rate-limit v0.2.0, go-database v0.7.0 with postgres/v0.4.0, go-storage v0.4.0
   with azureblob/v0.4.0, and blobfs v0.5.0 with postgres/v0.3.0:
@@ -132,8 +152,8 @@ accumulate under [Unreleased] until the first cut.
   - A download whose object fails to open answers `no-store`, with none of the file's headers.
   - `POST /admin/database/state` with an empty state resets to the configured seed.
   - Every configuration file decodes strictly: an unknown key fails the load.
-  - Startup's schema stage checks every statement once, through the seeder, before it seeds.
-    The `verify` stage is removed.
+  - The schema's startup checks every statement once, through the seeder, before it seeds.
+    The separate `verify` step is removed.
 - When a logo replacement or delete commits and its purge then fails, the request succeeds and
   logs the failure at warn; the stale reclaim finishes the file.
 - A logo seed that loses its activation to another logo leaves that logo and retires its own
@@ -186,14 +206,12 @@ accumulate under [Unreleased] until the first cut.
   key, null meaning the root.
 - The composition root is one file per layer under `internal/app`, as go-web-sdk-template
   v0.6.0 ships it.
-- Pins: go-core v0.5.0, go-database v0.7.0 with postgres/v0.4.0, go-web-sdk v0.14.0 with
-  middleware/rate-limit v0.2.0, sqlate v0.4.1 with postgres/v0.4.0, go-storage v0.4.0 with
+- Pins: go-core v0.6.0, go-database v0.7.0 with postgres/v0.4.0, go-web-sdk v0.15.0 with
+  middleware/rate-limit v0.2.0, sqlate v0.4.1 with postgres/v0.4.0, go-storage v0.5.0 with
   azureblob/v0.4.0, and blobfs v0.5.0 with postgres/v0.3.0.
 - The database admin verbs act on migration sets by name: `down`, `steps`, and `force` name
   the set in their body (400 when it is missing or undeclared), and the schema status reports
   each set. The state reset requires `"confirm": true`.
-- The lifecycle stages are named once, in the composition root's stage table: infrastructure,
-  schema, reactors, and root. The domains declare no stage.
 - Every 409 carries a curated detail naming its kind, never the error's text: "an entry with that
   name already exists", "the directory is not empty", "the directory is being deleted", "the
   file is being deleted", "the file is referenced", or "the request conflicts with the current

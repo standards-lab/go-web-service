@@ -12,13 +12,16 @@ import (
 	"github.com/standards-lab/go-web-service/integration"
 )
 
-// The probe bodies, as the SDK writes them.
+// The probe bodies, as the SDK writes them: a check's state, and the
+// readiness report that lists them, on a 200 and on a 503 problem alike.
+type check struct {
+	Name  string `json:"name"`
+	Ready bool   `json:"ready"`
+}
+
 type readiness struct {
-	Status string `json:"status"`
-	Checks []struct {
-		Name  string `json:"name"`
-		Ready bool   `json:"ready"`
-	} `json:"checks"`
+	Status string  `json:"status"`
+	Checks []check `json:"checks"`
 }
 
 const organizations = "/api/organizations"
@@ -53,9 +56,9 @@ func assertCurrent(t *testing.T, c *webtest.Client) {
 }
 
 // Startup applies the migration set to an empty schema and seeds the
-// reference data; the probes report every stage ready; the seed is
+// reference data; the probes report every check ready; the seed is
 // idempotent on a second run and across a second start; an interrupt
-// drains to exit 0. The sweep starts only after the schema stage: its
+// drains to exit 0. The sweep starts only after the schema: its
 // startup pass, which startup's own migration does not gate, runs over the
 // tables the migration created, so no pass of the process is refused.
 func TestLifecycle_StartupMigratesSeedsAndDrains(t *testing.T) {
@@ -68,22 +71,7 @@ func TestLifecycle_StartupMigratesSeedsAndDrains(t *testing.T) {
 	if live["status"] != "ok" {
 		t.Errorf("healthz = %v", live)
 	}
-	ready := webtest.Decode[readiness](t, c.Get(t, "/readyz"), http.StatusOK)
-	if ready.Status != "ready" {
-		t.Errorf("readyz status = %q", ready.Status)
-	}
-	want := map[string]bool{"lifecycle": false, "database": false, "storage": false, "schema": false, "sweeper": false}
-	for _, ch := range ready.Checks {
-		if _, known := want[ch.Name]; !known || !ch.Ready {
-			t.Errorf("readyz check %s ready=%t", ch.Name, ch.Ready)
-		}
-		want[ch.Name] = true
-	}
-	for name, seen := range want {
-		if !seen {
-			t.Errorf("readyz check %s missing", name)
-		}
-	}
+	assertReady(t, c)
 	assertCurrent(t, c)
 
 	if n := integration.Seed(t, c, ""); n["organizations"] != 0 {
@@ -97,7 +85,7 @@ func TestLifecycle_StartupMigratesSeedsAndDrains(t *testing.T) {
 		t.Errorf("drain not logged:\n%s", s.Output())
 	}
 	if strings.Contains(s.Output(), refusedRecord) {
-		t.Errorf("a sweep pass was refused while the schema was empty; want the sweep started after the schema stage:\n%s", s.Output())
+		t.Errorf("a sweep pass was refused while the schema was empty; want the sweep started after the schema:\n%s", s.Output())
 	}
 
 	// A second start against the seeded database inserts nothing.

@@ -2,12 +2,13 @@ package app
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"maps"
 	"runtime/debug"
+	"sync/atomic"
 	"time"
 
-	"github.com/standards-lab/go-core/lifecycle"
+	"github.com/standards-lab/go-core/graph"
 	"github.com/standards-lab/go-observability"
 	"github.com/standards-lab/go-observability/otlp"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -63,57 +64,86 @@ func observabilityConfig(cfg *config.Config) observability.Config {
 	return obsCfg
 }
 
-// newTelemetry constructs the telemetry service over the OTLP exporters and
-// registers its start and shutdown on lc as hooks rather than as a staged
-// service: the startup hook runs before the first numbered stage and the
-// shutdown hook after the last, so telemetry brackets every stage without
-// holding a stage number of its own. Construction performs no I/O: both
-// exporters dial lazily.
-func newTelemetry(infra *Infrastructure, cfg *config.Config, lc *lifecycle.Coordinator) error {
-	obsCfg := observabilityConfig(cfg)
-	ctx := context.Background()
+// defineTelemetry defines the telemetry node on g into n. It constructs
+// nothing.
+//
+// The database and the object store order themselves after telemetry, so
+// its Start installs the providers before either starts and its Shutdown
+// flushes after both have closed. Those edges only order; the router's
+// middleware stack, whose tracing records to the providers, Uses it, which
+// is what brings it into the Build. The server sits above both
+// connections, so every request is served while the providers are
+// installed.
+func defineTelemetry(g *graph.Graph, n *Nodes) {
+	n.Telemetry = g.Define("telemetry", newTelemetry(n))
+}
 
-	traceExp, err := otlp.NewTraceExporter(ctx, obsCfg)
-	if err != nil {
-		return fmt.Errorf("telemetry: trace exporter: %w", err)
-	}
-	metricExp, err := otlp.NewMetricExporter(ctx, obsCfg)
-	if err != nil {
-		return fmt.Errorf("telemetry: metric exporter: %w", err)
-	}
-	reader := sdkmetric.NewPeriodicReader(metricExp)
+// newTelemetry constructs the telemetry service over the OTLP exporters.
+// Construction performs no I/O: both exporters dial lazily.
+func newTelemetry(n *Nodes) func(*graph.Scope) (*Telemetry, error) {
+	return func(s *graph.Scope) (*Telemetry, error) {
+		obsCfg := observabilityConfig(s.Use(n.Config))
+		ctx := context.Background()
 
-	tel := observability.New(obsCfg, observability.Exporters{Trace: traceExp, Metric: reader})
-
-	lc.OnStartup(func(ctx context.Context) error {
-		if err := tel.Start(ctx); err != nil {
-			return fmt.Errorf("telemetry: %w", err)
+		traceExp, err := otlp.NewTraceExporter(ctx, obsCfg)
+		if err != nil {
+			return nil, err
 		}
-		return nil
-	})
-
-	// The shutdown hook never returns an error. Telemetry.Shutdown
-	// force-flushes both providers over OTLP, which fails whenever the
-	// collector is unreachable: the normal case in the integration tier,
-	// which never starts the observability compose profile. A returned
-	// flush error would join Coordinator.Run's return and exit the process
-	// with code 1, turning an observability outage into a service outage,
-	// which is what this design exists to prevent. The hook logs the error
-	// and swallows it.
-	//
-	// The flush is also bounded by telemetryFlushTimeout, well under the
-	// drain timeout. The OTLP exporters retry a refused export with a
-	// five-second initial backoff until their context ends, so an unbounded
-	// flush against an unreachable collector would hold the drain for the
-	// whole shutdown timeout on every exit.
-	lc.OnShutdown(func(ctx context.Context) error {
-		ctx, cancel := context.WithTimeout(ctx, telemetryFlushTimeout)
-		defer cancel()
-		if err := tel.Shutdown(ctx); err != nil {
-			infra.Logger.Warn("telemetry shutdown", "error", err)
+		metricExp, err := otlp.NewMetricExporter(ctx, obsCfg)
+		if err != nil {
+			return nil, err
 		}
-		return nil
-	})
+		reader := sdkmetric.NewPeriodicReader(metricExp)
 
+		return &Telemetry{
+			tel:    observability.New(obsCfg, observability.Exporters{Trace: traceExp, Metric: reader}),
+			logger: s.Use(n.Logger),
+		}, nil
+	}
+}
+
+// Telemetry is the telemetry node's value: go-observability's Telemetry
+// as a lifecycle participant, a Starter and a Stopper whose Shutdown never
+// fails the run.
+type Telemetry struct {
+	tel     *observability.Telemetry
+	logger  *slog.Logger
+	started atomic.Bool
+}
+
+// Start installs the trace and meter providers.
+func (t *Telemetry) Start(ctx context.Context) error {
+	if err := t.tel.Start(ctx); err != nil {
+		return err
+	}
+	t.started.Store(true)
+	return nil
+}
+
+// Shutdown flushes and shuts down the providers, and returns nil whatever
+// the flush does. It does nothing when Start did not succeed: the
+// lifecycle shuts down a participant whose Start failed, and
+// go-observability's Telemetry.Shutdown dereferences the providers only its
+// Start sets.
+//
+// The flush fails whenever the collector is unreachable: the normal case in
+// the integration tier, which never starts the observability compose
+// profile. A returned flush error would fail the run and exit the process
+// with code 1, turning an observability outage into a service outage, which
+// is what this design exists to prevent; Shutdown logs the error at warn
+// and swallows it. The flush is also bounded by telemetryFlushTimeout, well
+// under the shutdown timeout: the OTLP exporters retry a refused export
+// with a five-second initial backoff until their context ends, so an
+// unbounded flush against an unreachable collector would hold the drain
+// for the whole shutdown timeout on every exit.
+func (t *Telemetry) Shutdown(ctx context.Context) error {
+	if !t.started.Load() {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, telemetryFlushTimeout)
+	defer cancel()
+	if err := t.tel.Shutdown(ctx); err != nil {
+		t.logger.Warn("telemetry shutdown", "error", err)
+	}
 	return nil
 }

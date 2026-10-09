@@ -1,8 +1,8 @@
 // Package storage is the object storage admin domain: the HTTP half of the
 // object store's administration, a route group under the admin mount over
 // go-storage's Store. The Store is its own admin service: the operations
-// are the store's own methods. The composition root starts the store at
-// the infrastructure stage, before the schema stage seeds objects into it.
+// are the store's own methods. The composition root starts the store as its
+// storage node, beneath the schema node, which seeds objects into it.
 //
 // The group reads the store's diagnostics (whether it is ready, the
 // container it is configured for, and the provider's key rule) and creates

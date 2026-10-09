@@ -23,10 +23,5 @@ func run(stdout, stderr io.Writer) int {
 		return process.Fail(stderr, "config load failed", err)
 	}
 
-	a, err := app.New(cfg, stdout)
-	if err != nil {
-		return process.Fail(stderr, "app init failed", err)
-	}
-
-	return a.Run(ctx)
+	return app.New(cfg, stdout).Run(ctx)
 }

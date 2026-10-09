@@ -231,7 +231,7 @@ func TestSweepWorker_ContextStopsTheLoop(t *testing.T) {
 	sameOps(t, rec)
 }
 
-// Under the reactor the composition root stages it on, a refused pass
+// Under the reactor the composition root runs it on, a refused pass
 // leaves the reactor running: Err yields nothing, and the next nudge runs
 // the next pass.
 func TestSweepWorker_ARefusalKeepsTheReactor(t *testing.T) {

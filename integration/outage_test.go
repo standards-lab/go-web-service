@@ -87,21 +87,21 @@ func TestStorageOutage(t *testing.T) {
 		}
 	})
 
-	// The probe's 503 is a problem that lists its checks, the storage
-	// check alone not ready.
+	// The probe's 503 is a problem that lists every check in start order,
+	// the storage check alone not ready.
 	r := c.Get(t, "/readyz")
 	_ = r.Problem(t, http.StatusServiceUnavailable)
 	var report struct {
-		Checks []struct {
-			Name  string `json:"name"`
-			Ready bool   `json:"ready"`
-		} `json:"checks"`
+		Checks []check `json:"checks"`
 	}
 	r.JSON(t, &report)
+	if names := checkNames(report.Checks); !slices.Equal(names, readyChecks) {
+		t.Errorf("readyz checks = %v, want %v", names, readyChecks)
+	}
 	var unready []string
-	for _, check := range report.Checks {
-		if !check.Ready {
-			unready = append(unready, check.Name)
+	for _, ch := range report.Checks {
+		if !ch.Ready {
+			unready = append(unready, ch.Name)
 		}
 	}
 	if !slices.Equal(unready, []string{"storage"}) {

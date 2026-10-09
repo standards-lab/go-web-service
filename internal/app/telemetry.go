@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"maps"
 	"runtime/debug"
-	"sync/atomic"
 	"time"
 
 	"github.com/standards-lab/go-core/graph"
@@ -106,25 +105,19 @@ func newTelemetry(n *Nodes) func(*graph.Scope) (*Telemetry, error) {
 // as a lifecycle participant, a Starter and a Stopper whose Shutdown never
 // fails the run.
 type Telemetry struct {
-	tel     *observability.Telemetry
-	logger  *slog.Logger
-	started atomic.Bool
+	tel    *observability.Telemetry
+	logger *slog.Logger
 }
 
 // Start installs the trace and meter providers.
 func (t *Telemetry) Start(ctx context.Context) error {
-	if err := t.tel.Start(ctx); err != nil {
-		return err
-	}
-	t.started.Store(true)
-	return nil
+	return t.tel.Start(ctx)
 }
 
 // Shutdown flushes and shuts down the providers, and returns nil whatever
-// the flush does. It does nothing when Start did not succeed: the
-// lifecycle shuts down a participant whose Start failed, and
-// go-observability's Telemetry.Shutdown dereferences the providers only its
-// Start sets.
+// the flush does. The lifecycle also shuts down a participant whose Start
+// failed or never ran; go-observability's Telemetry.Shutdown then releases
+// the exporters Start never handed to a provider, so nothing leaks.
 //
 // The flush fails whenever the collector is unreachable: the normal case in
 // the integration tier, which never starts the observability compose
@@ -137,9 +130,6 @@ func (t *Telemetry) Start(ctx context.Context) error {
 // unbounded flush against an unreachable collector would hold the drain
 // for the whole shutdown timeout on every exit.
 func (t *Telemetry) Shutdown(ctx context.Context) error {
-	if !t.started.Load() {
-		return nil
-	}
 	ctx, cancel := context.WithTimeout(ctx, telemetryFlushTimeout)
 	defer cancel()
 	if err := t.tel.Shutdown(ctx); err != nil {

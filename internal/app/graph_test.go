@@ -253,10 +253,10 @@ func TestGraph_EachParticipantInOneNode(t *testing.T) {
 	}
 }
 
-// Telemetry's Shutdown does nothing when its Start never ran, as the
+// Telemetry's Shutdown is safe when its Start never ran, as the
 // lifecycle's shutdown of a participant whose Start failed calls it: it
-// returns nil, logs nothing, and does not reach go-observability's
-// providers, which only Start sets.
+// returns nil and logs nothing, go-observability releasing the exporters
+// Start never handed to a provider.
 func TestTelemetry_ShutdownWithoutStart(t *testing.T) {
 	var log syncBuffer
 	a := app.New(configtest.Config(t), &log)

@@ -162,6 +162,22 @@ func TestStartup_PortInUse(t *testing.T) {
 	}
 }
 
+// A configuration that fails to load ends the process before anything is
+// composed: it exits 1 with "config load failed" and the variable at fault
+// on stderr, and writes nothing to stdout, the service's log.
+func TestStartup_ConfigLoadFailure(t *testing.T) {
+	res := processtest.Run(t, processtest.Cmd{Env: []string{"APP_ENV=", "APP_SHUTDOWN_TIMEOUT=soon"}})
+	if res.Code != 1 {
+		t.Errorf("exit = %d, want 1", res.Code)
+	}
+	if !strings.HasPrefix(res.Stderr, "config load failed: ") || !strings.Contains(res.Stderr, "APP_SHUTDOWN_TIMEOUT") {
+		t.Errorf("stderr = %q, want config load failed naming APP_SHUTDOWN_TIMEOUT", res.Stderr)
+	}
+	if res.Stdout != "" {
+		t.Errorf("stdout = %q, want nothing", res.Stdout)
+	}
+}
+
 // shutdownTimeout is the drain bound the shutdown case configures, and
 // shutdownMargin what it allows beyond it for the process to exit.
 const (

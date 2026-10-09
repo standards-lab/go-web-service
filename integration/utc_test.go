@@ -33,10 +33,9 @@ func utc(t *testing.T, what string, r stamped) {
 // Every time the API returns is in UTC, whatever zone the service runs in:
 // the libraries return each time.Time in time.UTC, so the JSON encodes it
 // with a Z. The service runs in integration.ServiceZone, so a time left in
-// time.Local would carry its offset: +01:00 under British Summer Time, and
-// Z, indistinguishably, in winter. The organization's times are the
-// service's own rows, read through sqlate; the directory's and the file's
-// are blobfs's.
+// time.Local would carry its offset, +05:30, on any date. The
+// organization's times are the service's own rows, read through sqlate;
+// the directory's and the file's are blobfs's.
 func TestJSONTimesUTC(t *testing.T) {
 	// The service resolves TZ from this host's zone database, as this
 	// lookup does; without the zone it would run in UTC and prove nothing.

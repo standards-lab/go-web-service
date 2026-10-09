@@ -137,7 +137,7 @@ accumulate under [Unreleased] until the first cut.
     through go-observability's own `Shutdown`, where it skipped them before.
   - The rate limit keys an IPv4-mapped IPv6 client by its IPv4 address (httprate v0.16.1,
     through rate-limit v0.3.0), where every such client shared one counter.
-  - The integration tier runs every service process in `Europe/London`
+  - The integration tier runs every service process in `Asia/Kolkata`, +05:30 all year
     (`integration.ServiceZone`), and `TestJSONTimesUTC` asserts the API's times end in `Z`.
 - The compose stack builds every service from its own `compose/<service>/Dockerfile`, whose
   `FROM` line is the service's one image pin, with its configuration (the observability YAML and

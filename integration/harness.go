@@ -41,11 +41,12 @@ func getenv(name, def string) string {
 }
 
 // ServiceZone is the time zone every service process runs in, through TZ:
-// one whose offset is not zero for half the year, so a time the service
-// encodes in time.Local rather than time.UTC shows an offset in its JSON.
-// The process reads the host's zone database; a host without one would run
-// it in UTC silently, which TestJSONTimesUTC refuses up front.
-const ServiceZone = "Europe/London"
+// one whose offset is never zero (+05:30 all year, with no daylight
+// saving), so a time the service encodes in time.Local rather than
+// time.UTC shows an offset in its JSON on any date. The process reads the
+// host's zone database; a host without one would run it in UTC silently,
+// which TestJSONTimesUTC refuses up front.
+const ServiceZone = "Asia/Kolkata"
 
 // defaultRateLimitRequests overrides the service's own default (300 per
 // minute) generously upward, so no scenario's own request volume against
@@ -133,8 +134,9 @@ func (s *Service) Ready(t testing.TB) *Service {
 
 // environment composes the service's own variables for the run. APP_ENV is
 // cleared so no overlay applies: the base file and these variables are the
-// whole configuration. TZ is ServiceZone, so no process runs in UTC. The database address is the override when given,
-// else the parent's APP_DATABASE_* variables, else the compose defaults.
+// whole configuration. TZ is ServiceZone, so no process runs in UTC. The
+// database address is the override when given, else the parent's
+// APP_DATABASE_* variables, else the compose defaults.
 func environment(opts Options, addr, dbHost, dbPort string) []string {
 	host, port := databaseHostPort()
 	if opts.Database != "" {

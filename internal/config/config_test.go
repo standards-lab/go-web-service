@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -133,15 +135,153 @@ func TestConfig_FinalizeEnvOverrides(t *testing.T) {
 }
 
 func TestConfig_FinalizeRejectsNonPositiveShutdownTimeout(t *testing.T) {
-	t.Setenv("APP_SHUTDOWN_TIMEOUT", "-5s")
+	for _, v := range []string{"-5s", "0s"} {
+		t.Setenv("APP_SHUTDOWN_TIMEOUT", v)
+
+		cfg := configtest.Minimal()
+		err := cfg.Finalize("app")
+		if err == nil {
+			t.Fatalf("Finalize accepted shutdown_timeout %s", v)
+		}
+		if !strings.Contains(err.Error(), "shutdown_timeout must be positive") {
+			t.Errorf("error for %s = %v, want shutdown_timeout must be positive", v, err)
+		}
+	}
+}
+
+// A value the duration parser refuses fails the load with the variable's
+// name, so the operator sees which setting to fix.
+func TestConfig_FinalizeRejectsUnparsableShutdownTimeout(t *testing.T) {
+	t.Setenv("APP_SHUTDOWN_TIMEOUT", "soon")
 
 	cfg := configtest.Minimal()
 	err := cfg.Finalize("app")
 	if err == nil {
-		t.Fatal("Finalize accepted a negative shutdown_timeout")
+		t.Fatal("Finalize accepted an unparsable APP_SHUTDOWN_TIMEOUT")
 	}
-	if !strings.Contains(err.Error(), "shutdown_timeout") {
-		t.Errorf("error = %v, want it to name shutdown_timeout", err)
+	if !strings.Contains(err.Error(), "APP_SHUTDOWN_TIMEOUT") {
+		t.Errorf("error = %v, want it to name APP_SHUTDOWN_TIMEOUT", err)
+	}
+}
+
+// The empty prefix composes no variable name, so no environment value
+// reaches the shutdown timeout: the hermetic form tests use.
+func TestConfig_FinalizeEmptyPrefixReadsNoShutdownOverride(t *testing.T) {
+	t.Setenv("APP_SHUTDOWN_TIMEOUT", "30s")
+	t.Setenv("SHUTDOWN_TIMEOUT", "30s")
+
+	cfg := configtest.Minimal()
+	if err := cfg.Finalize(""); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	if got := cfg.ShutdownTimeout.Duration(); got != 10*time.Second {
+		t.Errorf("ShutdownTimeout = %s, want the 10s default", got)
+	}
+}
+
+// minimalFile is a config.json carrying the required fields, plus extra,
+// raw JSON members appended at the top level.
+func minimalFile(extra string) string {
+	body := `"database": {"name": "app"}, "storage": {"container": "c"}, "observability": {"endpoint": "127.0.0.1:4317"}`
+	if extra != "" {
+		body += ", " + extra
+	}
+	return "{" + body + "}"
+}
+
+// loadDir writes files into a fresh directory and runs Load there, as the
+// server binary does from its working directory. APP_ENV and
+// APP_SHUTDOWN_TIMEOUT are cleared, then env's KEY=VALUE entries applied,
+// so only what a test names reaches the load.
+func loadDir(t *testing.T, files map[string]string, env ...string) (*config.Config, error) {
+	t.Helper()
+	dir := t.TempDir()
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(dir)
+	t.Setenv("APP_ENV", "")
+	t.Setenv("APP_SHUTDOWN_TIMEOUT", "")
+	for _, kv := range env {
+		k, v, _ := strings.Cut(kv, "=")
+		t.Setenv(k, v)
+	}
+	return config.Load()
+}
+
+// shutdown_timeout is a top-level key of config.json, and a file that
+// omits it takes the 10s default.
+func TestLoad_ShutdownTimeoutIsATopLevelKey(t *testing.T) {
+	cfg, err := loadDir(t, map[string]string{"config.json": minimalFile(`"shutdown_timeout": "3s"`)})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.ShutdownTimeout.Duration(); got != 3*time.Second {
+		t.Errorf("ShutdownTimeout = %s, want 3s from the file", got)
+	}
+
+	cfg, err = loadDir(t, map[string]string{"config.json": minimalFile("")})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.ShutdownTimeout.Duration(); got != 10*time.Second {
+		t.Errorf("ShutdownTimeout = %s, want the 10s default", got)
+	}
+}
+
+// APP_SHUTDOWN_TIMEOUT overrides the file's value through Load.
+func TestLoad_EnvOverridesShutdownTimeout(t *testing.T) {
+	cfg, err := loadDir(t, map[string]string{"config.json": minimalFile(`"shutdown_timeout": "3s"`)}, "APP_SHUTDOWN_TIMEOUT=45s")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.ShutdownTimeout.Duration(); got != 45*time.Second {
+		t.Errorf("ShutdownTimeout = %s, want 45s from APP_SHUTDOWN_TIMEOUT", got)
+	}
+}
+
+// An overlay's shutdown_timeout replaces the base's; an overlay that
+// leaves it unset keeps the base's.
+func TestLoad_OverlayShutdownTimeout(t *testing.T) {
+	base := minimalFile(`"shutdown_timeout": "3s"`)
+	cfg, err := loadDir(t, map[string]string{
+		"config.json":         base,
+		"config.staging.json": `{"shutdown_timeout": "7s"}`,
+	}, "APP_ENV=staging")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.ShutdownTimeout.Duration(); got != 7*time.Second {
+		t.Errorf("ShutdownTimeout = %s, want the overlay's 7s", got)
+	}
+
+	cfg, err = loadDir(t, map[string]string{
+		"config.json":         base,
+		"config.staging.json": `{"log": {"level": "debug"}}`,
+	}, "APP_ENV=staging")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.ShutdownTimeout.Duration(); got != 3*time.Second {
+		t.Errorf("ShutdownTimeout = %s, want the base's 3s kept", got)
+	}
+}
+
+// The root configuration declares only its JSON keys: a file naming a Go
+// field or an internal member, such as Config or Env, is refused as an
+// unknown key rather than decoded into the root.
+func TestLoad_RejectsUnknownRootKeys(t *testing.T) {
+	for _, key := range []string{"Config", "Env"} {
+		_, err := loadDir(t, map[string]string{"config.json": minimalFile(`"` + key + `": {}`)})
+		if err == nil {
+			t.Errorf("Load accepted a %q key", key)
+			continue
+		}
+		if !strings.Contains(err.Error(), "unknown field") || !strings.Contains(err.Error(), key) {
+			t.Errorf("error for %q = %v, want it refused as an unknown field", key, err)
+		}
 	}
 }
 

@@ -424,8 +424,9 @@ func TestReactor_CoordinatorEndsRunOnFailure(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() { done <- lc.Run(context.Background()) }()
-	if err := recvOrFail(t, done, "Run to end on the reactor's failure"); !errors.Is(err, boom) {
-		t.Fatalf("Run = %v, want the handler's failure", err)
+	err := recvOrFail(t, done, "Run to end on the reactor's failure")
+	if !errors.Is(err, boom) || !strings.HasPrefix(err.Error(), "run: ") {
+		t.Fatalf("Run = %v, want the handler's failure labeled run:", err)
 	}
 }
 

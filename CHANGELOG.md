@@ -113,27 +113,28 @@ accumulate under [Unreleased] until the first cut.
 - The observability configuration block and a composition-root telemetry node wiring the
   service to `go-observability`: its start installs the tracer and meter providers ahead of
   every other lifecycle participant and its shutdown flushes them, bounded to a short timeout,
-  after the last one drains; the resource carries `service.name` (a literal, matching the collector's own
-  configuration) and `service.version` from the build's VCS revision. The middleware chain gains
-  tracing outermost and a request-id source drawn from the request's trace id, so the id in a
-  problem document's `request_id` extension, the request logger's record, and the correlating
-  log handler's `trace_id`/`span_id` attributes are all the same value. `log.format` defaults to
-  `json`, which the collector's log pipeline needed all along.
+  after the last one drains; the resource carries `service.name` (a literal, matching the
+  collector's own configuration) and `service.version` from the build's VCS revision. The
+  middleware chain gains tracing outermost and a request-id source drawn from the request's
+  trace id, so the id in a problem document's `request_id` extension, the request logger's
+  record, and the correlating log handler's `trace_id`/`span_id` attributes are all the same
+  value. `log.format` defaults to `json`, which the collector's log pipeline needed all along.
 
 ### Changed
 
 - The composition root runs on go-core v0.6.0's dependency graph, which it requires with
   go-web-sdk v0.15.0 and go-storage v0.5.0; those libraries' own breaking changes are in their
-  CHANGELOGs. `internal/app` describes the service as one graph in the exported `Nodes` value,
-  one node per part, each layer file filling its part in its define function. A node's part in
-  the lifecycle is inferred from its value's methods, so nothing registers with the coordinator,
-  and its order from the nodes it uses: telemetry first, the database and the object store
-  together, the schema after both, the sweeper after the schema, and the server last, alone on
-  top, so it drains first. The drain runs in reverse. `app.New` only describes the graph and
-  cannot fail, so `cmd/server` no longer reports `app init failed`; `App.Run` builds it, and a
-  constructor's error exits 1 as `service failed`, naming the node. `App.Graph` and `App.Nodes`
-  let a caller observe the build or replace a node before `Run`. Adding a service is defining a
-  node in its layer's define function; a reactor's node also joins `Nodes.Reactors`.
+  CHANGELOGs. `internal/app` describes the service as one graph, with a handle on each node in
+  the exported `Nodes` value; each layer file defines its nodes in its define function. A node's
+  part in the lifecycle is inferred from its value's methods, so nothing registers with the
+  coordinator, and its order from the nodes it uses: telemetry first, the database and the object
+  store together, the schema after both, the sweeper after the schema, and the server last, alone
+  in the top layer. The drain runs in reverse, so the server drains first. `app.New` only
+  describes the graph and cannot fail, so `cmd/server` no longer reports `app init failed`;
+  `App.Run` builds it, and a constructor's error exits 1 as `service failed`, naming the node.
+  `App.Graph` and `App.Nodes` let a caller observe the build or replace a node before `Run`.
+  Adding a service is defining a node in its layer's define function; a reactor's node also
+  joins `Nodes.Reactors`.
   - The configuration embeds go-core's `lifecycle.Config`, so `shutdown_timeout`
     (`APP_SHUTDOWN_TIMEOUT`, 10s) keeps its key, default, and error texts.
   - Telemetry is a graph node beneath every other lifecycle participant: its start installs

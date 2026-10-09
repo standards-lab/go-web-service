@@ -67,13 +67,13 @@ func observabilityConfig(cfg *config.Config) observability.Config {
 // defineTelemetry defines the telemetry node on g into n. It constructs
 // nothing.
 //
-// Telemetry brackets the connections: the database and the object store
-// order themselves after it, so its Start installs the providers before
-// either starts and its Shutdown flushes after both have closed. Those
-// edges only order; the router's middleware stack, whose tracing records
-// to the providers, Uses it, which is what brings it into the Build. The
-// server sits above both connections, so every request is served inside
-// the bracket.
+// The database and the object store order themselves after telemetry, so
+// its Start installs the providers before either starts and its Shutdown
+// flushes after both have closed. Those edges only order; the router's
+// middleware stack, whose tracing records to the providers, Uses it, which
+// is what brings it into the Build. The server sits above both
+// connections, so every request is served while the providers are
+// installed.
 func defineTelemetry(g *graph.Graph, n *Nodes) {
 	n.Telemetry = g.Define("telemetry", newTelemetry(n))
 }

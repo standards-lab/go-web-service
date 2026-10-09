@@ -16,10 +16,10 @@ import (
 //
 // Tracing runs outermost so every later middleware, and the handler itself,
 // sees the request inside its span. It records to the providers the
-// telemetry node installs, so the stack Uses that node: the use is what
-// brings telemetry into the Build, since the connections' edges to it only
-// order them after it and never build it. RequestID sits next, sourcing the trace
-// id observability.RequestIDSource reads off that span, so the id
+// telemetry node installs, so the stack Uses that node. That Use is what
+// brings telemetry into the Build: the connections' After edges to it
+// order them after it but never build it. RequestID sits next, sourcing
+// the trace id observability.RequestIDSource reads off that span, so the id
 // RequestLogger records, the X-Request-Id response header, and any problem
 // document's request_id extension all carry the same value. Reordering any
 // of the three breaks that chain: tracing after RequestID leaves no span for

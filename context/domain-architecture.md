@@ -93,10 +93,11 @@ every store that runs statements: `data.Database.Register(name, stmts, verifier)
 domain's store with its statements, and `data.NewStorage(db, …)` records blobfs's store, so
 `Seeder.Verify` checks every recorded store, including one that seeds nothing, and no list in the
 composition root can leave a store out. The admin service runs `Verify` in its startup, before
-it seeds. The startup order is the composition root's graph: each node starts after the nodes it
-uses, in layers, and three orderings without a value complete it, the pool and the object store
-after telemetry, the sweeper after the schema, and the server after both, alone
-on top. The order stays in the composition root, never in a library or a domain. The base layers (`data`,
+it seeds. The composition root's graph sets the startup order: each node starts after the nodes
+it uses, and three `After` edges, which order two nodes without passing a value, complete it: the
+pool and the object store after telemetry, the sweeper after the schema, and the server after the
+sweeper and the schema, alone in the top layer. The order stays in the composition root, never in
+a library or a domain. The base layers (`data`,
 `domain/<layer>`, `admin/<service>`) are root-level packages because the domain packages import
 `data` and the topology-and-naming principle forbids a root-level package importing `internal/*`. A
 domain that seeds the named states declares each contribution over its own tables and statements,

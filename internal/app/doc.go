@@ -1,13 +1,13 @@
 // Package app is the composition root. It describes the service as one
-// go-core dependency graph, and each architecture layer has one file, which
-// defines the layer's nodes in its define function and owns its mount, so
-// the layer files are the architecture's layer list:
+// go-core dependency graph. Each architecture layer has one file, which
+// defines the layer's nodes in its define function, so the layer files are
+// the architecture's layer list:
 //
 //   - infrastructure.go: defineInfrastructure, the configuration, the
 //     logger, the database pool, the object store, and the two the domains
 //     see them through, the sql session and the files store;
 //   - telemetry.go: defineTelemetry, the trace and meter providers, which
-//     bracket the connections;
+//     start before the connections and flush after them;
 //   - admin.go: defineAdmin, the quiesce gate and the schema service, and
 //     the /admin mount;
 //   - domain.go: defineDomain, the domain services, and the /api mount;
@@ -35,10 +35,11 @@
 // a ReadinessChecker joins the readiness probe, and a Monitored has its
 // runtime error watched. Nodes start in layer order and drain in reverse.
 // No layer file registers anything with the Coordinator. The order is
-// computed from what each node uses, plus three orderings without a value:
-// the database and the object store after telemetry, the sweeper after the
-// schema, and the server after the sweeper and the schema, so it is alone
-// in the top layer, starts last, and drains first. The probes report the
+// computed from what each node uses, plus three After edges, which order
+// two nodes without passing a value: the database and the object store
+// after telemetry, the sweeper after the schema, and the server after the
+// sweeper and the schema, so it is alone in the top layer, starts last, and
+// drains first. The probes report the
 // Coordinator's status under the "lifecycle" name, then the database, the
 // object store, the schema, and the sweeper, in layer, then definition,
 // order. [Telemetry] and [Wake] are the two node values the package owns:

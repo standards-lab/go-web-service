@@ -15,9 +15,9 @@ import (
 // The suite is hermetic: no live database or object store exists, so it
 // proves the cold start and the startup contract: the Build performs no
 // I/O, and a failed start of the connections fails startup before the
-// schema starts, instead of serving unready. The serve-probes-drain path and every
-// behavior that needs a real engine are the integration tier's, the root
-// integration package.
+// schema starts, instead of serving unready. The serve-probes-drain path
+// and every behavior that needs a real engine are the integration tier's,
+// the root integration package.
 
 // failsafe bounds every wait for an event that should occur, so a broken
 // composition fails the test instead of hanging it.

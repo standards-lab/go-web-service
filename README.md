@@ -367,6 +367,9 @@ mise. `serve`'s full command also needs a shell that understands `/dev/tcp` (bas
 | `mise run otel:up` | `docker compose ... up -d --wait --build`, then polls Mimir until it can query | Start the collector, Loki, Tempo, Mimir, and Grafana |
 | `mise run otel:down` | `docker compose --profile observability down …` | Stop the observability profile (keep data) |
 | `mise run otel:reset` | `docker compose --profile observability down -v …` | Stop the observability profile and drop its data |
+| `mise run stack:up` | `db:up` and `otel:up` | Start the local Postgres and Azurite and the observability profile |
+| `mise run stack:down` | `db:down` and `otel:down` | Stop the local Postgres and Azurite and the observability profile (keep data) |
+| `mise run stack:reset` | `db:reset` and `otel:reset` | Stop the local Postgres and Azurite and the observability profile and drop their data |
 | `mise run db:state <state>` | `curl -d '{"state":"<state>","confirm":true}' localhost:8080/admin/database/state` | Reset the running service's database to a named state |
 | `mise run slab -- list` | `cd tools/slab && go run ./cmd/slab` | Run the narrated demo scenarios — see [`tools/slab/README.md`](tools/slab/README.md) |
 

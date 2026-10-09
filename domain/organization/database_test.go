@@ -413,8 +413,8 @@ func TestSeed_RollsBackOnFailure(t *testing.T) {
 	}
 }
 
-// The layer's verifier covers its statements, the seed's among them, at
-// the schema stage the seeder's Verify runs at.
+// The layer's verifier covers its statements, the seed's among them, when
+// the schema's startup runs the seeder's Verify.
 func TestSeed_VerifiesTheLayersStatements(t *testing.T) {
 	s, rec := seeder(t)
 	if err := s.Verify(context.Background()); err != nil {

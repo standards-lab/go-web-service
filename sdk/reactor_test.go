@@ -412,7 +412,7 @@ func coordinate(t *testing.T, r *sdk.Reactor[time.Time]) *lifecycle.Coordinator 
 	return lifecycle.New(sys, lifecycle.Config{ShutdownTimeout: libconfig.Duration(failsafe)})
 }
 
-// As a graph node's value, with no Monitor call, a handler's failure while
+// As a graph node's value, registered nowhere, a handler's failure while
 // running ends the run with the failure in Run's result, and the drain
 // still shuts the reactor down.
 func TestReactor_CoordinatorAdapter(t *testing.T) {

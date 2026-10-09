@@ -24,7 +24,7 @@ Broad and unordered; each layer is detailed only when a session is about to buil
 baseline is running: `cmd/server`, the config files, and the README are authoritative for the
 composition root, configuration bootstrap, logging, lifecycle, HTTP server, probes, the database
 with its admin service (startup migration, the configured seed set, the named states, and the
-admin mount), observability (a telemetry layer bracketing the lifecycle stages, tracing and
+admin mount), observability (a telemetry node beneath every lifecycle participant, tracing and
 metrics over OTLP, and structured logs correlated to them by trace id), and object storage (an
 organization's logo and its document hierarchy on blobfs over go-storage, proxied through the
 service, with the sweep that finishes a recursive delete), all wired over the SDKs,

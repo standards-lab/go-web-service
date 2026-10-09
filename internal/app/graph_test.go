@@ -22,7 +22,8 @@ import (
 // This file pins the graph's structural properties the composition root
 // owns: the server alone in the top layer, the readiness checks the
 // lifecycle infers from the node values and their order, telemetry beneath
-// the connections, and each participant held by one node. It builds the
+// every other participant, the schema between the connections and the
+// sweeper, and each participant held by one node. It builds the
 // graph without starting it, so it needs no live engine. Unlike
 // app_test.go, these tests name nodes: they reach the graph through
 // App.Graph and App.Nodes, as does the Build-failure case, which
@@ -147,21 +148,87 @@ func TestGraph_ReadinessChecks(t *testing.T) {
 	}
 }
 
-// Telemetry sits beneath both connections, so its providers are installed
-// before either starts and flushed after both close.
-func TestGraph_TelemetryBeneathConnections(t *testing.T) {
+// participant reports whether v takes part in the lifecycle's startup or
+// shutdown.
+func participant(v any) bool {
+	switch v.(type) {
+	case lifecycle.Starter, lifecycle.Stopper:
+		return true
+	}
+	return false
+}
+
+// beneathTelemetry returns the lifecycle participants, other than telemetry
+// itself, whose layer is not above telemetry's.
+func beneathTelemetry(t *testing.T, sys *graph.System, n app.Nodes) []string {
+	t.Helper()
+	tel := layerOf(sys, n.Telemetry.Name())
+	if tel < 0 {
+		t.Fatal("telemetry is not in the built System")
+	}
+	var out []string
+	for i, layer := range sys.Layers() {
+		for _, d := range layer {
+			if d.Name != n.Telemetry.Name() && participant(d.Value) && i <= tel {
+				out = append(out, d.Name)
+			}
+		}
+	}
+	return out
+}
+
+// lateStarter is a participant that orders itself after nothing.
+type lateStarter struct{}
+
+func (lateStarter) Start(context.Context) error { return nil }
+
+// Telemetry sits beneath every other lifecycle participant, so its
+// providers are installed before any starts and flushed after all have
+// stopped. A participant that misses the edge to telemetry fails here; the
+// second case shows the check catches one.
+func TestGraph_TelemetryBeneathParticipants(t *testing.T) {
+	t.Run("as defined", func(t *testing.T) {
+		a := app.New(configtest.Config(t), io.Discard)
+		sys := buildAsRun(t, a)
+		if below := beneathTelemetry(t, sys, a.Nodes()); len(below) > 0 {
+			t.Errorf("participants %v are not above telemetry's layer", below)
+		}
+	})
+
+	t.Run("a participant missing the edge", func(t *testing.T) {
+		a := app.New(configtest.Config(t), io.Discard)
+		stray := a.Graph().Define("stray", func(*graph.Scope) (lateStarter, error) {
+			return lateStarter{}, nil
+		})
+		sys := buildAsRun(t, a, stray)
+		if below := beneathTelemetry(t, sys, a.Nodes()); !slices.Contains(below, "stray") {
+			t.Errorf("participants below telemetry = %v, want stray among them", below)
+		}
+	})
+}
+
+// The connections share a layer beneath the schema, so they start together
+// and close together after it, and the sweeper sits above the schema, so it
+// starts once every table it touches is verified and stops before the
+// schema does.
+func TestGraph_SchemaBetweenConnectionsAndSweeper(t *testing.T) {
 	a := app.New(configtest.Config(t), io.Discard)
 	sys := buildAsRun(t, a)
 	n := a.Nodes()
 
-	tel := layerOf(sys, n.Telemetry.Name())
-	if tel < 0 {
-		t.Fatal("telemetry is not in the System Run builds")
+	db, store := layerOf(sys, n.Database.Name()), layerOf(sys, n.Storage.Name())
+	schema, sweeper := layerOf(sys, n.Schema.Name()), layerOf(sys, n.Sweeper.Name())
+	if db < 0 || store < 0 || schema < 0 || sweeper < 0 {
+		t.Fatalf("layers: database %d, storage %d, schema %d, sweeper %d; want each built", db, store, schema, sweeper)
 	}
-	for _, name := range []string{n.Database.Name(), n.Storage.Name()} {
-		if l := layerOf(sys, name); l <= tel {
-			t.Errorf("%s in layer %d, want above telemetry's %d", name, l, tel)
-		}
+	if db != store {
+		t.Errorf("database in layer %d, storage in layer %d, want the same layer", db, store)
+	}
+	if db >= schema {
+		t.Errorf("connections in layer %d, schema in layer %d, want the connections below", db, schema)
+	}
+	if sweeper <= schema {
+		t.Errorf("sweeper in layer %d, schema in layer %d, want the sweeper above", sweeper, schema)
 	}
 }
 

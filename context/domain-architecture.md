@@ -28,8 +28,8 @@ aggregating its role for the layer:
   hold `storage.go`, the blobfs translation file; `messaging.go` and `ai.go` are planned.
 - `service.go`: the single domain service, a concrete type constructed from the `data` package.
   Its methods map endpoints to operations one to one, and each operation delegates whole to the
-  store after the command's own validation. A domain declares no lifecycle stage and imports no
-  part of go-core's `lifecycle`.
+  store after the command's own validation. A domain service is no lifecycle participant and
+  imports no part of go-core's `lifecycle`.
 - `handler.go`: the single handler, the layer's route group of error-returning handlers over the
   group's error writer.
 
@@ -86,17 +86,17 @@ contract (`ParseQuery`); the lowering to the read model's header is `data.Direct
 
 ## Composition wiring
 
-`internal/app/domain.go` constructs each layer's service from the `data` package and never hands the
-`Infrastructure` struct down. A domain declares no lifecycle service. The seeder verifies
+`internal/app/domain.go` defines each layer's service as a graph node built from the `data`
+package's nodes it uses, and never hands `Nodes` itself down. A domain service has no start, stop,
+or readiness of its own, so it takes no part in the lifecycle. The seeder verifies
 every store that runs statements: `data.Database.Register(name, stmts, verifier)` records each
 domain's store with its statements, and `data.NewStorage(db, …)` records blobfs's store, so
 `Seeder.Verify` checks every recorded store, including one that seeds nothing, and no list in the
-composition root can leave a store out. The admin service runs `Verify` at the schema stage before
-it seeds. Every stage the process uses is named once in
-`internal/app/stages.go`, in dependency order: `stageInfrastructure` (the pool and the object
-store), `stageSchema` (the schema, the statements, and the seed), `stageReactors`, and `stageRoot`
-(the server). Each layer file registers at a stage from that table, so the ordering is the root's
-alone: a stage stays at the call site, never in a library or a domain. The base layers (`data`,
+composition root can leave a store out. The admin service runs `Verify` in its startup, before
+it seeds. The startup order is the composition root's graph: each node starts after the nodes it
+uses, in layers, and three orderings without a value complete it, the pool and the object store
+after telemetry, the sweeper after the schema, and the server after both, alone
+on top. The order stays in the composition root, never in a library or a domain. The base layers (`data`,
 `domain/<layer>`, `admin/<service>`) are root-level packages because the domain packages import
 `data` and the topology-and-naming principle forbids a root-level package importing `internal/*`. A
 domain that seeds the named states declares each contribution over its own tables and statements,

@@ -6,8 +6,8 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/standards-lab/blobfs v0.6.0
-	github.com/standards-lab/go-core v0.7.0
-	github.com/standards-lab/go-web-sdk v0.15.1
+	github.com/standards-lab/go-core v0.8.0
+	github.com/standards-lab/go-web-sdk v0.15.2
 	github.com/standards-lab/sqlate v0.5.0
 	github.com/standards-lab/sqlate/postgres v0.5.0
 	golang.org/x/sys v0.49.0

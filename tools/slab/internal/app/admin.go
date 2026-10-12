@@ -8,10 +8,10 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/output"
 )
 
-// Admin composes the admin clients, one field per admin domain: the
-// administrative counterpart of Domain. Each field is the constructor the
-// package's commands call when a subcommand runs, for the reason Domain's
-// are.
+// Admin composes the admin clients, one field per admin domain. Each field
+// is the constructor the package's commands call when a subcommand runs,
+// not the client itself: the client binds to the base URL, which cobra
+// parses after the tree is built.
 type Admin struct {
 	Database func() *database.Client
 	Storage  func() *storage.Client

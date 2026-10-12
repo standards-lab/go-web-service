@@ -88,24 +88,6 @@ func TestDemo_MountsEachScenario(t *testing.T) {
 	}
 }
 
-func TestDocs_MountsTheDocumentCommands(t *testing.T) {
-	for args, wants := range map[string][]string{
-		"docs":       {"dirs", "files"},
-		"docs dirs":  {"create", "get", "list", "move", "delete"},
-		"docs files": {"list", "put", "show", "get", "move", "delete"},
-	} {
-		out, errOut, code := execute(t, strings.Fields(args)...)
-		if code != 0 {
-			t.Fatalf("%s exited %d: %s", args, code, errOut)
-		}
-		for _, want := range append([]string{"Available Commands:"}, wants...) {
-			if !strings.Contains(out, want) {
-				t.Errorf("%s help lacks %q:\n%s", args, want, out)
-			}
-		}
-	}
-}
-
 func TestAdmin_MountsTheDatabaseCommands(t *testing.T) {
 	out, errOut, code := execute(t, "admin")
 	if code != 0 {
@@ -144,11 +126,6 @@ func TestCommands_BindTheClientToTheBaseFlagAsParsed(t *testing.T) {
 		method string
 		uri    string
 	}{
-		"docs": {
-			args:   []string{"docs", "dirs", "get", "1", "root"},
-			method: http.MethodGet,
-			uri:    "/api/documents/1/directories/root",
-		},
 		"admin database": {
 			args:   []string{"admin", "database", "diagnostics"},
 			method: http.MethodGet,
@@ -224,7 +201,7 @@ func TestCommands_NeverColorAStreamThatIsNoTerminal(t *testing.T) {
 func TestConfig_FallsBackToSLABBase(t *testing.T) {
 	received, srv := newService(t, http.StatusOK, `{}`)
 	t.Setenv("SLAB_BASE", srv.URL)
-	_, errOut, code := execute(t, "docs", "dirs", "get", "1", "root")
+	_, errOut, code := execute(t, "admin", "database", "diagnostics")
 	if code != 0 {
 		t.Fatalf("exited %d: %s", code, errOut)
 	}
@@ -235,25 +212,25 @@ func TestConfig_FallsBackToSLABBase(t *testing.T) {
 
 func TestRun_RendersTheErrorAndExitsNonZero(t *testing.T) {
 	t.Run("a problem document, member by member", func(t *testing.T) {
-		_, srv := newService(t, http.StatusNotFound, `{"status":404,"title":"Not Found","detail":"no directory root","instance":"/api/documents/1/directories/root"}`)
-		out, errOut, code := execute(t, "docs", "dirs", "get", "1", "root", "--base", srv.URL)
+		_, srv := newService(t, http.StatusNotFound, `{"status":404,"title":"Not Found","detail":"no diagnostics","instance":"/admin/database/diagnostics"}`)
+		out, errOut, code := execute(t, "admin", "database", "diagnostics", "--base", srv.URL)
 		if code != 1 {
 			t.Errorf("exited %d, want 1", code)
 		}
 		if out != "" {
 			t.Errorf("stdout = %q, want nothing", out)
 		}
-		if want := "404 Not Found\ndetail: no directory root\ninstance: /api/documents/1/directories/root\n"; errOut != want {
+		if want := "404 Not Found\ndetail: no diagnostics\ninstance: /admin/database/diagnostics\n"; errOut != want {
 			t.Errorf("stderr = %q, want %q", errOut, want)
 		}
 	})
 	t.Run("a usage error, as its message", func(t *testing.T) {
-		_, errOut, code := execute(t, "docs", "dirs", "get")
+		_, errOut, code := execute(t, "admin", "database", "diagnostics", "--bogus")
 		if code != 1 {
 			t.Errorf("exited %d, want 1", code)
 		}
-		if !strings.Contains(errOut, "accepts 2 arg(s), received 0") {
-			t.Errorf("stderr = %q, want cobra's argument count message", errOut)
+		if !strings.Contains(errOut, "unknown flag: --bogus") {
+			t.Errorf("stderr = %q, want cobra's unknown flag message", errOut)
 		}
 	})
 }
@@ -266,7 +243,7 @@ func TestBridge_TakesRootFlagsBeforeTheFamilyWord(t *testing.T) {
 		"a valued flag":     {"--base", "%s"},
 		"a flag with =":     {"--base=%s"},
 		"a boolean flag":    {"--no-color", "--base", "%s"},
-		"a value like word": {"--repo", "docs", "--base", "%s"},
+		"a value like word": {"--repo", "admin", "--base", "%s"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			received, srv := newService(t, http.StatusOK, `{}`)
@@ -274,12 +251,12 @@ func TestBridge_TakesRootFlagsBeforeTheFamilyWord(t *testing.T) {
 			for _, a := range lead {
 				args = append(args, strings.ReplaceAll(a, "%s", srv.URL))
 			}
-			_, errOut, code := execute(t, append(args, "docs", "dirs", "get", "1", "root")...)
+			_, errOut, code := execute(t, append(args, "admin", "database", "diagnostics")...)
 			if code != 0 {
 				t.Fatalf("exited %d: %s", code, errOut)
 			}
-			if len(*received) != 1 || (*received)[0] != (exchange{http.MethodGet, "/api/documents/1/directories/root"}) {
-				t.Errorf("the service received %+v, want one GET /api/documents/1/directories/root", *received)
+			if len(*received) != 1 || (*received)[0] != (exchange{http.MethodGet, "/admin/database/diagnostics"}) {
+				t.Errorf("the service received %+v, want one GET /admin/database/diagnostics", *received)
 			}
 		})
 	}

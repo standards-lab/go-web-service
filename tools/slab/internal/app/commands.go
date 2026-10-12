@@ -7,13 +7,10 @@ import (
 )
 
 // commands is the list of mounts: the subtrees the legacy cobra root serves,
-// each built by the layer file that owns it. The domain commands come from domain.go,
-// the admin mount from admin.go, the demo mount and list from demo.go; this
-// file composes and does nothing else. The direct command families render
-// through out; the demo narrates through its own reporter, over cfg.
-func commands(dom *Domain, adm *Admin, out *output.Output, cfg *legacyConfig) []*cobra.Command {
-	var all []*cobra.Command
-	all = append(all, mountDomain(dom, out)...)
-	all = append(all, mountAdmin(adm, out), mountDemo(cfg), listCommand())
-	return all
+// each built by the layer file that owns it. The admin mount comes from
+// admin.go, the demo mount and list from demo.go; this file composes and
+// does nothing else. The admin commands render through out; the demo
+// narrates through its own reporter, over cfg.
+func commands(adm *Admin, out *output.Output, cfg *legacyConfig) []*cobra.Command {
+	return []*cobra.Command{mountAdmin(adm, out), mountDemo(cfg), listCommand()}
 }

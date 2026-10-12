@@ -17,7 +17,7 @@ import (
 )
 
 // legacy is the temporary bridge to the command families still on cobra:
-// docs, admin, demo, and list. Each moves onto the go-cli-sdk tree in
+// admin, demo, and list. Each moves onto the go-cli-sdk tree in
 // a later slice of the commands task, and this file goes with the last of
 // them. Until then a run whose subcommand is one of them is dispatched to
 // a cobra tree built as before the move, with its own flags, words,
@@ -104,7 +104,7 @@ func (l *legacy) tree(cfg *legacyConfig) (*cobra.Command, *output.Output) {
 	root.SetErr(l.streams.Stderr)
 	out := newOutput(l.streams.Stdout, l.streams.Stderr, cfg)
 	infra := newInfrastructure(cfg)
-	root.AddCommand(commands(newDomain(infra), newAdmin(infra), out, cfg)...)
+	root.AddCommand(commands(newAdmin(infra), out, cfg)...)
 	return root, out
 }
 

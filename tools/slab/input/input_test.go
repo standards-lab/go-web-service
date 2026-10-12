@@ -211,8 +211,7 @@ func TestGuardedBody_ChecksTheVersionBeforeBuildingFromFlags(t *testing.T) {
 	}
 }
 
-// The cobra adapters read whether each flag was set from the command's
-// flags, and refuse a missing version in cobra's words.
+// The cobra adapter reads whether --body was set from the command's flags.
 func TestCobraBody_ReadsTheCommandsFlags(t *testing.T) {
 	cmd, raw, _ := parsedCobra(t, "--body", `{"a":1}`)
 	if body, err := input.CobraBody(cmd, raw, never(t)); err != nil || string(body) != `{"a":1}` {
@@ -221,16 +220,5 @@ func TestCobraBody_ReadsTheCommandsFlags(t *testing.T) {
 	cmd, raw, _ = parsedCobra(t)
 	if body, err := input.CobraBody(cmd, raw, built(fields{Code: "x"})); err != nil || string(body) != `{"code":"x","name":""}` {
 		t.Errorf("CobraBody() = %q, %v; want what the flags build", body, err)
-	}
-}
-
-func TestCobraGuardedBody_ReadsTheCommandsFlags(t *testing.T) {
-	cmd, raw, version := parsedCobra(t, "--body", `{"version":4}`)
-	if body, ifMatch, err := input.CobraGuardedBody(cmd, raw, version, never(t)); err != nil || string(body) != `{}` || ifMatch != 4 {
-		t.Errorf("CobraGuardedBody(--body) = %q, %d, %v", body, ifMatch, err)
-	}
-	cmd, raw, version = parsedCobra(t)
-	if _, _, err := input.CobraGuardedBody(cmd, raw, version, never(t)); err == nil || err.Error() != `required flag(s) "version" not set` {
-		t.Errorf("err = %v, want cobra's words for the missing version", err)
 	}
 }

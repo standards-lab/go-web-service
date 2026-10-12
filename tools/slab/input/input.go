@@ -40,36 +40,10 @@ func CobraBody(cmd *cobra.Command, raw string, fromFlags func() (any, error)) ([
 // the request fires, in the words go-cli-sdk refuses a missing required
 // flag with. A command calls it from its Validate, as it does [Body].
 func GuardedBody(inv *cli.Invocation, raw string, version int64, fromFlags func() (any, error)) ([]byte, int64, error) {
-	return guardedBody(inv.Changed, raw, version, fromFlags, errors.New("required flag --version not set"))
-}
-
-// CobraGuardedBody is [GuardedBody] for a command still on cobra: it reads
-// whether each flag was set from cmd's flags, and refuses a missing version
-// in cobra's words. It goes when the last such family moves onto
-// go-cli-sdk.
-func CobraGuardedBody(cmd *cobra.Command, raw string, version int64, fromFlags func() (any, error)) ([]byte, int64, error) {
-	return guardedBody(cmd.Flags().Changed, raw, version, fromFlags, errors.New(`required flag(s) "version" not set`))
-}
-
-// body is [Body] over changed, which reports whether a flag was set.
-func body(changed func(name string) bool, raw string, fromFlags func() (any, error)) ([]byte, error) {
-	if changed("body") {
-		return []byte(raw), nil
-	}
-	v, err := fromFlags()
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(v)
-}
-
-// guardedBody is [GuardedBody] over changed, which reports whether a flag
-// was set, refusing a request with no version source with noVersion.
-func guardedBody(changed func(name string) bool, raw string, version int64, fromFlags func() (any, error), noVersion error) ([]byte, int64, error) {
-	flagged := changed("version")
-	if !changed("body") {
+	flagged := inv.Changed("version")
+	if !inv.Changed("body") {
 		if !flagged {
-			return nil, 0, noVersion
+			return nil, 0, errors.New("required flag --version not set")
 		}
 		v, err := fromFlags()
 		if err != nil {
@@ -104,4 +78,16 @@ func guardedBody(changed func(name string) bool, raw string, version int64, from
 		return nil, 0, fmt.Errorf(`--body: "version" is not an integer: %s`, embedded)
 	}
 	return body, version, nil
+}
+
+// body is [Body] over changed, which reports whether a flag was set.
+func body(changed func(name string) bool, raw string, fromFlags func() (any, error)) ([]byte, error) {
+	if changed("body") {
+		return []byte(raw), nil
+	}
+	v, err := fromFlags()
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(v)
 }

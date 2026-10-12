@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/cobra"
-
 	"github.com/standards-lab/go-cli-sdk"
 
 	"github.com/standards-lab/go-web-service/tools/slab/input"
@@ -63,20 +61,5 @@ func TestReadFlags_RefusesPageWithCursor(t *testing.T) {
 	code := cli.Run(context.Background(), cmd, []string{"--page", "2", "--cursor", "c"}, cli.Streams{Stdout: &stderr, Stderr: &stderr})
 	if code != 2 || !strings.Contains(stderr.String(), "flags --page, --cursor cannot be used together") {
 		t.Errorf("code = %d, stderr = %q, want the exclusive group refused", code, stderr.String())
-	}
-}
-
-// The cobra binding reads the same grammar from a cobra command's flags.
-func TestReadFlags_CobraBinding(t *testing.T) {
-	var read input.ReadFlags
-	cmd := &cobra.Command{Use: "list"}
-	read.BindCobra(cmd)
-	if err := cmd.ParseFlags([]string{"--filter", "a=b", "--filter", "c=d", "--size", "5"}); err != nil {
-		t.Fatal(err)
-	}
-	got, err := read.QueryCobra(cmd)
-	want := [][2]string{{"size", "5"}, {"a", "b"}, {"c", "d"}}
-	if err != nil || fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Errorf("query = %v, %v; want %v", got, err, want)
 	}
 }

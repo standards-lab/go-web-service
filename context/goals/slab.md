@@ -1,6 +1,6 @@
 # goal · slab
 
-- **State:** building
+- **State:** brief ready
 - **Task:** commands
 - **Branch:** commands
 

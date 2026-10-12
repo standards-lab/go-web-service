@@ -121,7 +121,7 @@ run = "golangci-lint run --build-tags integration ./... && go tool sqlint && cd 
 # than passing through at the root, means a clone without a go.work still
 # resolves slab's dependencies against the published releases.
 [tasks.slab]
-description = "Run slab, the narrated-scenario runner (`mise run slab -- list`)"
+description = "Run slab, the narrated-scenario runner (`mise run slab -- scenario <name>`)"
 dir = "tools/slab"
 run = "go run ./cmd/slab"
 

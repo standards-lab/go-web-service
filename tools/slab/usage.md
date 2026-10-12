@@ -169,20 +169,23 @@ mise run slab -- admin storage diagnostics     # ready, the container, the key l
 mise run slab -- admin storage container       # creates the container; succeeds when it exists
 ```
 
-## `demo` — the narrated scenarios
+## `scenario` — the narrated scenarios
 
 ```sh
-mise run slab -- demo sqlate     # no stack needed, deterministic output
-mise run slab -- demo domain
-mise run slab -- demo problems
-mise run slab -- demo storage    # ends by resetting to the default state
-mise run slab -- demo storage    # runs again as it stands: the branch it deletes is named for the run
-mise run slab -- list
-mise run slab -- demo none       # usage error (exit 2): unknown command "none"
+mise run slab -- scenario sqlate     # no stack needed, deterministic output
+mise run slab -- scenario domain
+mise run slab -- scenario problems
+mise run slab -- scenario storage    # ends by resetting to the default state
+mise run slab -- scenario storage    # runs again as it stands: the branch it deletes is named for the run
+mise run slab -- scenario            # the listing: each scenario, its summary, and the nodes it uses
+mise run slab -- scenario none       # usage error (exit 2): unknown command "none"
 ```
 
+A scenario that needs the service or Grafana checks it before its first step; with the stack
+down it exits 1 naming the mise task that brings it up, as in
+`slab scenario domain: startup: service: nothing answers at ... (start the service with: mise run serve): ...`.
 A step whose response is not the one it expects stops the scenario and exits 1, naming the step
-by its number and intent, as in `slab demo storage: storage: step 6 (Logo Delete): status = 500 ...`.
+by its number and intent, as in `slab scenario storage: step 6 (Logo Delete): status = 500 ...`.
 
 ## Clean up
 

@@ -66,12 +66,11 @@ func (g Grafana) Start(ctx context.Context) error {
 }
 
 // ended is a Start's error when the run context ended during its probe, by
-// a signal or by another need node's failed start in the same layer: the
-// probe's failure is then a consequence, not a finding, so it is the
-// context's error, which the lifecycle drops once a failure is on record,
-// rather than a report naming a task that would fix nothing. The probe's
-// own error carries the context's cause instead, which the lifecycle would
-// report as a second failure.
+// a signal or by another need node's failed start in the same layer. It
+// returns the context's error, which the lifecycle drops once a failure is
+// on record, so the cancelled probe adds no second report naming a task
+// that would fix nothing. The probe's own error wraps the context's cause,
+// and the lifecycle would report it.
 func ended(ctx context.Context) error {
 	return ctx.Err()
 }

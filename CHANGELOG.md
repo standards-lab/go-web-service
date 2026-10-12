@@ -133,12 +133,12 @@ accumulate under [Unreleased] until the first cut.
   report on stderr: `slab <command path>: `, then every member of the document on its own line.
 - slab's scenarios run on go-cli-sdk's scenario runner, from the `tools/slab/scenarios`
   package, as `slab scenario <name>`; the root's help and `slab scenario`'s help both end with
-  the listing, each scenario's name, summary, and the nodes it uses. The service and Grafana are
-  need nodes, probed before the first step: a run with either down fails at start, exit 1,
-  naming the mise task that brings it up (`mise run serve`, `mise run db:up`, or
-  `mise run otel:up`). A failed step reads `slab scenario <name>: step <i> (<intent>): …`. Only
-  the blocks are colored, never a heading, a note, or a caption, and `style.JSON` leaves JSON
-  that breaks partway as it came, uncolored.
+  the listing, which gives each scenario's name, summary, and the nodes it uses. The service
+  and Grafana are need nodes, probed before the first step: a run with either down fails at
+  start, exit 1, naming the mise task that brings it up (`mise run serve`, `mise run db:up`,
+  or `mise run otel:up`). A failed step reads `slab scenario <name>: step <i> (<intent>): …`. Only
+  the blocks are colored, never a heading, a note, or a caption. `style.JSON` returns JSON that
+  breaks partway unchanged and uncolored.
 - Pins: go-core v0.8.0 and go-web-sdk v0.15.2, in both modules; their own changes are in their
   CHANGELOGs.
 - Every time the API's JSON carries (an organization's, a directory's, and a file's

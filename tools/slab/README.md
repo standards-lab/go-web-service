@@ -146,10 +146,10 @@ Two of the nodes are needs, each checked when the run starts, before any step:
 - **grafana up** — the running Grafana at `--grafana`, probed at `/api/health`. A failure names
   `mise run otel:up`.
 
-A need that fails stops the run with exit code 1 and one report per failed need, as in
-`slab scenario domain: startup: service: nothing answers at http://127.0.0.1:8080 (start the
-service with: mise run serve): ...`. A step whose result is not the one it expects stops the
-run the same way, naming the step by its number and intent:
+A need that fails stops the run with exit code 1 and one report, which names the first need
+that failed, as in `slab scenario domain: startup: service: nothing answers at
+http://127.0.0.1:8080 (start the service with: mise run serve): ...`. A step whose result is
+not the one it expects stops the run the same way, naming the step by its number and intent:
 `slab scenario <name>: step <i> (<intent>): <error>`.
 
 ## Configuration
@@ -207,7 +207,7 @@ that are its own.
   then the settings, and the composition root's `internal/app/scenario.go` hands it those nodes
   and mounts it under `scenario`; a need is a node whose value probes what it names when the run
   starts and names the mise task that fixes it. A scenario constructs no client: it calls the
-  service through the one the service node's value carries, the client node's.
+  service through the client node's client, which the service node's value carries.
 - **Direct commands.** Each direct command maps to one route. A command's field flags name the
   wire field they build (`--code`, `--parent-id`), and `--body` and `--version` mean the same on
   every command. A family's `Commands` takes the client node and the `output.Source`, declares

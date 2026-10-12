@@ -31,17 +31,20 @@
 //   - [All], the scenarios in presentation order
 //   - [Sqlate], [Domain], [Problems], and [Storage], the scenarios
 //
-// scenarios.go holds Nodes, All, and the narration every scenario's steps
-// share; stack.go holds the need nodes' values; calls.go holds a call or
-// check only when two scenarios make it identically, a step whose point is
-// showing its own literal request keeping that request in its scenario
-// file; each other file holds one scenario: its constructor, its literal,
-// and the step methods that run it. A step narrates its prose with the
-// reporter's Note and shows its results as the output package's blocks
-// through the reporter's Show, each block colored only when the run's
-// color is on: a captioned block follows a plain Note of its caption, and
-// in the scenarios against the service every block is set off by a blank
-// line, so a request, its response, and what is read off them read apart.
+// scenarios.go holds Nodes, All, and the narration helpers every
+// scenario's steps share, and stack.go holds the need nodes' values.
+// calls.go holds a call or check only when two scenarios make it
+// identically; a step whose point is showing its own literal request keeps
+// that request in its scenario file. Each other file holds one scenario:
+// its constructor, its literal, and the step methods that run it.
+//
+// A step narrates its prose with the reporter's Note and shows its results
+// as the output package's blocks through the reporter's Show, each block
+// colored only when the run's color is on. A captioned block follows a
+// plain Note of its caption. In the scenarios against the service, an
+// empty Note sets each block off by a blank line, so a request, its
+// response, and what is read off them read apart.
+//
 // The wire types and routes come from domain/organization, domain/document,
 // and admin/database, which restate the service's contract once for every
 // slab command. The storage scenario waits for the sweep through

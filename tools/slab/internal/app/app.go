@@ -2,8 +2,6 @@ package app
 
 import (
 	"context"
-	"fmt"
-	"io"
 
 	"github.com/standards-lab/go-cli-sdk"
 	"github.com/standards-lab/go-core/graph"
@@ -34,10 +32,6 @@ func New(streams cli.Streams) *App {
 		root: &cli.Command{
 			Name:    "slab",
 			Summary: "Call the service's endpoints and run its narrated scenarios",
-			Footer: func(w io.Writer) {
-				_, _ = fmt.Fprintln(w, "Scenarios:")
-				writeScenarios(w)
-			},
 		},
 		streams: streams,
 	}
@@ -48,7 +42,6 @@ func New(streams cli.Streams) *App {
 	a.root.Add(versionCommand())
 	mountDomain(a.root, &a.nodes)
 	mountAdmin(a.root, &a.nodes)
-	a.root.Add(demoCommand(&a.nodes), listCommand())
 	mountScenarios(a.root, &a.nodes)
 	return a
 }
@@ -73,7 +66,6 @@ type Nodes struct {
 	LifecycleConfig *graph.Node[lifecycle.Config]  // "lifecycle config"
 	Base            *graph.Node[string]            // "base", the service's base URL
 	Grafana         *graph.Node[string]            // "grafana", Grafana's base URL
-	Tempo           *graph.Node[string]            // "tempo", Tempo's HTTP API base URL
 	Repo            *graph.Node[string]            // "repo", the repository root override; empty when not given
 	NoColor         *graph.Node[bool]              // "no color", print without ANSI color even on a terminal
 	Client          *graph.Node[*httpx.Client]     // "client"

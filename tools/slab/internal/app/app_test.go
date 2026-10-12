@@ -41,8 +41,8 @@ func newApp(t *testing.T) (a *app.App, stdout, stderr *bytes.Buffer, built *appt
 
 // settings are the values of the run setting nodes, as a probe reads them.
 type settings struct {
-	base, grafana, tempo, repo string
-	noColor                    bool
+	base, grafana, repo string
+	noColor             bool
 }
 
 // probe adds a group command at a's root holding three leaves that each
@@ -53,7 +53,7 @@ type settings struct {
 func probe(a *app.App) **settings {
 	got := new(*settings)
 	n := a.Nodes()
-	nodes := []graph.Ref{n.Base, n.Grafana, n.Tempo, n.Repo, n.NoColor}
+	nodes := []graph.Ref{n.Base, n.Grafana, n.Repo, n.NoColor}
 	read := (&cli.Command{
 		Name:    "probe",
 		Summary: "Read the settings",
@@ -62,7 +62,6 @@ func probe(a *app.App) **settings {
 			*got = &settings{
 				base:    inv.Get(n.Base),
 				grafana: inv.Get(n.Grafana),
-				tempo:   inv.Get(n.Tempo),
 				repo:    inv.Get(n.Repo),
 				noColor: inv.Get(n.NoColor),
 			}
@@ -93,8 +92,8 @@ func TestRun_RootHelp(t *testing.T) {
 			}
 			for _, want := range []string{
 				"Usage:\n  slab <command> [flags]",
-				"Commands:", "version", "org", "docs", "admin", "demo", "list",
-				"--base string", `(default "http://127.0.0.1:8080")`, "--grafana string", "--tempo string", "--repo string", "--no-color",
+				"Commands:", "version", "org", "docs", "admin", "scenario",
+				"--base string", `(default "http://127.0.0.1:8080")`, "--grafana string", "--repo string", "--no-color",
 				"Scenarios:", "  sqlate    ", "  domain    ", "  problems  ", "  storage   ",
 			} {
 				if !strings.Contains(stdout.String(), want) {
@@ -137,14 +136,18 @@ func TestRun_UsageErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		"an unknown command":     {[]string{"bogus"}, `slab: unknown command "bogus"`},
-		"an unknown subcommand":  {[]string{"group", "bogus"}, `slab group: unknown command "bogus"`},
-		"an extra argument":      {[]string{"version", "extra"}, "slab version: accepts no arguments, got 1\nUsage: slab version [flags]\n"},
-		"an unknown flag":        {[]string{"version", "--bogus"}, "slab version: flag provided but not defined: -bogus\nUsage: slab version [flags]\n"},
-		"a root flag's value":    {[]string{"group", "probe", "--base"}, "slab group probe: flag needs an argument: -base\n"},
-		"a missing flag":         {[]string{"group", "needs"}, "slab group needs: required flag --a not set\n"},
-		"exclusive flags":        {[]string{"group", "either", "--a", "x", "--b", "y"}, "slab group either: flags --a, --b cannot be used together\n"},
-		"a bad root flag syntax": {[]string{"--no-color=maybe", "version"}, "slab: invalid boolean value"},
+		"an unknown command":      {[]string{"bogus"}, `slab: unknown command "bogus"`},
+		"an unknown subcommand":   {[]string{"group", "bogus"}, `slab group: unknown command "bogus"`},
+		"an extra argument":       {[]string{"version", "extra"}, "slab version: accepts no arguments, got 1\nUsage: slab version [flags]\n"},
+		"an unknown flag":         {[]string{"version", "--bogus"}, "slab version: flag provided but not defined: -bogus\nUsage: slab version [flags]\n"},
+		"a root flag's value":     {[]string{"group", "probe", "--base"}, "slab group probe: flag needs an argument: -base\n"},
+		"a missing flag":          {[]string{"group", "needs"}, "slab group needs: required flag --a not set\n"},
+		"exclusive flags":         {[]string{"group", "either", "--a", "x", "--b", "y"}, "slab group either: flags --a, --b cannot be used together\n"},
+		"a bad root flag syntax":  {[]string{"--no-color=maybe", "version"}, "slab: invalid boolean value"},
+		"the removed list":        {[]string{"list"}, `slab: unknown command "list"`},
+		"the removed demo":        {[]string{"demo"}, `slab: unknown command "demo"`},
+		"a removed demo scenario": {[]string{"demo", "sqlate"}, `slab: unknown command "demo"`},
+		"the removed --tempo":     {[]string{"--tempo", "x", "org", "list"}, "slab: flag provided but not defined: -tempo"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			unreadable(t)
@@ -211,7 +214,7 @@ func TestNew_IsCold(t *testing.T) {
 // probeBuilt is what the probe builds: the run setting nodes it declares,
 // in the order it declares them, and the lifecycle config the dispatcher
 // adds.
-var probeBuilt = []string{"base", "grafana", "tempo", "repo", "no color", "lifecycle config"}
+var probeBuilt = []string{"base", "grafana", "repo", "no color", "lifecycle config"}
 
 // A command builds the nodes it declares, and the lifecycle config the
 // dispatcher adds, and nothing else.
@@ -237,27 +240,27 @@ func TestRun_CommandBuildsWhatItDeclares(t *testing.T) {
 // unreadable or unused, and the run succeeds.
 func TestRun_ASettingIsReadOnlyByACommandThatDeclaresIt(t *testing.T) {
 	t.Setenv(noColor, "not-a-bool")
-	t.Setenv("SLAB_TEMPO", "http://env-tempo")
+	t.Setenv("SLAB_GRAFANA", "http://env-grafana")
 	a, _, stderr, built := newApp(t)
-	tempo := a.Nodes().Tempo
+	grafana := a.Nodes().Grafana
 	var got string
 	a.Root().Add((&cli.Command{
-		Name: "tempo",
+		Name: "grafana",
 		Run: func(_ context.Context, inv *cli.Invocation) error {
-			got = inv.Get(tempo)
+			got = inv.Get(grafana)
 			return nil
 		},
-	}).Use(tempo))
+	}).Use(grafana))
 
-	code := a.Run(context.Background(), []string{"tempo"})
+	code := a.Run(context.Background(), []string{"grafana"})
 
 	if code != process.ExitOK {
 		t.Fatalf("code = %d, want %d; stderr = %q", code, process.ExitOK, stderr)
 	}
-	if got != "http://env-tempo" {
-		t.Errorf("tempo = %q, want the environment's", got)
+	if got != "http://env-grafana" {
+		t.Errorf("grafana = %q, want the environment's", got)
 	}
-	if want := []string{"tempo", "lifecycle config"}; !slices.Equal(built.Log(), want) {
+	if want := []string{"grafana", "lifecycle config"}; !slices.Equal(built.Log(), want) {
 		t.Errorf("nodes built = %q, want %q", built.Log(), want)
 	}
 }
@@ -268,11 +271,10 @@ func TestSettings_LayerDefaultsEnvAndFlags(t *testing.T) {
 	defaults := settings{
 		base:    "http://127.0.0.1:8080",
 		grafana: "http://127.0.0.1:3000",
-		tempo:   "http://127.0.0.1:3200",
 	}
-	fromEnv := settings{base: "http://env-base", grafana: "http://env-grafana", tempo: "http://env-tempo", repo: "/env-repo", noColor: true}
-	fromFlags := settings{base: "http://flag-base", grafana: "http://flag-grafana", tempo: "http://flag-tempo", repo: "/flag-repo", noColor: false}
-	flags := []string{"--base", "http://flag-base", "--grafana=http://flag-grafana", "--tempo", "http://flag-tempo", "--repo", "/flag-repo", "--no-color=false"}
+	fromEnv := settings{base: "http://env-base", grafana: "http://env-grafana", repo: "/env-repo", noColor: true}
+	fromFlags := settings{base: "http://flag-base", grafana: "http://flag-grafana", repo: "/flag-repo", noColor: false}
+	flags := []string{"--base", "http://flag-base", "--grafana=http://flag-grafana", "--repo", "/flag-repo", "--no-color=false"}
 	for name, tc := range map[string]struct {
 		env  bool
 		args []string
@@ -290,11 +292,10 @@ func TestSettings_LayerDefaultsEnvAndFlags(t *testing.T) {
 			if tc.env {
 				t.Setenv("SLAB_BASE", fromEnv.base)
 				t.Setenv("SLAB_GRAFANA", fromEnv.grafana)
-				t.Setenv("SLAB_TEMPO", fromEnv.tempo)
 				t.Setenv("SLAB_REPO", fromEnv.repo)
 				t.Setenv(noColor, "true")
 			} else {
-				for _, v := range []string{"SLAB_BASE", "SLAB_GRAFANA", "SLAB_TEMPO", "SLAB_REPO", noColor} {
+				for _, v := range []string{"SLAB_BASE", "SLAB_GRAFANA", "SLAB_REPO", noColor} {
 					t.Setenv(v, "")
 				}
 			}

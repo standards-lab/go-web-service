@@ -6,10 +6,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/standards-lab/go-web-sdk"
-
-	"github.com/standards-lab/go-web-service/tools/slab/env"
 )
 
 // probe is the client Probe sends with: a short timeout, so a service that
@@ -58,18 +54,4 @@ func Probe(ctx context.Context, base, path string) error {
 // ProbeGrafana is [Probe] of Grafana at base on its health endpoint.
 func ProbeGrafana(ctx context.Context, base string) error {
 	return Probe(ctx, base, grafanaHealthPath)
-}
-
-// Live is [Probe] of the service named in ctx's env on its liveness
-// endpoint. It is the check a demo scenario's Need states for the service,
-// so it takes only the Need's context and reads the service's base URL
-// from it.
-func Live(ctx context.Context) error {
-	return Probe(ctx, env.FromContext(ctx).Base, web.HealthPath)
-}
-
-// GrafanaLive is [ProbeGrafana] of the Grafana named in ctx's env. It is
-// the check a demo scenario's Need states for Grafana.
-func GrafanaLive(ctx context.Context) error {
-	return ProbeGrafana(ctx, env.FromContext(ctx).Grafana)
 }

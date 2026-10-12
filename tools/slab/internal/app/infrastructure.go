@@ -27,7 +27,6 @@ const envPrefix = "SLAB"
 const (
 	defaultBase    = "http://127.0.0.1:8080"
 	defaultGrafana = "http://127.0.0.1:3000"
-	defaultTempo   = "http://127.0.0.1:3200"
 )
 
 // defineInfrastructure defines the infrastructure nodes on g into n: the
@@ -42,7 +41,6 @@ func defineInfrastructure(g *graph.Graph, n *Nodes, flags *rootFlags) {
 	n.LifecycleConfig = g.Define("lifecycle config", newLifecycleConfig)
 	n.Base = g.Define("base", newSetting(flags, "base", defaultBase, parseString))
 	n.Grafana = g.Define("grafana", newSetting(flags, "grafana", defaultGrafana, parseString))
-	n.Tempo = g.Define("tempo", newSetting(flags, "tempo", defaultTempo, parseString))
 	n.Repo = g.Define("repo", newSetting(flags, "repo", "", parseString))
 	n.NoColor = g.Define("no color", newSetting(flags, "no-color", false, strconv.ParseBool))
 	n.Client = g.Define("client", newClient(n.Base))
@@ -102,7 +100,6 @@ func bindRootFlags(fs *flag.FlagSet) *rootFlags {
 	env := func(name string) string { return " (env " + config.EnvName(envPrefix, name) + ")" }
 	fs.String("base", defaultBase, "the service's base URL"+env("base"))
 	fs.String("grafana", defaultGrafana, "Grafana's base URL"+env("grafana"))
-	fs.String("tempo", defaultTempo, "Tempo's HTTP API base URL"+env("tempo"))
 	fs.String("repo", "", "the repository root, when slab is not run from inside it"+env("repo"))
 	fs.Bool("no-color", false, "print without ANSI color even on a terminal"+env("no-color"))
 	return &rootFlags{fs: fs}
@@ -130,9 +127,7 @@ func (f *rootFlags) value(name string) (any, bool) {
 }
 
 // newClient returns the client node's constructor: the HTTP client to the
-// service, bound to the URL the base node resolves. It is the one place a
-// command on the tree gets an httpx.Client from; the demo scenarios
-// construct their own, as each addresses the stack it needs by name.
+// service, bound to the URL the base node resolves.
 func newClient(base *graph.Node[string]) func(*graph.Scope) (*httpx.Client, error) {
 	return func(s *graph.Scope) (*httpx.Client, error) {
 		return httpx.NewClient(s.Use(base)), nil

@@ -17,7 +17,7 @@ func tree(t *testing.T) (root, nested string) {
 	t.Helper()
 	root = t.TempDir()
 	write(t, filepath.Join(root, "go.mod"), "module "+repo.Module+"\n\ngo 1.27\n")
-	nested = filepath.Join(root, "tools", "slab", "internal", "demo")
+	nested = filepath.Join(root, "tools", "slab", "internal", "app")
 	write(t, filepath.Join(root, "tools", "slab", "go.mod"), "module "+repo.Module+"/tools/slab\n")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatal(err)

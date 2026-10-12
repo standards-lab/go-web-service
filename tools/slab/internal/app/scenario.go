@@ -1,6 +1,8 @@
 package app
 
 import (
+	"io"
+
 	"github.com/standards-lab/go-cli-sdk"
 	"github.com/standards-lab/go-cli-sdk/scenario"
 	"github.com/standards-lab/go-core/graph"
@@ -28,15 +30,17 @@ func defineScenarioNodes(g *graph.Graph, n *Nodes) {
 
 // mountScenarios mounts go-cli-sdk's scenario parent at root, with one leaf
 // per scenario the scenarios package builds over the nodes from n it
-// reads. Each leaf declares its own scenario's nodes, so a scenario builds
-// and starts only what it reads; the parent declares none, and its help
-// ends with the listing. The root's own Footer still lists the demo
-// scenarios while the demo command stands beside this one.
+// reads, and sets root's Footer to the same listing the parent's help ends
+// with, so root help ends with it too. Each leaf declares its own
+// scenario's nodes, so a scenario builds and starts only what it reads;
+// the parent declares none, and writing the listing builds nothing.
 func mountScenarios(root *cli.Command, n *Nodes) {
-	root.Add(scenario.Commands(scenarios.All(scenarios.Nodes{
+	all := scenarios.All(scenarios.Nodes{
 		Service:   n.Service,
 		GrafanaUp: n.GrafanaUp,
 		Repo:      n.Repo,
 		NoColor:   n.NoColor,
-	})...)...)
+	})
+	root.Footer = func(w io.Writer) { scenario.WriteListing(w, all...) }
+	root.Add(scenario.Commands(all...)...)
 }

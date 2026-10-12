@@ -56,7 +56,7 @@ func Domain(n Nodes) scenario.Scenario {
 	s := &domain{n: n}
 	return scenario.Scenario{
 		Name:    "domain",
-		Summary: "The organization domain's full CRUD surface against the running service, reseeded from a known fixture each run, with the create request's trace located in Grafana (needs the full compose stack)",
+		Summary: "The organization domain's full CRUD surface against the running service, reseeded from a known fixture each run, with the create request's trace located in Grafana",
 		Nodes:   []graph.Ref{n.Service, n.GrafanaUp, n.Repo, n.NoColor},
 		Steps: []scenario.Step{
 			{Intent: "Initialization", Action: s.initialization},

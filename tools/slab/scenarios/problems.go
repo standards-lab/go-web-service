@@ -52,7 +52,7 @@ func Problems(n Nodes) scenario.Scenario {
 	s := &problems{n: n}
 	return scenario.Scenario{
 		Name:    "problems",
-		Summary: "The service's problem-response contract (RFC 9457) across its real error conditions, one request each against the running service, with every response's trace located in Grafana (needs the full compose stack)",
+		Summary: "The service's problem-response contract (RFC 9457) across its real error conditions, one request each against the running service, with every response's trace located in Grafana",
 		Nodes:   []graph.Ref{n.Service, n.GrafanaUp, n.Repo, n.NoColor},
 		Steps: []scenario.Step{
 			{Intent: "Initialization", Action: s.initialization},

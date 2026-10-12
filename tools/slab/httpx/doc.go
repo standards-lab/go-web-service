@@ -10,5 +10,4 @@
 //   - [RawQuery], which joins query pairs as the printed request shows them
 //   - [Probe] and [ProbeGrafana], which probe an endpoint at a base URL, and
 //     [StatusError], a probe answered with another status than 200
-//   - [Live] and [GrafanaLive], the probes a demo scenario's Need checks with
 package httpx

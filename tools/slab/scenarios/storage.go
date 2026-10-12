@@ -211,7 +211,7 @@ func Storage(n Nodes) scenario.Scenario {
 	s := &storage{n: n}
 	return scenario.Scenario{
 		Name:    "storage",
-		Summary: "Storage end to end against the running service: the migration sets, a logo's replace cycle, acme's document tree and a cursor walk, the scoped refusals, a recursive delete swept to 404, and a reset (needs postgres, azurite, and the service)",
+		Summary: "Storage end to end against the running service: the migration sets, a logo's replace cycle, acme's document tree and a cursor walk, the scoped refusals, a recursive delete swept to 404, and a reset",
 		Nodes:   []graph.Ref{n.Service, n.Repo, n.NoColor},
 		Steps: []scenario.Step{
 			{Intent: "Migration Sets", Action: s.migrationSets},

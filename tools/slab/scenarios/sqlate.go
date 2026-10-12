@@ -50,7 +50,7 @@ func Sqlate(n Nodes) scenario.Scenario {
 	s := &sqlate{n: n}
 	return scenario.Scenario{
 		Name:    "sqlate",
-		Summary: "One pattern, one statement that includes it, the two calls that register them, and the compiled result (no compose stack needed)",
+		Summary: "One pattern, one statement that includes it, the two calls that register them, and the compiled result",
 		Nodes:   []graph.Ref{n.Repo, n.NoColor},
 		Steps: []scenario.Step{
 			{Intent: "Write a pattern", Action: s.writePattern},

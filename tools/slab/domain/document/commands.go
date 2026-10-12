@@ -260,7 +260,7 @@ const pollInterval = 250 * time.Millisecond
 // deleting, read again after pollInterval; any other status is returned as
 // output.Expect's error. When limit passes first, or ctx ends, it returns
 // the reason. It is exported because it is --wait's one definition: the
-// storage demo waits for the sweep through it rather than restating it.
+// storage scenario waits for the sweep through it rather than restating it.
 func AwaitSweep(ctx context.Context, client *Client, location string, limit time.Duration) (time.Duration, error) {
 	start := time.Now()
 	deadline := start.Add(limit)

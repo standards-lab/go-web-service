@@ -186,6 +186,30 @@ func TestScenario_WithNoScenarioPrintsItsHelpEndingInTheListing(t *testing.T) {
 	}
 }
 
+// The root's help ends with the same listing the scenario parent's help
+// ends with, word for word: both are go-cli-sdk's listing of the one
+// scenario set.
+func TestScenario_RootHelpEndsWithTheScenarioListing(t *testing.T) {
+	unreadable(t)
+	help := func(args ...string) string {
+		a, stdout, stderr, _ := newApp(t)
+		if code := a.Run(context.Background(), args); code != process.ExitUsage {
+			t.Fatalf("%q: code = %d, want %d; stderr = %q", args, code, process.ExitUsage, stderr)
+		}
+		return stdout.String()
+	}
+	root, parent := help(), help("scenario")
+
+	i := strings.LastIndex(parent, "Scenarios:\n")
+	if i < 0 {
+		t.Fatalf("scenario help has no listing:\n%s", parent)
+	}
+	listing := parent[i:]
+	if !strings.HasSuffix(root, "\n"+listing) {
+		t.Errorf("root help does not end with the scenario listing %q:\n%s", listing, root)
+	}
+}
+
 // Every usage error of scenario exits ExitUsage with go-cli-sdk's report on
 // stderr, before anything is built.
 func TestScenario_UsageErrors(t *testing.T) {

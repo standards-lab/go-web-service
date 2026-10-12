@@ -235,7 +235,7 @@ func Storage(n Nodes) scenario.Scenario {
 }
 
 func (s *storage) migrationSets(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
-	s.client = httpx.NewClient(inv.Get(s.n.Service).URL)
+	s.client = inv.Get(s.n.Service).Client
 	st := styleOf(s.n, inv)
 	r.Note("The service's schema is two migration sets, applied at startup in declaration order: blobfs, go-database's file hierarchy (directories, files, and their statuses), and app, the service's own tables, whose owner rows (an organization's logo image and its document root) reference blobfs's. The schema status reports each set's applied version against the latest it carries.")
 	res, err := call(ctx, r, st, s.client, http.MethodGet, schemaRoute, nil, nil)

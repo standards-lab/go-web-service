@@ -72,7 +72,7 @@ func Problems(n Nodes) scenario.Scenario {
 }
 
 func (s *problems) initialization(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
-	s.client = httpx.NewClient(inv.Get(s.n.Service).URL)
+	s.client = inv.Get(s.n.Service).Client
 	if err := reset(ctx, s.n, inv, s.client, r); err != nil {
 		return err
 	}

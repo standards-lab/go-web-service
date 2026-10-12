@@ -114,7 +114,7 @@ func TestScenario_DomainRunsTenStepsInOrder(t *testing.T) {
 		"[5/10] Find by Path", "[6/10] Create", "[7/10] Edit", "[8/10] Transfer",
 		"[9/10] Results", "[10/10] Delete",
 	})
-	if want := []string{"service", "base", "grafana up", "grafana", "repo", "no color", "lifecycle config"}; !slices.Equal(r.built, want) {
+	if want := []string{"service", "base", "client", "grafana up", "grafana", "repo", "no color", "lifecycle config"}; !slices.Equal(r.built, want) {
 		t.Errorf("nodes built = %q, want %q", r.built, want)
 	}
 	if strings.Contains(r.stdout, "\x1b[") {

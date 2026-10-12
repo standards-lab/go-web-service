@@ -11,17 +11,17 @@ import (
 )
 
 // defineScenarioNodes defines on g into n the need nodes the scenarios
-// declare, over the settings nodes defineInfrastructure defined: service,
-// the running service at the base node's URL, and grafana up, the running
-// Grafana at the grafana node's URL. Each value is a lifecycle Starter
-// that probes what it names, so the dispatcher starts it after the Build
-// and a scenario that declares it runs no step until it answers; a failed
-// probe is reported "startup: <node>: ..." naming the mise task that
-// fixes it.
+// declare, over the nodes defineInfrastructure defined: service, the
+// running service at the base node's URL with the client node's client
+// bound to it, and grafana up, the running Grafana at the grafana node's
+// URL. Each value is a lifecycle Starter that probes what it names, so the
+// dispatcher starts it after the Build and a scenario that declares it
+// runs no step until it answers; a failed probe is reported
+// "startup: <node>: ..." naming the mise task that fixes it.
 func defineScenarioNodes(g *graph.Graph, n *Nodes) {
-	base, grafana := n.Base, n.Grafana
+	base, client, grafana := n.Base, n.Client, n.Grafana
 	n.Service = g.Define("service", func(s *graph.Scope) (scenarios.Service, error) {
-		return scenarios.Service{URL: s.Use(base)}, nil
+		return scenarios.Service{URL: s.Use(base), Client: s.Use(client)}, nil
 	})
 	n.GrafanaUp = g.Define("grafana up", func(s *graph.Scope) (scenarios.Grafana, error) {
 		return scenarios.Grafana{URL: s.Use(grafana)}, nil

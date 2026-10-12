@@ -24,7 +24,7 @@ func runProblems(t *testing.T) (*orgFake, string) {
 	if r.code != process.ExitOK {
 		t.Fatalf("code = %d, want %d; stderr = %q\n%s", r.code, process.ExitOK, r.stderr, r.stdout)
 	}
-	if want := []string{"service", "base", "grafana up", "grafana", "repo", "no color", "lifecycle config"}; !slices.Equal(r.built, want) {
+	if want := []string{"service", "base", "client", "grafana up", "grafana", "repo", "no color", "lifecycle config"}; !slices.Equal(r.built, want) {
 		t.Errorf("nodes built = %q, want %q", r.built, want)
 	}
 	return fake, r.stdout

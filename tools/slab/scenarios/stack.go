@@ -11,12 +11,16 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 )
 
-// Service is the service node's value: the running service's base URL.
-// It is a lifecycle Starter, so a scenario that declares the node runs no
-// step until the service answers ready; a failed Start is the run's
-// failure, which the dispatcher reports labelled with the node's name.
+// Service is the service node's value: the running service's base URL and
+// the client bound to it, which the composition root's client node builds,
+// so a scenario calls the service through the same client every command
+// does. It is a lifecycle Starter, so a scenario that declares the node
+// runs no step until the service answers ready; a failed Start is the
+// run's failure, which the dispatcher reports labelled with the node's
+// name.
 type Service struct {
-	URL string // the service's base URL, from the base setting
+	URL    string        // the service's base URL, from the base setting
+	Client *httpx.Client // the client bound to URL, from the client node
 }
 
 // Start probes the service's readiness endpoint, which answers 200 only

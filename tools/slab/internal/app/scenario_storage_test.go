@@ -66,7 +66,7 @@ func TestScenario_StorageRunsSixteenStepsInOrder(t *testing.T) {
 		t.Fatalf("code = %d, want %d; stderr = %q\n%s", r.code, process.ExitOK, r.stderr, r.stdout)
 	}
 	inOrder(t, r.stdout, storageSteps)
-	if want := []string{"service", "base", "repo", "no color", "lifecycle config"}; !slices.Equal(r.built, want) {
+	if want := []string{"service", "base", "client", "repo", "no color", "lifecycle config"}; !slices.Equal(r.built, want) {
 		t.Errorf("nodes built = %q, want %q", r.built, want)
 	}
 	if slices.Contains(fake.requests, "GET /api/health") {

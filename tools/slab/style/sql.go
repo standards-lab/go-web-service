@@ -49,20 +49,18 @@ func (s Style) sqlLine(b *strings.Builder, line string) {
 	}
 	for line != "" {
 		comment := strings.Index(line, sqlComment)
-		open := strings.Index(line, sqlMarkerOpen)
-		if comment >= 0 && (open < 0 || comment < open) {
+		open, end := strings.Index(line, sqlMarkerOpen), -1
+		if open >= 0 {
+			end = strings.Index(line[open:], sqlMarkerClose)
+		}
+		// An unclosed {{ is no marker: it reads as code.
+		if open < 0 || end < 0 || (comment >= 0 && comment < open) {
+			if comment < 0 {
+				s.sqlCode(b, line)
+				return
+			}
 			s.sqlCode(b, line[:comment])
 			b.WriteString(s.Dim(line[comment:]))
-			return
-		}
-		if open < 0 {
-			s.sqlCode(b, line)
-			return
-		}
-		end := strings.Index(line[open:], sqlMarkerClose)
-		if end < 0 {
-			// An unclosed {{ is no marker: the line is code to its end.
-			s.sqlCode(b, line)
 			return
 		}
 		end += open + len(sqlMarkerClose)

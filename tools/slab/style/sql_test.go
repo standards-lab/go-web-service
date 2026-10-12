@@ -38,7 +38,7 @@ func TestSQL_BoldsWholeWordKeywordsOnly(t *testing.T) {
 	}
 }
 
-func TestSQL(t *testing.T) {
+func TestSQL_DimsCommentsAndColorsMarkers(t *testing.T) {
 	for name, tc := range map[string]struct{ in, want string }{
 		// The keywords RETURNING and INTO in the annotation stay unbolded:
 		// the line is dimmed whole, indentation included.
@@ -76,6 +76,10 @@ func TestSQL(t *testing.T) {
 		"an unclosed marker is code": {
 			"SELECT {{code FROM t",
 			bold + "SELECT" + reset + " {{code " + bold + "FROM" + reset + " t",
+		},
+		"a trailing comment after an unclosed marker is still dimmed": {
+			"SELECT {{code -- note",
+			bold + "SELECT" + reset + " {{code " + dim + "-- note" + reset,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

@@ -20,9 +20,10 @@ import (
 // decided on, so the block is colored only when the run's color is on.
 type Render = func(io.Writer) error
 
-// SQL returns the Render of an SQL statement as authored, its keywords in
-// bold under st, with any trailing newlines dropped so the block ends at
-// its last line.
+// SQL returns the Render of an SQL statement as authored, colored by
+// st.SQL (comments dimmed, sqlate markers in the Value color, keywords
+// bold), with any trailing newlines dropped so the block ends at its last
+// line.
 func SQL(st style.Style, text string) Render {
 	return func(w io.Writer) error {
 		_, err := fmt.Fprintln(w, st.SQL(strings.TrimRight(text, "\n")))

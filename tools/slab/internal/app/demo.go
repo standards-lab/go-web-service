@@ -21,15 +21,15 @@ import (
 // than through the client node, since each one addresses the stack it
 // needs (the service, Grafana, Tempo) by name.
 func demoCommand(n *Nodes) *cli.Command {
-	config := n.Config
+	cfg := n.Config
 	return demo.Commands(scenario.Source{
-		Node: config,
+		Node: cfg,
 		Env: func(inv *cli.Invocation) env.Env {
-			c := inv.Get(config)
+			c := inv.Get(cfg)
 			return env.Env{Base: c.Base, Grafana: c.Grafana, Tempo: c.Tempo, Repo: c.Repo}
 		},
 		Reporter: func(inv *cli.Invocation) *scenario.Reporter {
-			return scenario.NewReporter(inv.Stdout, style.ColorEnabled(inv.Stdout, inv.Get(config).NoColor))
+			return scenario.NewReporter(inv.Stdout, style.ColorEnabled(inv.Stdout, inv.Get(cfg).NoColor))
 		},
 	})
 }

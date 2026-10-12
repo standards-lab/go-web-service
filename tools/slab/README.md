@@ -182,9 +182,11 @@ that are its own.
 - **Direct commands.** Each direct command maps to one route. A command's field flags name the
   wire field they build (`--code`, `--parent-id`), and `--body` and `--version` mean the same on
   every command. A family's `Commands` takes the client node and the `output.Source`, declares
-  them with `Use`, and never names `httpx.NewClient` or a stream; a leaf refuses bad input in
-  `Validate`, before anything is built, and returns any other failure for the dispatcher to
-  report.
+  them with `Use`, returns `[]*cli.Command` for the composition root's one
+  `Add(pkg.Commands(...)...)`, and never names `httpx.NewClient` or a stream. Each leaf is a plain
+  function of those two, with no type wrapping them; it refuses bad input in `Validate`, before
+  anything is built, finishes through `Source.Respond`, and returns any other failure for the
+  dispatcher to report.
 - **Naming.** A root subcommand is bare, never capability-prefixed: `demo domain`, not
   `demo domain-crud`. `admin database` nests the admin mount's one domain under the `admin`
   command, so a second admin domain can arrive without renaming the first.

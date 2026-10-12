@@ -122,6 +122,15 @@ accumulate under [Unreleased] until the first cut.
 
 ### Changed
 
+- slab runs on go-cli-sdk v0.2.0 over go-cli-sdk-template's composition root, in place of cobra
+  and pflag. Help, a parent run with no or an unknown subcommand, and every usage error exit 2,
+  where help exited 0 and a usage error 1; a command's input refusals are usage errors. A
+  command builds only the configuration and client it declares, so `version`, `list`, and help
+  read no configuration. Every root flag has a `SLAB_*` variable (`SLAB_REPO` and
+  `SLAB_NO_COLOR` are new) that the flag overrides, and a problem response is reported once on
+  stderr, every member of the document on its own line, with nothing on stdout.
+- Pins: go-core v0.8.0 and go-web-sdk v0.15.2, in both modules; their own changes are in their
+  CHANGELOGs.
 - Every time the API's JSON carries (an organization's, a directory's, and a file's
   `created_at` and `updated_at`) is in UTC, ending in `Z`, whatever zone the process runs in. It
   carried the host's offset before. The UTC guarantee comes from the libraries' releases, which

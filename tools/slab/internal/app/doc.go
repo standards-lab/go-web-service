@@ -5,17 +5,18 @@
 //
 //   - app.go: [App], [New], and [Nodes], which call the layer files'
 //     define and mount functions in layer order, lowest first;
-//   - config.go: [Config], slab's run configuration, read from SLAB_*
-//     variables with the root flags (--base, --grafana, --tempo, --repo,
-//     --no-color) overriding them, and those flags, accepted at any depth;
 //   - infrastructure.go: defineInfrastructure, the lifecycle and run
 //     configuration nodes and the client node, the HTTP client to the
-//     service bound to the config's base URL; and the output source the
+//     service bound to the config's base URL; [Config], slab's run
+//     configuration, read from SLAB_* variables with the root flags
+//     (--base, --grafana, --tempo, --repo, --no-color) overriding them, and
+//     those flags, accepted at any depth; and the output source the
 //     families on the tree render through;
-//   - domain.go, admin.go, and demo.go: the domain commands (org and
-//     docs), the admin command over the database and storage families, and
-//     the demo command, over slab's own scenario runner, and list, the
-//     scenario listing;
+//   - domain.go and admin.go: mountDomain, one root.Add(pkg.Commands(...)...)
+//     per domain (org and docs), and mountAdmin, the admin command over the
+//     database and storage families;
+//   - demo.go: the demo command, over slab's own scenario runner, and list,
+//     the scenario listing;
 //   - version.go: the version command, which declares no nodes.
 //
 // [Nodes] holds one handle per node: each define function fills its own

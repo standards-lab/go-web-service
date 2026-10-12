@@ -13,18 +13,10 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/output"
 )
 
-// deps is what every leaf command needs: the client node it sends through
-// and the source of the output it renders its reply through. Bundled once
-// here so a leaf builder is a method taking neither, rather than a free
-// function repeating both.
-type deps struct {
-	client *graph.Node[*httpx.Client]
-	out    output.Source
-}
-
 // Commands builds the database command, on go-cli-sdk: the schema
 // subcommand over the migration operations, and one subcommand per
-// remaining endpoint. The database command declares with Use the two nodes
+// remaining endpoint, and returns it alone in the slice the composition
+// root mounts with admin.Add(Commands(...)...). The database command declares with Use the two nodes
 // every leaf below it needs, out's configuration node and client, the HTTP
 // client bound to the service's base URL; the dispatcher builds them only
 // when a leaf runs, and a leaf reads the client through its Invocation then.
@@ -34,73 +26,52 @@ type deps struct {
 // checks for 200 with output.Expect, and renders the reply through out; the
 // error it returns, such as the output.Report of a problem response, is
 // printed once by the dispatcher.
-func Commands(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
-	d := deps{client: client, out: out}
+func Commands(client *graph.Node[*httpx.Client], out output.Source) []*cli.Command {
 	database := &cli.Command{
 		Name:    "database",
 		Summary: "Call the database admin service's endpoints",
 	}
-	return database.Add(
-		d.schemaCommands(),
-		d.seedCommand(),
-		d.stateCommand(),
-		d.fixedCommand("diagnostics", "Read the database's health: dialect, ping, server version, and pool counters", (*Client).Diagnose),
-		d.fixedCommand("patterns", "Read the pattern catalog", (*Client).Catalog),
-		d.fixedCommand("statements", "Read the statements registry, every domain's compiled inventory", (*Client).Statements),
-		d.fixedCommand("states", "List the named states the seeder declares", (*Client).States),
+	database.Add(
+		schemaCommands(client, out),
+		seedCommand(client, out),
+		stateCommand(client, out),
+		fixedCommand(client, out, "diagnostics", "Read the database's health: dialect, ping, server version, and pool counters", (*Client).Diagnose),
+		fixedCommand(client, out, "patterns", "Read the pattern catalog", (*Client).Catalog),
+		fixedCommand(client, out, "statements", "Read the statements registry, every domain's compiled inventory", (*Client).Statements),
+		fixedCommand(client, out, "states", "List the named states the seeder declares", (*Client).States),
 	).Use(out.Node, client)
-}
-
-// newClient returns the database client over the HTTP client the
-// dispatcher built for inv.
-func (d deps) newClient(inv *cli.Invocation) *Client {
-	return NewClient(inv.Get(d.client))
-}
-
-// respond finishes a leaf's Run: it returns err, the request's error, when
-// there is one, then output.Expect's error when res does not carry 200,
-// and otherwise renders the reply through Response. Every database
-// endpoint answers 200 on success.
-func (d deps) respond(inv *cli.Invocation, res *httpx.Response, err error) error {
-	if err != nil {
-		return err
-	}
-	if err := output.Expect(res, http.StatusOK); err != nil {
-		return err
-	}
-	d.out.New(inv).Response(res.Status, res.Body)
-	return nil
+	return []*cli.Command{database}
 }
 
 // fixedCommand builds the leaf for an endpoint that takes no input: it
 // accepts no arguments, and its Run sends the one request op, a Client
 // method expression, stands for.
-func (d deps) fixedCommand(name, summary string, op func(*Client, context.Context) (*httpx.Response, error)) *cli.Command {
+func fixedCommand(client *graph.Node[*httpx.Client], out output.Source, name, summary string, op func(*Client, context.Context) (*httpx.Response, error)) *cli.Command {
 	return &cli.Command{
 		Name:    name,
 		Summary: summary,
 		Args:    cli.NoArgs,
 		Run: func(ctx context.Context, inv *cli.Invocation) error {
-			res, err := op(d.newClient(inv), ctx)
-			return d.respond(inv, res, err)
+			res, err := op(NewClient(inv.Get(client)), ctx)
+			return out.Respond(inv, res, err, http.StatusOK)
 		},
 	}
 }
 
 // schemaCommands builds the schema subcommand: the migration operations,
 // each answering with the schema's resulting status.
-func (d deps) schemaCommands() *cli.Command {
+func schemaCommands(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	schema := &cli.Command{
 		Name:    "schema",
 		Summary: "Read and operate on the schema's migration history",
 	}
 	return schema.Add(
-		d.fixedCommand("status", "Read the schema's status against the migration set", (*Client).Status),
-		d.fixedCommand("verify", "Check that the schema is at the set's clean head and the seeder's statements prepare against it", (*Client).Verify),
-		d.fixedCommand("up", "Apply every pending migration", (*Client).Up),
-		d.downCommand(),
-		d.stepsCommand(),
-		d.forceCommand(),
+		fixedCommand(client, out, "status", "Read the schema's status against the migration set", (*Client).Status),
+		fixedCommand(client, out, "verify", "Check that the schema is at the set's clean head and the seeder's statements prepare against it", (*Client).Verify),
+		fixedCommand(client, out, "up", "Apply every pending migration", (*Client).Up),
+		downCommand(client, out),
+		stepsCommand(client, out),
+		forceCommand(client, out),
 	)
 }
 
@@ -108,7 +79,7 @@ func (d deps) schemaCommands() *cli.Command {
 // or Down built from --set, which must be given, and --steps, omitted when
 // unset: the service reverts one migration of the set then, and the default
 // is left to it rather than restated here.
-func (d deps) downCommand() *cli.Command {
+func downCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		raw, set string
 		steps    int
@@ -128,8 +99,8 @@ func (d deps) downCommand() *cli.Command {
 			return err
 		},
 		Run: func(ctx context.Context, inv *cli.Invocation) error {
-			res, err := d.newClient(inv).Down(ctx, body)
-			return d.respond(inv, res, err)
+			res, err := NewClient(inv.Get(client)).Down(ctx, body)
+			return out.Respond(inv, res, err, http.StatusOK)
 		},
 	}
 	setFlag(cmd, &set)
@@ -159,7 +130,7 @@ func bodyFlag(cmd *cli.Command, raw *string) {
 // or Steps built from --set and --steps, both of which must be given: the
 // service rejects an empty set and zero steps, so an unset flag is refused
 // here rather than sent.
-func (d deps) stepsCommand() *cli.Command {
+func stepsCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		raw, set string
 		steps    int
@@ -182,8 +153,8 @@ func (d deps) stepsCommand() *cli.Command {
 			return err
 		},
 		Run: func(ctx context.Context, inv *cli.Invocation) error {
-			res, err := d.newClient(inv).Steps(ctx, body)
-			return d.respond(inv, res, err)
+			res, err := NewClient(inv.Get(client)).Steps(ctx, body)
+			return out.Respond(inv, res, err, http.StatusOK)
 		},
 	}
 	setFlag(cmd, &set)
@@ -198,7 +169,7 @@ func (d deps) stepsCommand() *cli.Command {
 // or Force built from --set and --version, both of which must be given: 0
 // is a meaningful version (an empty history), so an unset flag is refused
 // rather than sent.
-func (d deps) forceCommand() *cli.Command {
+func forceCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		raw, set string
 		version  int
@@ -221,8 +192,8 @@ func (d deps) forceCommand() *cli.Command {
 			return err
 		},
 		Run: func(ctx context.Context, inv *cli.Invocation) error {
-			res, err := d.newClient(inv).Force(ctx, body)
-			return d.respond(inv, res, err)
+			res, err := NewClient(inv.Get(client)).Force(ctx, body)
+			return out.Respond(inv, res, err, http.StatusOK)
 		},
 	}
 	setFlag(cmd, &set)
@@ -240,7 +211,7 @@ func (d deps) forceCommand() *cli.Command {
 // named set's rows idempotently over the schema as it stands, so seeding
 // an empty set onto a populated database leaves the existing rows in
 // place. stateCommand is the one that clears first.
-func (d deps) seedCommand() *cli.Command {
+func seedCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		raw, state string
 		body       []byte
@@ -259,8 +230,8 @@ func (d deps) seedCommand() *cli.Command {
 			return err
 		},
 		Run: func(ctx context.Context, inv *cli.Invocation) error {
-			res, err := d.newClient(inv).Seed(ctx, body)
-			return d.respond(inv, res, err)
+			res, err := NewClient(inv.Get(client)).Seed(ctx, body)
+			return out.Respond(inv, res, err, http.StatusOK)
 		},
 	}
 	cmd.Flags().StringVar(&state, "state", "", "the state whose set to apply; the service's configured set when unset")
@@ -274,7 +245,7 @@ func (d deps) seedCommand() *cli.Command {
 // empty name, so an unset flag is refused here before the request fires.
 // --confirm is sent as given: the service refuses an unconfirmed reset, and
 // that refusal is the service's to state, not restated here.
-func (d deps) stateCommand() *cli.Command {
+func stateCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		raw, state string
 		confirm    bool
@@ -294,8 +265,8 @@ func (d deps) stateCommand() *cli.Command {
 			return err
 		},
 		Run: func(ctx context.Context, inv *cli.Invocation) error {
-			res, err := d.newClient(inv).Reset(ctx, body)
-			return d.respond(inv, res, err)
+			res, err := NewClient(inv.Get(client)).Reset(ctx, body)
+			return out.Respond(inv, res, err, http.StatusOK)
 		},
 	}
 	cmd.Flags().StringVar(&state, "state", "", "the state to reset to, one of the names states lists")

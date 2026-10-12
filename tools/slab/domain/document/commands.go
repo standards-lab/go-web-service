@@ -23,16 +23,9 @@ import (
 // type, so an unknown extension is no reason to refuse.
 const octetStream = "application/octet-stream"
 
-// deps is what every leaf command needs: the client node it sends through
-// and the source of the output it renders its reply through, bundled as on
-// the organization commands.
-type deps struct {
-	client *graph.Node[*httpx.Client]
-	out    output.Source
-}
-
 // Commands builds the docs command with a dirs group and a files group, one
-// leaf per endpoint, on go-cli-sdk. The docs command declares with Use the
+// leaf per endpoint, on go-cli-sdk, and returns it alone in the slice the
+// composition root mounts with root.Add(Commands(...)...). The docs command declares with Use the
 // two nodes every leaf below it needs, out's configuration node and client,
 // the HTTP client bound to the service's base URL; the dispatcher builds
 // them only when a leaf runs, and a leaf reads the client through its
@@ -44,61 +37,41 @@ type deps struct {
 // output.Expect, and renders the reply through out; the error it returns,
 // such as the output.Report of a problem response, is printed once by the
 // dispatcher.
-func Commands(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
-	d := deps{client: client, out: out}
+func Commands(client *graph.Node[*httpx.Client], out output.Source) []*cli.Command {
 	dirs := &cli.Command{
 		Name:    "dirs",
 		Summary: "Create, read, list, move, and delete an organization's directories",
 	}
 	dirs.Add(
-		d.dirsCreateCommand(),
-		d.dirsGetCommand(),
-		d.dirsListCommand(),
-		d.dirsMoveCommand(),
-		d.dirsDeleteCommand(),
+		dirsCreateCommand(client, out),
+		dirsGetCommand(client, out),
+		dirsListCommand(client, out),
+		dirsMoveCommand(client, out),
+		dirsDeleteCommand(client, out),
 	)
 	files := &cli.Command{
 		Name:    "files",
 		Summary: "List, upload, read, move, and delete an organization's files",
 	}
 	files.Add(
-		d.filesListCommand(),
-		d.filesPutCommand(),
-		d.filesShowCommand(),
-		d.filesGetCommand(),
-		d.filesMoveCommand(),
-		d.filesDeleteCommand(),
+		filesListCommand(client, out),
+		filesPutCommand(client, out),
+		filesShowCommand(client, out),
+		filesGetCommand(client, out),
+		filesMoveCommand(client, out),
+		filesDeleteCommand(client, out),
 	)
 	docs := &cli.Command{
 		Name:    "docs",
 		Summary: "Call the document domain's endpoints",
 	}
-	return docs.Add(dirs, files).Use(out.Node, client)
-}
-
-// newClient returns the document client over the HTTP client the
-// dispatcher built for inv.
-func (d deps) newClient(inv *cli.Invocation) *Client {
-	return NewClient(inv.Get(d.client))
-}
-
-// respond finishes a leaf's Run: it returns err, the request's error, when
-// there is one, then output.Expect's error when res does not carry status,
-// and otherwise renders the reply through Response.
-func (d deps) respond(inv *cli.Invocation, res *httpx.Response, err error, status int) error {
-	if err != nil {
-		return err
-	}
-	if err := output.Expect(res, status); err != nil {
-		return err
-	}
-	d.out.New(inv).Response(res.Status, res.Body)
-	return nil
+	docs.Add(dirs, files).Use(out.Node, client)
+	return []*cli.Command{docs}
 }
 
 // dirsCreateCommand is POST Documents/{org}/directories. The body is --body
 // verbatim, or CreateDirectory built from --parent-id and --name.
-func (d deps) dirsCreateCommand() *cli.Command {
+func dirsCreateCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		raw, parent, name string
 		body              []byte
@@ -118,8 +91,8 @@ func (d deps) dirsCreateCommand() *cli.Command {
 			return err
 		},
 		Run: func(ctx context.Context, inv *cli.Invocation) error {
-			res, err := d.newClient(inv).CreateDirectory(ctx, inv.Args[0], body)
-			return d.respond(inv, res, err, http.StatusCreated)
+			res, err := NewClient(inv.Get(client)).CreateDirectory(ctx, inv.Args[0], body)
+			return out.Respond(inv, res, err, http.StatusCreated)
 		},
 	}
 	fs := cmd.Flags()
@@ -133,22 +106,22 @@ func (d deps) dirsCreateCommand() *cli.Command {
 
 // dirsGetCommand is GET Documents/{org}/directories/{id}: the directory's
 // metadata, with its path from the root.
-func (d deps) dirsGetCommand() *cli.Command {
+func dirsGetCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	return &cli.Command{
 		Name:     "get",
 		Summary:  "Read one directory, by id or root",
 		Synopsis: "<org> <dir>",
 		Args:     cli.ExactArgs(2),
 		Run: func(ctx context.Context, inv *cli.Invocation) error {
-			res, err := d.newClient(inv).Directory(ctx, inv.Args[0], inv.Args[1])
-			return d.respond(inv, res, err, http.StatusOK)
+			res, err := NewClient(inv.Get(client)).Directory(ctx, inv.Args[0], inv.Args[1])
+			return out.Respond(inv, res, err, http.StatusOK)
 		},
 	}
 }
 
 // dirsListCommand is GET Documents/{org}/directories/{id}/directories under
 // the read grammar: a directory's child directories, a page at a time.
-func (d deps) dirsListCommand() *cli.Command {
+func dirsListCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		read  input.ReadFlags
 		query [][2]string
@@ -163,8 +136,8 @@ func (d deps) dirsListCommand() *cli.Command {
 			return err
 		},
 		Run: func(ctx context.Context, inv *cli.Invocation) error {
-			res, err := d.newClient(inv).ListDirectories(ctx, inv.Args[0], inv.Args[1], query...)
-			return d.respond(inv, res, err, http.StatusOK)
+			res, err := NewClient(inv.Get(client)).ListDirectories(ctx, inv.Args[0], inv.Args[1], query...)
+			return out.Respond(inv, res, err, http.StatusOK)
 		},
 	}
 	read.Bind(cmd)
@@ -175,7 +148,7 @@ func (d deps) dirsListCommand() *cli.Command {
 // If-Match. The body is --body verbatim, or MoveDirectory built from
 // --parent-id and --name, both required since the service defaults neither;
 // the version is resolved by input.GuardedBody.
-func (d deps) dirsMoveCommand() *cli.Command {
+func dirsMoveCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		raw, parent, name string
 		version, ifMatch  int64
@@ -196,8 +169,8 @@ func (d deps) dirsMoveCommand() *cli.Command {
 			return err
 		},
 		Run: func(ctx context.Context, inv *cli.Invocation) error {
-			res, err := d.newClient(inv).MoveDirectory(ctx, inv.Args[0], inv.Args[1], ifMatch, body)
-			return d.respond(inv, res, err, http.StatusOK)
+			res, err := NewClient(inv.Get(client)).MoveDirectory(ctx, inv.Args[0], inv.Args[1], ifMatch, body)
+			return out.Respond(inv, res, err, http.StatusOK)
 		},
 	}
 	fs := cmd.Flags()
@@ -218,7 +191,7 @@ func (d deps) dirsMoveCommand() *cli.Command {
 // --wait then polls that Location until it answers 404, for at most the
 // duration given. A --wait without --recursive, or a negative one, is
 // refused in Validate.
-func (d deps) dirsDeleteCommand() *cli.Command {
+func dirsDeleteCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		recursive bool
 		version   int64
@@ -239,10 +212,10 @@ func (d deps) dirsDeleteCommand() *cli.Command {
 			return nil
 		},
 		Run: func(ctx context.Context, inv *cli.Invocation) error {
-			client := d.newClient(inv)
-			res, err := client.DeleteDirectory(ctx, inv.Args[0], inv.Args[1], version, recursive)
+			docs := NewClient(inv.Get(client))
+			res, err := docs.DeleteDirectory(ctx, inv.Args[0], inv.Args[1], version, recursive)
 			if !recursive {
-				return d.respond(inv, res, err, http.StatusNoContent)
+				return out.Respond(inv, res, err, http.StatusNoContent)
 			}
 			if err != nil {
 				return err
@@ -254,18 +227,18 @@ func (d deps) dirsDeleteCommand() *cli.Command {
 			if location == "" {
 				return errors.New("the service answered 202 with no Location to follow")
 			}
-			out := d.out.New(inv)
-			out.Status(res.Status,
+			o := out.New(inv)
+			o.Status(res.Status,
 				"Location: "+location,
 				"the branch is deleting; the sweep removes it, and the Location answers 404 once it has")
 			if wait == 0 {
 				return nil
 			}
-			took, err := AwaitSweep(ctx, client, location, wait)
+			took, err := AwaitSweep(ctx, docs, location, wait)
 			if err != nil {
 				return err
 			}
-			out.Status(http.StatusNotFound, fmt.Sprintf("the sweep removed the branch within %s", took.Round(time.Millisecond)))
+			o.Status(http.StatusNotFound, fmt.Sprintf("the sweep removed the branch within %s", took.Round(time.Millisecond)))
 			return nil
 		},
 	}
@@ -316,7 +289,7 @@ func AwaitSweep(ctx context.Context, client *Client, location string, limit time
 
 // filesListCommand is GET Documents/{org}/directories/{id}/files under the
 // read grammar: the files in a directory, a page at a time.
-func (d deps) filesListCommand() *cli.Command {
+func filesListCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		read  input.ReadFlags
 		query [][2]string
@@ -331,8 +304,8 @@ func (d deps) filesListCommand() *cli.Command {
 			return err
 		},
 		Run: func(ctx context.Context, inv *cli.Invocation) error {
-			res, err := d.newClient(inv).ListFiles(ctx, inv.Args[0], inv.Args[1], query...)
-			return d.respond(inv, res, err, http.StatusOK)
+			res, err := NewClient(inv.Get(client)).ListFiles(ctx, inv.Args[0], inv.Args[1], query...)
+			return out.Respond(inv, res, err, http.StatusOK)
 		},
 	}
 	read.Bind(cmd)
@@ -347,7 +320,7 @@ func (d deps) filesListCommand() *cli.Command {
 // service accepts any type. Both are resolved from the file's name alone;
 // the file is read in Run, so a file that cannot be read is a failure, not
 // a usage error.
-func (d deps) filesPutCommand() *cli.Command {
+func filesPutCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var name, contentType string
 	cmd := &cli.Command{
 		Name:     "put",
@@ -369,8 +342,8 @@ func (d deps) filesPutCommand() *cli.Command {
 					media = octetStream
 				}
 			}
-			res, err := d.newClient(inv).UploadFile(ctx, inv.Args[0], inv.Args[1], stored, media, body)
-			return d.respond(inv, res, err, http.StatusCreated)
+			res, err := NewClient(inv.Get(client)).UploadFile(ctx, inv.Args[0], inv.Args[1], stored, media, body)
+			return out.Respond(inv, res, err, http.StatusCreated)
 		},
 	}
 	fs := cmd.Flags()
@@ -381,15 +354,15 @@ func (d deps) filesPutCommand() *cli.Command {
 
 // filesShowCommand is GET Documents/{org}/files/{id}: the file's metadata,
 // never its bytes.
-func (d deps) filesShowCommand() *cli.Command {
+func filesShowCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	return &cli.Command{
 		Name:     "show",
 		Summary:  "Read one file's metadata",
 		Synopsis: "<org> <file-id>",
 		Args:     cli.ExactArgs(2),
 		Run: func(ctx context.Context, inv *cli.Invocation) error {
-			res, err := d.newClient(inv).File(ctx, inv.Args[0], inv.Args[1])
-			return d.respond(inv, res, err, http.StatusOK)
+			res, err := NewClient(inv.Get(client)).File(ctx, inv.Args[0], inv.Args[1])
+			return out.Respond(inv, res, err, http.StatusOK)
 		},
 	}
 }
@@ -399,15 +372,15 @@ func (d deps) filesShowCommand() *cli.Command {
 // and writes the bytes to --out rather than to the terminal.
 // --if-none-match sends a revalidation, answered 304 when the file is
 // unchanged.
-func (d deps) filesGetCommand() *cli.Command {
-	var out, etag string
+func filesGetCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
+	var dest, etag string
 	cmd := &cli.Command{
 		Name:     "get",
 		Summary:  "Read a file's content: its headers, and its bytes to --out",
 		Synopsis: "<org> <file-id>",
 		Args:     cli.ExactArgs(2),
 		Run: func(ctx context.Context, inv *cli.Invocation) error {
-			res, err := d.newClient(inv).Content(ctx, inv.Args[0], inv.Args[1], etag)
+			res, err := NewClient(inv.Get(client)).Content(ctx, inv.Args[0], inv.Args[1], etag)
 			if err != nil {
 				return err
 			}
@@ -417,17 +390,17 @@ func (d deps) filesGetCommand() *cli.Command {
 				}
 			}
 			saved := ""
-			if out != "" && res.Status == http.StatusOK {
-				if err := os.WriteFile(out, res.Body, 0o644); err != nil {
+			if dest != "" && res.Status == http.StatusOK {
+				if err := os.WriteFile(dest, res.Body, 0o644); err != nil {
 					return err
 				}
-				saved = out
+				saved = dest
 			}
-			d.out.New(inv).Object(res.Status, res.Header, len(res.Body), saved)
+			out.New(inv).Object(res.Status, res.Header, len(res.Body), saved)
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&out, "out", "", "the file the content's bytes are written to")
+	cmd.Flags().StringVar(&dest, "out", "", "the file the content's bytes are written to")
 	cmd.Flags().StringVar(&etag, "if-none-match", "", "an ETag a previous get printed; 304 when the file is unchanged")
 	return cmd
 }
@@ -435,7 +408,7 @@ func (d deps) filesGetCommand() *cli.Command {
 // filesMoveCommand is POST Documents/{org}/files/{id}/move under If-Match.
 // The body is --body verbatim, or MoveFile built from --directory-id and
 // --name, both required; the version is resolved by input.GuardedBody.
-func (d deps) filesMoveCommand() *cli.Command {
+func filesMoveCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		raw, directory, name string
 		version, ifMatch     int64
@@ -456,8 +429,8 @@ func (d deps) filesMoveCommand() *cli.Command {
 			return err
 		},
 		Run: func(ctx context.Context, inv *cli.Invocation) error {
-			res, err := d.newClient(inv).MoveFile(ctx, inv.Args[0], inv.Args[1], ifMatch, body)
-			return d.respond(inv, res, err, http.StatusOK)
+			res, err := NewClient(inv.Get(client)).MoveFile(ctx, inv.Args[0], inv.Args[1], ifMatch, body)
+			return out.Respond(inv, res, err, http.StatusOK)
 		},
 	}
 	fs := cmd.Flags()
@@ -472,7 +445,7 @@ func (d deps) filesMoveCommand() *cli.Command {
 
 // filesDeleteCommand is DELETE Documents/{org}/files/{id} under If-Match.
 // There is no body, so --version is simply required.
-func (d deps) filesDeleteCommand() *cli.Command {
+func filesDeleteCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var version int64
 	cmd := &cli.Command{
 		Name:     "delete",
@@ -480,8 +453,8 @@ func (d deps) filesDeleteCommand() *cli.Command {
 		Synopsis: "<org> <file-id>",
 		Args:     cli.ExactArgs(2),
 		Run: func(ctx context.Context, inv *cli.Invocation) error {
-			res, err := d.newClient(inv).DeleteFile(ctx, inv.Args[0], inv.Args[1], version)
-			return d.respond(inv, res, err, http.StatusNoContent)
+			res, err := NewClient(inv.Get(client)).DeleteFile(ctx, inv.Args[0], inv.Args[1], version)
+			return out.Respond(inv, res, err, http.StatusNoContent)
 		},
 	}
 	cmd.Flags().Int64Var(&version, "version", 0, "the version the file was last seen at, sent as If-Match")

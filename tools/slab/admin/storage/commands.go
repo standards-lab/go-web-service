@@ -12,12 +12,13 @@ import (
 )
 
 // Commands builds the storage command, on go-cli-sdk, with one subcommand
-// per endpoint. The storage command declares with Use out's configuration
+// per endpoint, and returns it alone in the slice the composition root
+// mounts with admin.Add(Commands(...)...). The storage command declares with Use out's configuration
 // node and client, the HTTP client bound to the service's base URL, as the
 // database command does; neither endpoint takes input, so a leaf accepts
 // no arguments, and its Run sends its one request, checks for 200 with
 // output.Expect, and renders the reply through out.
-func Commands(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
+func Commands(client *graph.Node[*httpx.Client], out output.Source) []*cli.Command {
 	fixed := func(name, summary string, op func(*Client, context.Context) (*httpx.Response, error)) *cli.Command {
 		return &cli.Command{
 			Name:    name,
@@ -25,14 +26,7 @@ func Commands(client *graph.Node[*httpx.Client], out output.Source) *cli.Command
 			Args:    cli.NoArgs,
 			Run: func(ctx context.Context, inv *cli.Invocation) error {
 				res, err := op(NewClient(inv.Get(client)), ctx)
-				if err != nil {
-					return err
-				}
-				if err := output.Expect(res, http.StatusOK); err != nil {
-					return err
-				}
-				out.New(inv).Response(res.Status, res.Body)
-				return nil
+				return out.Respond(inv, res, err, http.StatusOK)
 			},
 		}
 	}
@@ -40,8 +34,9 @@ func Commands(client *graph.Node[*httpx.Client], out output.Source) *cli.Command
 		Name:    "storage",
 		Summary: "Call the object store's admin endpoints",
 	}
-	return storage.Add(
+	storage.Add(
 		fixed("diagnostics", "Read the object store's readiness (a live probe), its container, and its key length bound", (*Client).Diagnostics),
 		fixed("container", "Create the configured container, succeeding when it exists", (*Client).Container),
 	).Use(out.Node, client)
+	return []*cli.Command{storage}
 }

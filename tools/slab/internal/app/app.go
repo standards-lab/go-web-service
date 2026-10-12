@@ -44,8 +44,8 @@ func New(streams cli.Streams) *App {
 	a.root.PreRun = flags.preRun
 	defineInfrastructure(a.graph, &a.nodes, flags)
 	a.root.Add(versionCommand())
-	a.root.Add(domainCommands(&a.nodes)...)
-	a.root.Add(adminCommand(&a.nodes))
+	mountDomain(a.root, &a.nodes)
+	mountAdmin(a.root, &a.nodes)
 	a.root.Add(demoCommand(&a.nodes), listCommand())
 	return a
 }

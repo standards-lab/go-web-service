@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"flag"
+	"io"
 	"os"
 	"slices"
 	"strings"
@@ -14,10 +15,11 @@ import (
 
 	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/output"
+	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
 // legacy is the temporary bridge to the command families still on cobra:
-// admin, demo, and list. Each moves onto the go-cli-sdk tree in
+// demo and list. Each moves onto the go-cli-sdk tree in
 // a later slice of the commands task, and this file goes with the last of
 // them. Until then a run whose subcommand is one of them is dispatched to
 // a cobra tree built as before the move, with its own flags, words,
@@ -103,8 +105,7 @@ func (l *legacy) tree(cfg *legacyConfig) (*cobra.Command, *output.Output) {
 	root.SetOut(l.streams.Stdout)
 	root.SetErr(l.streams.Stderr)
 	out := newOutput(l.streams.Stdout, l.streams.Stderr, cfg)
-	infra := newInfrastructure(cfg)
-	root.AddCommand(commands(newAdmin(infra), out, cfg)...)
+	root.AddCommand(commands(cfg)...)
 	return root, out
 }
 
@@ -142,4 +143,15 @@ func envOr(name, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// newOutput constructs the output the cobra tree reports a command's error
+// through: failures to stderr, as before the move. The color decision is a
+// closure over cfg that the output asks when it renders, since --no-color
+// is a persistent flag cobra parses during execution, after this runs.
+// Reading cfg.NoColor here would read it before it is set.
+func newOutput(stdout, stderr io.Writer, cfg *legacyConfig) *output.Output {
+	return output.New(stdout, stderr, func() bool {
+		return style.ColorEnabled(stdout, cfg.NoColor)
+	})
 }

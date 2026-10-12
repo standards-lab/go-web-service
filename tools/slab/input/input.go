@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/spf13/cobra"
-
 	"github.com/standards-lab/go-cli-sdk"
 )
 
@@ -18,14 +16,14 @@ import (
 // calls it from its Validate, so the refusal is a usage error and nothing
 // is built.
 func Body(inv *cli.Invocation, raw string, fromFlags func() (any, error)) ([]byte, error) {
-	return body(inv.Changed, raw, fromFlags)
-}
-
-// CobraBody is [Body] for a command still on cobra, which reads whether
-// --body was set from cmd's flags. It goes when the last such family moves
-// onto go-cli-sdk.
-func CobraBody(cmd *cobra.Command, raw string, fromFlags func() (any, error)) ([]byte, error) {
-	return body(cmd.Flags().Changed, raw, fromFlags)
+	if inv.Changed("body") {
+		return []byte(raw), nil
+	}
+	v, err := fromFlags()
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(v)
 }
 
 // GuardedBody resolves what a guarded body-sending command sends: the body
@@ -78,16 +76,4 @@ func GuardedBody(inv *cli.Invocation, raw string, version int64, fromFlags func(
 		return nil, 0, fmt.Errorf(`--body: "version" is not an integer: %s`, embedded)
 	}
 	return body, version, nil
-}
-
-// body is [Body] over changed, which reports whether a flag was set.
-func body(changed func(name string) bool, raw string, fromFlags func() (any, error)) ([]byte, error) {
-	if changed("body") {
-		return []byte(raw), nil
-	}
-	v, err := fromFlags()
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(v)
 }

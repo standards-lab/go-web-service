@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/cobra"
-
 	"github.com/standards-lab/go-cli-sdk"
 
 	"github.com/standards-lab/go-web-service/tools/slab/input"
@@ -37,18 +35,6 @@ func parsed(t *testing.T, args ...string) (inv *cli.Invocation, raw string, vers
 		t.Fatalf("dispatch of %q exited %d: %s", args, code, stderr.String())
 	}
 	return inv, raw, version
-}
-
-// parsedCobra is parsed for a command still on cobra.
-func parsedCobra(t *testing.T, args ...string) (cmd *cobra.Command, raw string, version int64) {
-	t.Helper()
-	cmd = &cobra.Command{Use: "x"}
-	cmd.Flags().StringVar(&raw, "body", "", "")
-	cmd.Flags().Int64Var(&version, "version", 0, "")
-	if err := cmd.ParseFlags(args); err != nil {
-		t.Fatal(err)
-	}
-	return cmd, raw, version
 }
 
 // built is a fromFlags that returns v.
@@ -208,17 +194,5 @@ func TestGuardedBody_ChecksTheVersionBeforeBuildingFromFlags(t *testing.T) {
 	_, _, err := input.GuardedBody(inv, raw, version, never(t))
 	if err == nil || !strings.Contains(err.Error(), "required flag --version not set") {
 		t.Errorf("err = %v, want the missing version refused first", err)
-	}
-}
-
-// The cobra adapter reads whether --body was set from the command's flags.
-func TestCobraBody_ReadsTheCommandsFlags(t *testing.T) {
-	cmd, raw, _ := parsedCobra(t, "--body", `{"a":1}`)
-	if body, err := input.CobraBody(cmd, raw, never(t)); err != nil || string(body) != `{"a":1}` {
-		t.Errorf("CobraBody(--body) = %q, %v; want the bytes as given", body, err)
-	}
-	cmd, raw, _ = parsedCobra(t)
-	if body, err := input.CobraBody(cmd, raw, built(fields{Code: "x"})); err != nil || string(body) != `{"code":"x","name":""}` {
-		t.Errorf("CobraBody() = %q, %v; want what the flags build", body, err)
 	}
 }

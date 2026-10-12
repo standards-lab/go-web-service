@@ -10,13 +10,11 @@
 //
 // The functions read from go-cli-sdk's Invocation whether each flag was
 // given, and a command calls them from its Validate, so input they refuse
-// is a usage error and nothing is built. The admin family, still on cobra,
-// calls [CobraBody], which reads the same from a cobra command's flags and
-// goes when that family moves onto go-cli-sdk.
+// is a usage error and nothing is built.
 //
 // The package exports:
 //
-//   - [Body], the body of an unguarded command, and [CobraBody]
+//   - [Body], the body of an unguarded command
 //   - [GuardedBody], the body of a command under a precondition header, and
 //     the version its If-Match carries
 //   - [ReadFlags], the read grammar a collection read's command binds, with

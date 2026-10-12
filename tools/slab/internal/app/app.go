@@ -47,6 +47,7 @@ func New(streams cli.Streams) *App {
 	defineInfrastructure(a.graph, &a.nodes, flags)
 	a.root.Add(versionCommand())
 	a.root.Add(domainCommands(&a.nodes)...)
+	a.root.Add(adminCommand(&a.nodes))
 	a.legacy = mountLegacy(a.root, streams)
 	return a
 }

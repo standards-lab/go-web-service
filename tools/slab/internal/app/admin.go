@@ -1,47 +1,26 @@
 package app
 
 import (
-	"github.com/spf13/cobra"
+	"github.com/standards-lab/go-cli-sdk"
 
 	"github.com/standards-lab/go-web-service/tools/slab/admin/database"
 	"github.com/standards-lab/go-web-service/tools/slab/admin/storage"
-	"github.com/standards-lab/go-web-service/tools/slab/output"
 )
 
-// Admin composes the admin clients, one field per admin domain. Each field
-// is the constructor the package's commands call when a subcommand runs,
-// not the client itself: the client binds to the base URL, which cobra
-// parses after the tree is built.
-type Admin struct {
-	Database func() *database.Client
-	Storage  func() *storage.Client
-}
-
-// newAdmin wires the admin layer over infra, each admin package's client
-// constructor closed over the infrastructure's client.
-func newAdmin(infra *Infrastructure) *Admin {
-	return &Admin{
-		Database: func() *database.Client {
-			return database.NewClient(infra.Client())
-		},
-		Storage: func() *storage.Client {
-			return storage.NewClient(infra.Client())
-		},
+// adminCommand builds the admin layer's command on the tree: the admin
+// command, with each admin package's commands mounted under it, each handed
+// the client node from n and the output source to render through. The
+// admin endpoints share the service's base URL with the domain ones, so the
+// families send through the same client node. The admin command declares no
+// node itself; each family declares what its leaves need.
+func adminCommand(n *Nodes) *cli.Command {
+	out := outputSource(n)
+	admin := &cli.Command{
+		Name:    "admin",
+		Summary: "Call the admin services' endpoints",
 	}
-}
-
-// mountAdmin builds the admin mount, the admin command, with each admin
-// domain's commands mounted under it, each rendering through out. Run
-// without a subcommand, it prints its help.
-func mountAdmin(adm *Admin, out *output.Output) *cobra.Command {
-	admin := &cobra.Command{
-		Use:   "admin",
-		Short: "Call the admin services' endpoints",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return cmd.Help()
-		},
-	}
-	admin.AddCommand(database.Commands(adm.Database, out), storage.Commands(adm.Storage, out))
-	return admin
+	return admin.Add(
+		database.Commands(n.Client, out),
+		storage.Commands(n.Client, out),
+	)
 }

@@ -10,12 +10,11 @@
 //     --no-color) overriding them, and those flags, accepted at any depth;
 //   - infrastructure.go: defineInfrastructure, the lifecycle and run
 //     configuration nodes and the client node, the HTTP client to the
-//     service bound to the config's base URL; the output source the
-//     families on the tree render through; and the HTTP client the cobra
-//     families compose;
+//     service bound to the config's base URL; and the output source the
+//     families on the tree render through;
 //   - domain.go, admin.go, and demo.go: the domain commands on the tree
-//     (org and docs), the admin clients and commands still on cobra, and
-//     the demo mount and the scenario listing;
+//     (org and docs), the admin command on the tree over the database and
+//     storage families, and the demo mount and the scenario listing;
 //   - version.go: the version command, which declares no nodes;
 //   - legacy.go and commands.go: the temporary bridge to the command
 //     families still on cobra, and their list of mounts.
@@ -29,8 +28,8 @@
 // records which root flags a dispatch set, so the config node applies a
 // flag over its variable only when the flag was given.
 //
-// The org and docs families are on the tree. The command families admin,
-// demo, and list are moving onto it one by one. Until each moves,
+// The org, docs, and admin families are on the tree. The command families
+// demo and list are moving onto it one by one. Until each moves,
 // [App.Run] hands a run that selects it to a cobra tree built per run as
 // before the move, with its own flags, words, requests, and exit codes;
 // the root's help lists them beside the commands on the tree.
@@ -47,6 +46,4 @@
 //   - [Nodes], the graph's nodes
 //   - [Config], [ConfigEnv], and [NewConfigEnv], the run configuration and
 //     the variables it reads
-//   - [Infrastructure] and [Admin], the layers the cobra families are
-//     composed on
 package app

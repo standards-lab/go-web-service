@@ -2,6 +2,8 @@ package app_test
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -10,6 +12,7 @@ import (
 	"github.com/standards-lab/go-core/process"
 
 	"github.com/standards-lab/go-web-service/tools/slab/internal/app"
+	"github.com/standards-lab/go-web-service/tools/slab/internal/apptest"
 	"github.com/standards-lab/go-web-service/tools/slab/internal/termtest"
 	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
@@ -44,7 +47,7 @@ func TestScenario_RunsSqlate(t *testing.T) {
 		"    VALUES ({{parent_id:uuid}}, {{code}}, {{name}})",
 		"    {{> app.identity}}",
 		"    //go:embed statements/*.sql\n    var statements embed.FS\n",
-		"  fsys, the filesystem both calls below read from\n    fsys, err := repo.FS(ctx)\n",
+		"  fsys, the filesystem both calls below read from\n    fsys, err := repo.FS(override)\n",
 		`    query.NewCatalog(query.Patterns(), bfdata.Patterns(), query.Publish("app", fsys, "data/patterns"))`,
 		`    catalog.Compile(fsys, "domain/organization/statements", postgres.Dialect{})`,
 		"  create, compiled for execution by postgres\n",
@@ -157,8 +160,26 @@ func TestScenario_WithNoScenarioPrintsItsHelpEndingInTheListing(t *testing.T) {
 		t.Errorf("stdout = %q, want it to start with %q", out, want)
 	}
 	listing := out[strings.LastIndex(out, "Scenarios:\n"):]
-	if !strings.HasPrefix(listing, "Scenarios:\n  sqlate   One pattern,") || !strings.HasSuffix(listing, "\n           uses repo, no color\n") {
-		t.Errorf("help does not end with the listing:\n%s", out)
+	var names, uses []string
+	for line := range strings.Lines(strings.TrimPrefix(listing, "Scenarios:\n")) {
+		if rest, ok := strings.CutPrefix(line, "             uses "); ok {
+			uses = append(uses, strings.TrimSuffix(rest, "\n"))
+			continue
+		}
+		names = append(names, strings.Fields(line)[0])
+	}
+	if want := []string{"sqlate", "domain", "problems", "storage"}; !slices.Equal(names, want) {
+		t.Errorf("the listing names %q, want %q:\n%s", names, want, listing)
+	}
+	// Each uses line names the need nodes first, then the settings the
+	// steps read: storage points at no trace, so it uses no grafana up.
+	if want := []string{
+		"repo, no color",
+		"service, grafana up, repo, no color",
+		"service, grafana up, repo, no color",
+		"service, repo, no color",
+	}; !slices.Equal(uses, want) {
+		t.Errorf("the listing's uses lines are %q, want %q:\n%s", uses, want, listing)
 	}
 	if log := built.Log(); len(log) != 0 {
 		t.Errorf("nodes built = %q, want none", log)
@@ -193,6 +214,122 @@ func TestScenario_UsageErrors(t *testing.T) {
 			}
 			if log := built.Log(); len(log) != 0 {
 				t.Errorf("nodes built = %q, want none", log)
+			}
+		})
+	}
+}
+
+// stackScenarios are the scenarios that declare the service node.
+var stackScenarios = []string{"domain", "problems", "storage"}
+
+// closedURL returns the URL of a listener that has been closed, where
+// nothing answers.
+func closedURL(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(http.NotFoundHandler())
+	srv.Close()
+	return srv.URL
+}
+
+// answering returns the URL of a server that answers the readiness and
+// health probes with their status from probes, keyed by path, and every
+// other request with 500, recording each path it is sent.
+func answering(t *testing.T, probes map[string]int) (string, *apptest.Recorder) {
+	t.Helper()
+	sent := &apptest.Recorder{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent.Record(r.Method + " " + r.URL.Path)
+		status, ok := probes[r.URL.Path]
+		if !ok {
+			status = http.StatusInternalServerError
+		}
+		w.WriteHeader(status)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL, sent
+}
+
+// A scenario that declares the service node fails before its first step
+// when nothing answers at the base URL: the dispatcher reports the
+// service node's start once, naming mise run serve, and exits 1.
+func TestScenario_StopsAtStartWhenTheServiceDoesNotAnswer(t *testing.T) {
+	for _, name := range stackScenarios {
+		t.Run(name, func(t *testing.T) {
+			grafana, _ := answering(t, map[string]int{"/api/health": http.StatusOK})
+			r := runScenario(t, name, closedURL(t), grafana)
+
+			if r.code != process.ExitFailure {
+				t.Errorf("code = %d, want %d; stderr = %q", r.code, process.ExitFailure, r.stderr)
+			}
+			if want := "slab scenario " + name + ": startup: service: nothing answers at "; !strings.HasPrefix(r.stderr, want) {
+				t.Errorf("stderr = %q, want it to start with %q", r.stderr, want)
+			}
+			if !strings.Contains(r.stderr, "mise run serve") {
+				t.Errorf("stderr = %q, want it to name mise run serve", r.stderr)
+			}
+			if n := strings.Count(r.stderr, "slab scenario"); n != 1 {
+				t.Errorf("stderr reports %d times, want once:\n%s", n, r.stderr)
+			}
+			if r.stdout != "" {
+				t.Errorf("stdout = %q, want no step narrated", r.stdout)
+			}
+		})
+	}
+}
+
+// A service that answers its readiness probe with 503 is up over a
+// database or storage that is not: the run fails before its first step,
+// naming mise run db:up, and sends the service nothing past the probe.
+func TestScenario_StopsAtStartWhenTheServiceIsNotReady(t *testing.T) {
+	for _, name := range stackScenarios {
+		t.Run(name, func(t *testing.T) {
+			base, sent := answering(t, map[string]int{"/readyz": http.StatusServiceUnavailable, "/api/health": http.StatusOK})
+			r := runScenario(t, name, base, base)
+
+			if r.code != process.ExitFailure {
+				t.Errorf("code = %d, want %d; stderr = %q", r.code, process.ExitFailure, r.stderr)
+			}
+			if want := "slab scenario " + name + ": startup: service: " + base + " answers but is not ready"; !strings.HasPrefix(r.stderr, want) {
+				t.Errorf("stderr = %q, want it to start with %q", r.stderr, want)
+			}
+			for _, want := range []string{"mise run db:up", "GET /readyz: status 503 Service Unavailable"} {
+				if !strings.Contains(r.stderr, want) {
+					t.Errorf("stderr = %q, want it to name %q", r.stderr, want)
+				}
+			}
+			if r.stdout != "" {
+				t.Errorf("stdout = %q, want no step narrated", r.stdout)
+			}
+			if log := sent.Log(); slices.ContainsFunc(log, func(s string) bool { return s != "GET /readyz" && s != "GET /api/health" }) {
+				t.Errorf("the service was sent %q, want only the probes", log)
+			}
+		})
+	}
+}
+
+// A scenario that points at traces declares grafana up, so it fails before
+// its first step when Grafana does not answer, naming the node and mise
+// run otel:up, though the service is ready.
+func TestScenario_StopsAtStartWhenGrafanaIsDown(t *testing.T) {
+	for _, name := range []string{"domain", "problems"} {
+		t.Run(name, func(t *testing.T) {
+			base, _ := answering(t, map[string]int{"/readyz": http.StatusOK})
+			r := runScenario(t, name, base, closedURL(t))
+
+			if r.code != process.ExitFailure {
+				t.Errorf("code = %d, want %d; stderr = %q", r.code, process.ExitFailure, r.stderr)
+			}
+			if want := "slab scenario " + name + ": startup: grafana up: Grafana is not up at "; !strings.HasPrefix(r.stderr, want) {
+				t.Errorf("stderr = %q, want it to start with %q", r.stderr, want)
+			}
+			if !strings.Contains(r.stderr, "mise run otel:up") {
+				t.Errorf("stderr = %q, want it to name mise run otel:up", r.stderr)
+			}
+			if strings.Contains(r.stderr, "service:") {
+				t.Errorf("stderr = %q, want the ready service unreported", r.stderr)
+			}
+			if r.stdout != "" {
+				t.Errorf("stdout = %q, want no step narrated", r.stdout)
 			}
 		})
 	}

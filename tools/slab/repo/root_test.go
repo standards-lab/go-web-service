@@ -1,7 +1,6 @@
 package repo_test
 
 import (
-	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -9,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/repo"
 )
 
@@ -75,8 +73,7 @@ func TestFind_ReportsNotFoundAboveADirectoryWithNoRoot(t *testing.T) {
 
 func TestRoot_UsesTheOverride(t *testing.T) {
 	root, _ := tree(t)
-	ctx := env.WithContext(context.Background(), env.Env{Repo: root})
-	got, err := repo.Root(ctx)
+	got, err := repo.Root(root)
 	if err != nil {
 		t.Fatalf("Root with --repo %s: %v", root, err)
 	}
@@ -87,12 +84,10 @@ func TestRoot_UsesTheOverride(t *testing.T) {
 
 func TestRoot_RejectsAnOverrideThatIsNotTheRoot(t *testing.T) {
 	_, nested := tree(t)
-	ctx := env.WithContext(context.Background(), env.Env{Repo: nested})
-	if _, err := repo.Root(ctx); err == nil {
+	if _, err := repo.Root(nested); err == nil {
 		t.Errorf("Root accepted --repo %s, which declares no go.mod", nested)
 	}
-	ctx = env.WithContext(context.Background(), env.Env{Repo: filepath.Join(nested, "..", "..")})
-	if _, err := repo.Root(ctx); err == nil {
+	if _, err := repo.Root(filepath.Join(nested, "..", "..")); err == nil {
 		t.Error("Root accepted --repo tools/slab, whose go.mod declares another module")
 	}
 }
@@ -100,8 +95,7 @@ func TestRoot_RejectsAnOverrideThatIsNotTheRoot(t *testing.T) {
 func TestFS_ReadsUnderTheRoot(t *testing.T) {
 	root, _ := tree(t)
 	write(t, filepath.Join(root, "data", "seeds", "default.json"), "{}")
-	ctx := env.WithContext(context.Background(), env.Env{Repo: root})
-	fsys, err := repo.FS(ctx)
+	fsys, err := repo.FS(root)
 	if err != nil {
 		t.Fatalf("FS: %v", err)
 	}
@@ -115,14 +109,13 @@ func TestFS_ReadsUnderTheRoot(t *testing.T) {
 }
 
 func TestFS_FailsWhereRootFails(t *testing.T) {
-	ctx := env.WithContext(context.Background(), env.Env{Repo: t.TempDir()})
-	if _, err := repo.FS(ctx); err == nil {
+	if _, err := repo.FS(t.TempDir()); err == nil {
 		t.Error("FS accepted --repo pointing at a directory with no go.mod")
 	}
 }
 
 func TestRoot_WalksFromTheWorkingDirectoryWithoutAnOverride(t *testing.T) {
-	got, err := repo.Root(context.Background())
+	got, err := repo.Root("")
 	if err != nil {
 		t.Fatalf("Root: %v", err)
 	}

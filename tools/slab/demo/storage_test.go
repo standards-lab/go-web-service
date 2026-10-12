@@ -79,7 +79,7 @@ type seeded struct {
 // loadSeed reads the repository's default seed file.
 func loadSeed(t *testing.T) seedFile {
 	t.Helper()
-	fsys, err := repo.FS(context.Background())
+	fsys, err := repo.FS("")
 	if err != nil {
 		t.Fatalf("find the repository: %v", err)
 	}

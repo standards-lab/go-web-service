@@ -14,7 +14,6 @@ import (
 	"github.com/standards-lab/sqlate/postgres"
 	"github.com/standards-lab/sqlate/query"
 
-	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/output"
 	"github.com/standards-lab/go-web-service/tools/slab/repo"
 	"github.com/standards-lab/go-web-service/tools/slab/statement"
@@ -62,9 +61,8 @@ func Sqlate(n Nodes) scenario.Scenario {
 	}
 }
 
-func (s *sqlate) writePattern(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
-	// repo.FS reads the --repo override from the environment on ctx.
-	fsys, err := repo.FS(env.WithContext(ctx, env.Env{Repo: inv.Get(s.n.Repo)}))
+func (s *sqlate) writePattern(_ context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
+	fsys, err := repo.FS(inv.Get(s.n.Repo))
 	if err != nil {
 		return err
 	}
@@ -105,10 +103,10 @@ func (s *sqlate) writeStatement(_ context.Context, inv *cli.Invocation, r *scena
 
 func (s *sqlate) registerCatalog(_ context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
 	st := styleOf(s.n, inv)
-	if err := show(r, "fsys, the filesystem both calls below read from", output.SQL(st, "fsys, err := repo.FS(ctx)")); err != nil {
+	if err := show(r, "fsys, the filesystem both calls below read from", output.SQL(st, "fsys, err := repo.FS(override)")); err != nil {
 		return err
 	}
-	r.Note("repo.FS(ctx) resolves the repository root — the --repo flag when it is set, or the nearest ancestor directory whose go.mod declares this module — and returns an os.DirFS rooted there. Every path this scenario reads, the pattern and statement above included, is relative to that root.")
+	r.Note("repo.FS(override) resolves the repository root — override, the --repo flag, when it is set, or the nearest ancestor directory whose go.mod declares this module — and returns an os.DirFS rooted there. Every path this scenario reads, the pattern and statement above included, is relative to that root.")
 	if err := show(r, fmt.Sprintf("The pattern registered under the %q namespace, beside blobfs's published namespace", appNamespace),
 		output.SQL(st, fmt.Sprintf("query.NewCatalog(query.Patterns(), bfdata.Patterns(), query.Publish(%q, fsys, %q))", appNamespace, patternsDir))); err != nil {
 		return err

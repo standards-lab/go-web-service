@@ -10,6 +10,7 @@ import (
 
 	"github.com/standards-lab/go-web-service/tools/slab/admin/database"
 	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
+	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 	"github.com/standards-lab/go-web-service/tools/slab/repo"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
@@ -62,7 +63,7 @@ func (t Tree) Get(code string) (organization.Organization, error) {
 // each run from the same known rows.
 func Reset(ctx context.Context, c *httpx.Client, r *scenario.Reporter) error {
 	r.Note("This step posts the %q state to %s, so the database starts this run from a predictable, known set of data: the schema at its latest version and the seven-row acme tree below as the only rows, whatever the last run left behind.", SeedState, stateRoute)
-	fsys, err := repo.FS(ctx)
+	fsys, err := repo.FS(env.FromContext(ctx).Repo)
 	if err != nil {
 		return err
 	}

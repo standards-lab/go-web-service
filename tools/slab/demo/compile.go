@@ -11,6 +11,7 @@ import (
 	"github.com/standards-lab/sqlate/postgres"
 	"github.com/standards-lab/sqlate/query"
 
+	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/repo"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 	"github.com/standards-lab/go-web-service/tools/slab/statement"
@@ -51,7 +52,7 @@ func Compile() scenario.Scenario {
 }
 
 func (s *state) writePattern(ctx context.Context, r *scenario.Reporter) error {
-	fsys, err := repo.FS(ctx)
+	fsys, err := repo.FS(env.FromContext(ctx).Repo)
 	if err != nil {
 		return err
 	}

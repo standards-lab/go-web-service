@@ -26,6 +26,9 @@
 //   - [Report], the error of a problem response, the document rendered
 //     member by member
 //   - [Render], one block of a scenario's narration as go-cli-sdk's
-//     scenario.Reporter.Show takes it, and [SQL] and [Table], the blocks
-//     a step shows its statements and name/value pairs through
+//     scenario.Reporter.Show takes it, and the blocks a step shows
+//     through it: [SQL] and [JSON], a statement and a document as
+//     authored; [Table], name/value pairs; [Request] and [Response], the
+//     two sides of an HTTP call; and [Trace], the pointer to a request's
+//     trace in Grafana
 package output

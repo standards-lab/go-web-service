@@ -157,7 +157,7 @@ func (t seedTree) paths() map[string]string {
 
 // loadSeed reads and decodes data/seeds/<SeedState>.json from the repository.
 func loadSeed(ctx context.Context) (seedFile, error) {
-	fsys, err := repo.FS(ctx)
+	fsys, err := repo.FS(env.FromContext(ctx).Repo)
 	if err != nil {
 		return seedFile{}, err
 	}
@@ -356,7 +356,7 @@ func (s *storageState) revalidateLogo(ctx context.Context, r *scenario.Reporter)
 }
 
 func (s *storageState) replaceLogo(ctx context.Context, r *scenario.Reporter) error {
-	fsys, err := repo.FS(ctx)
+	fsys, err := repo.FS(env.FromContext(ctx).Repo)
 	if err != nil {
 		return err
 	}

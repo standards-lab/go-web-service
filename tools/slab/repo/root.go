@@ -2,15 +2,12 @@ package repo
 
 import (
 	"bufio"
-	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/standards-lab/go-web-service/tools/slab/env"
 )
 
 // Module is the module path the repository root's go.mod declares. slab is
@@ -21,11 +18,11 @@ const Module = "github.com/standards-lab/go-web-service"
 // ErrNotFound reports that no directory on the walk declares Module.
 var ErrNotFound = errors.New("repo: no go.mod declaring " + Module)
 
-// Root returns the repository root: the --repo override carried by ctx
-// when one was given, checked to be a root, or else the nearest ancestor of
-// the working directory whose go.mod declares Module.
-func Root(ctx context.Context) (string, error) {
-	if override := env.FromContext(ctx).Repo; override != "" {
+// Root returns the repository root: override, the --repo setting, when it
+// is not empty, checked to be a root, or else the nearest ancestor of the
+// working directory whose go.mod declares Module.
+func Root(override string) (string, error) {
+	if override != "" {
 		dir, err := filepath.Abs(override)
 		if err != nil {
 			return "", fmt.Errorf("repo: --repo %q: %w", override, err)
@@ -46,10 +43,11 @@ func Root(ctx context.Context) (string, error) {
 	return Find(wd)
 }
 
-// FS returns the repository root Root resolves as a filesystem, the form a
-// scenario reads the service's sources and seeds through.
-func FS(ctx context.Context) (fs.FS, error) {
-	root, err := Root(ctx)
+// FS returns the repository root Root resolves from override as a
+// filesystem, the form a scenario reads the service's sources and seeds
+// through.
+func FS(override string) (fs.FS, error) {
+	root, err := Root(override)
 	if err != nil {
 		return nil, err
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/standards-lab/go-core/lifecycle"
 
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
+	"github.com/standards-lab/go-web-service/tools/slab/scenarios"
 )
 
 // App is the program: its dependency graph and the [Nodes] that describe
@@ -43,6 +44,7 @@ func New(streams cli.Streams) *App {
 	flags := bindRootFlags(a.root.Flags())
 	a.root.PreRun = flags.preRun
 	defineInfrastructure(a.graph, &a.nodes, flags)
+	defineScenarioNodes(a.graph, &a.nodes)
 	a.root.Add(versionCommand())
 	mountDomain(a.root, &a.nodes)
 	mountAdmin(a.root, &a.nodes)
@@ -68,13 +70,15 @@ func (a *App) Run(ctx context.Context, args []string) int {
 // layers' nodes from that same value. Each field's node is named as the
 // dispatcher labels its errors.
 type Nodes struct {
-	LifecycleConfig *graph.Node[lifecycle.Config] // "lifecycle config"
-	Base            *graph.Node[string]           // "base", the service's base URL
-	Grafana         *graph.Node[string]           // "grafana", Grafana's base URL
-	Tempo           *graph.Node[string]           // "tempo", Tempo's HTTP API base URL
-	Repo            *graph.Node[string]           // "repo", the repository root override; empty when not given
-	NoColor         *graph.Node[bool]             // "no color", print without ANSI color even on a terminal
-	Client          *graph.Node[*httpx.Client]    // "client"
+	LifecycleConfig *graph.Node[lifecycle.Config]  // "lifecycle config"
+	Base            *graph.Node[string]            // "base", the service's base URL
+	Grafana         *graph.Node[string]            // "grafana", Grafana's base URL
+	Tempo           *graph.Node[string]            // "tempo", Tempo's HTTP API base URL
+	Repo            *graph.Node[string]            // "repo", the repository root override; empty when not given
+	NoColor         *graph.Node[bool]              // "no color", print without ANSI color even on a terminal
+	Client          *graph.Node[*httpx.Client]     // "client"
+	Service         *graph.Node[scenarios.Service] // "service", the running service, checked ready at start
+	GrafanaUp       *graph.Node[scenarios.Grafana] // "grafana up", the running Grafana, checked up at start
 }
 
 // Graph returns the graph a's commands are built from, as [New] described

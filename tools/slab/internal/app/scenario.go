@@ -3,16 +3,40 @@ package app
 import (
 	"github.com/standards-lab/go-cli-sdk"
 	"github.com/standards-lab/go-cli-sdk/scenario"
+	"github.com/standards-lab/go-core/graph"
 
 	"github.com/standards-lab/go-web-service/tools/slab/scenarios"
 )
 
+// defineScenarioNodes defines on g into n the need nodes the scenarios
+// declare, over the settings nodes defineInfrastructure defined: service,
+// the running service at the base node's URL, and grafana up, the running
+// Grafana at the grafana node's URL. Each value is a lifecycle Starter
+// that probes what it names, so the dispatcher starts it after the Build
+// and a scenario that declares it runs no step until it answers; a failed
+// probe is reported "startup: <node>: ..." naming the mise task that
+// fixes it.
+func defineScenarioNodes(g *graph.Graph, n *Nodes) {
+	base, grafana := n.Base, n.Grafana
+	n.Service = g.Define("service", func(s *graph.Scope) (scenarios.Service, error) {
+		return scenarios.Service{URL: s.Use(base)}, nil
+	})
+	n.GrafanaUp = g.Define("grafana up", func(s *graph.Scope) (scenarios.Grafana, error) {
+		return scenarios.Grafana{URL: s.Use(grafana)}, nil
+	})
+}
+
 // mountScenarios mounts go-cli-sdk's scenario parent at root, with one leaf
 // per scenario the scenarios package builds over the nodes from n it
 // reads. Each leaf declares its own scenario's nodes, so a scenario builds
-// only what it reads; the parent declares none, and its help ends with the
-// listing. The root's own Footer still lists the demo scenarios while the
-// demo command stands beside this one.
+// and starts only what it reads; the parent declares none, and its help
+// ends with the listing. The root's own Footer still lists the demo
+// scenarios while the demo command stands beside this one.
 func mountScenarios(root *cli.Command, n *Nodes) {
-	root.Add(scenario.Commands(scenarios.All(scenarios.Nodes{Repo: n.Repo, NoColor: n.NoColor})...)...)
+	root.Add(scenario.Commands(scenarios.All(scenarios.Nodes{
+		Service:   n.Service,
+		GrafanaUp: n.GrafanaUp,
+		Repo:      n.Repo,
+		NoColor:   n.NoColor,
+	})...)...)
 }

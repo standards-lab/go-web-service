@@ -254,6 +254,14 @@ func TestScenario_StoragePrintsTheTreeTheDeletingStatusAndTheSeededCounts(t *tes
 			t.Errorf("the tree table lacks %s at %s", p, id)
 		}
 	}
+	// The tree's last row is the seed's deepest file under its last
+	// directory, as the walk lists a directory's files, then its
+	// subdirectories, each by name.
+	setOff(t, out, []block{
+		{"Migration sets", "    app "},
+		{"acme's document tree", "    /operations/logistics/carriers.csv "},
+		{"Seeded", "    documents "},
+	})
 	if !strings.Contains(step(t, out, "[14/16]"), `"status": "deleting"`) {
 		t.Errorf("the recursive delete does not show the deleting status:\n%s", out)
 	}

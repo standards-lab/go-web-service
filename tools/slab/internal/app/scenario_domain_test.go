@@ -181,6 +181,9 @@ func TestScenario_DomainShowsTheSeedFileBeforeTheReset(t *testing.T) {
 			t.Errorf("the seed block lacks %s:\n%s", want, out[caption:reset])
 		}
 	}
+	// The seed file's last line is its closing brace, the only one at the
+	// block's indent.
+	setOff(t, out, []block{{"data/seeds/default.json", "\n    }"}})
 }
 
 func TestScenario_DomainSendsTheQueryWithLiteralBrackets(t *testing.T) {

@@ -58,11 +58,7 @@ func TestScenario_RunsSqlate(t *testing.T) {
 			t.Errorf("the narration lacks %q:\n%s", want, out)
 		}
 	}
-	// Each captioned block, in the order shown, is set off from the
-	// narration around it: a blank line before its caption and one after
-	// its last line.
-	at := 0
-	for _, block := range []struct{ caption, last string }{
+	setOff(t, out, []block{
 		{"data/patterns/identity.sql", "RETURNING id, version"},
 		{"An embed directive over an embed.FS variable", "var patterns embed.FS"},
 		{"domain/organization/statements/create.sql", "{{> app.identity}}"},
@@ -72,24 +68,7 @@ func TestScenario_RunsSqlate(t *testing.T) {
 		{"A directory of statements, compiled against the postgres dialect", `postgres.Dialect{})`},
 		{"create, compiled for execution by postgres", "RETURNING id, version"},
 		{"Placeholders, in position order", "$3  name"},
-	} {
-		caption := strings.Index(out[at:], "  "+block.caption)
-		if caption < 0 {
-			t.Fatalf("the caption %q is missing after offset %d:\n%s", block.caption, at, out)
-		}
-		caption += at
-		last := strings.Index(out[caption:], block.last)
-		if last < 0 {
-			t.Fatalf("the block under %q lacks %q:\n%s", block.caption, block.last, out)
-		}
-		at = caption + last + len(block.last)
-		if !strings.HasSuffix(out[:caption], "\n\n") {
-			t.Errorf("no blank line precedes the caption %q:\n%s", block.caption, out)
-		}
-		if !strings.HasPrefix(out[at:], "\n\n") {
-			t.Errorf("no blank line follows the block under %q:\n%s", block.caption, out)
-		}
-	}
+	})
 	if strings.Contains(out, "[5/") {
 		t.Errorf("the scenario narrates more than four steps:\n%s", out)
 	}
@@ -109,6 +88,41 @@ func TestScenario_RunsSqlate(t *testing.T) {
 	}
 	if !slices.Equal(built.Log(), sqlateBuilt) {
 		t.Errorf("nodes built = %q, want %q", built.Log(), sqlateBuilt)
+	}
+}
+
+// block names one captioned block of a narration: the start of its
+// caption, and text on its last line, the first match after the caption.
+type block struct{ caption, last string }
+
+// setOff fails t unless each block appears in out, in the order given,
+// set off from the narration around it: a blank line before its caption
+// and one after its last line.
+func setOff(t *testing.T, out string, blocks []block) {
+	t.Helper()
+	at := 0
+	for _, b := range blocks {
+		caption := strings.Index(out[at:], "  "+b.caption)
+		if caption < 0 {
+			t.Fatalf("the caption %q is missing after offset %d:\n%s", b.caption, at, out)
+		}
+		caption += at
+		last := strings.Index(out[caption:], b.last)
+		if last < 0 {
+			t.Fatalf("the block under %q lacks %q:\n%s", b.caption, b.last, out)
+		}
+		at = caption + last + len(b.last)
+		if end := strings.IndexByte(out[at:], '\n'); end >= 0 {
+			at += end
+		} else {
+			at = len(out)
+		}
+		if !strings.HasSuffix(out[:caption], "\n\n") {
+			t.Errorf("no blank line precedes the caption %q:\n%s", b.caption, out)
+		}
+		if !strings.HasPrefix(out[at:], "\n\n") {
+			t.Errorf("no blank line follows the block under %q:\n%s", b.caption, out)
+		}
 	}
 }
 

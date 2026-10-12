@@ -277,7 +277,7 @@ func (s *storage) migrationSets(ctx context.Context, inv *cli.Invocation, r *sce
 			return fmt.Errorf("the schema status lists no %s set", want)
 		}
 	}
-	return showApart(r, "Migration sets", output.Table(st, rows))
+	return show(r, "Migration sets", output.Table(st, rows))
 }
 
 func (s *storage) additiveSeed(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
@@ -497,7 +497,7 @@ func (s *storage) documentTree(ctx context.Context, inv *cli.Invocation, r *scen
 	if err := walk("/", dirs.Items, files.Items); err != nil {
 		return err
 	}
-	if err := showApart(r, "acme's document tree", output.Table(st, rows)); err != nil {
+	if err := show(r, "acme's document tree", output.Table(st, rows)); err != nil {
 		return err
 	}
 	for p, id := range s.paths {
@@ -813,7 +813,7 @@ func (s *storage) reset(ctx context.Context, inv *cli.Invocation, r *scenario.Re
 	if err := res.JSON(&tr); err != nil {
 		return err
 	}
-	if err := showApart(r, "Seeded", output.Table(st, [][2]string{
+	if err := show(r, "Seeded", output.Table(st, [][2]string{
 		{"organizations", strconv.Itoa(tr.Seeded.Organizations)},
 		{"logos", strconv.Itoa(tr.Seeded.Logos)},
 		{"documents", strconv.Itoa(tr.Seeded.Documents)},

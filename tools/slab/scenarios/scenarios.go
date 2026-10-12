@@ -46,25 +46,34 @@ func styleOf(n Nodes, inv *cli.Invocation) style.Style {
 	return style.New(style.ColorEnabled(inv.Stdout, inv.Get(n.NoColor)))
 }
 
-// show prints a captioned block through r: the caption as a plain note,
-// then the block, so only the block is colored.
+// show prints a captioned SQL, JSON, or table block through r, set off
+// from the narration around it the way the old runner set it off: a blank
+// line, the caption as a plain note, the block, and a blank line. Only the
+// block is colored. Each blank line is an empty Note, which the reporter
+// prints as one blank line, never two and never first, so blocks that
+// follow one another stand one blank line apart.
 func show(r *scenario.Reporter, caption string, block output.Render) error {
+	r.Note("")
 	r.Note("%s", caption)
-	return r.Show(block)
+	if err := r.Show(block); err != nil {
+		return err
+	}
+	r.Note("")
+	return nil
 }
 
-// showApart is show set off by a blank line from what precedes it, for the
-// scenarios whose blocks follow one another, where a request, its
-// response, and what is read off them would otherwise run together. An
-// empty caption shows the block alone, as a request or response, whose
-// status line heads it, is shown. The blank line is an empty Note, which
-// the reporter prints as one blank line, never two and never first.
+// showApart prints a block set off by a blank line from what precedes it
+// but not from what follows, for an HTTP request, its response, and the
+// trace pointer read off them, where the narration after reads on from
+// the block. An empty caption shows the block alone, as a request or
+// response, whose status line heads it, is shown. The blank line is an
+// empty Note, as in show.
 func showApart(r *scenario.Reporter, caption string, block output.Render) error {
 	r.Note("")
-	if caption == "" {
-		return r.Show(block)
+	if caption != "" {
+		r.Note("%s", caption)
 	}
-	return show(r, caption, block)
+	return r.Show(block)
 }
 
 // call narrates one HTTP call through c: the request as sent, the call,

@@ -246,7 +246,7 @@ func TestScenario_StoragePrintsTheTreeTheDeletingStatusAndTheSeededCounts(t *tes
 	out := runStorageOK(t, fake)
 	paths := fake.acmeTree.paths()
 	treeStep := step(t, out, "[7/16]")
-	if !strings.Contains(treeStep, "  acme's document tree\n") {
+	if !strings.Contains(treeStep, "\n\n  acme's document tree\n") {
 		t.Errorf("the tree step lacks its table:\n%s", treeStep)
 	}
 	for p, id := range paths {

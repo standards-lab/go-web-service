@@ -172,7 +172,7 @@ func TestScenario_DomainShowsTheRequestAndResponseAsBlocks(t *testing.T) {
 
 func TestScenario_DomainShowsTheSeedFileBeforeTheReset(t *testing.T) {
 	_, out := runDomain(t)
-	caption, reset := strings.Index(out, "  data/seeds/default.json\n"), strings.Index(out, "POST /admin/database/state")
+	caption, reset := strings.Index(out, "\n\n  data/seeds/default.json\n"), strings.Index(out, "\n\n    POST /admin/database/state")
 	if caption < 0 || reset < 0 || caption > reset {
 		t.Fatalf("the seed file does not precede the reset request:\n%s", out)
 	}

@@ -41,9 +41,10 @@
 // A step narrates its prose with the reporter's Note and shows its results
 // as the output package's blocks through the reporter's Show, each block
 // colored only when the run's color is on. A captioned block follows a
-// plain Note of its caption. In the scenarios against the service, an
-// empty Note sets each block off by a blank line, so a request, its
-// response, and what is read off them read apart.
+// plain Note of its caption. An empty Note sets a block off by a blank
+// line: a SQL, JSON, or table block stands between two, before its caption
+// and after it, and a request, its response, and the trace pointer read
+// off them each follow one, so they read apart.
 //
 // The wire types and routes come from domain/organization, domain/document,
 // and admin/database, which restate the service's contract once for every

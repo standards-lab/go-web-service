@@ -58,6 +58,38 @@ func TestScenario_RunsSqlate(t *testing.T) {
 			t.Errorf("the narration lacks %q:\n%s", want, out)
 		}
 	}
+	// Each captioned block, in the order shown, is set off from the
+	// narration around it: a blank line before its caption and one after
+	// its last line.
+	at := 0
+	for _, block := range []struct{ caption, last string }{
+		{"data/patterns/identity.sql", "RETURNING id, version"},
+		{"An embed directive over an embed.FS variable", "var patterns embed.FS"},
+		{"domain/organization/statements/create.sql", "{{> app.identity}}"},
+		{"An embed directive over an embed.FS variable", "var statements embed.FS"},
+		{"fsys, the filesystem both calls below read from", "fsys, err := repo.FS(override)"},
+		{"The pattern registered under the", `query.Publish("app", fsys, "data/patterns"))`},
+		{"A directory of statements, compiled against the postgres dialect", `postgres.Dialect{})`},
+		{"create, compiled for execution by postgres", "RETURNING id, version"},
+		{"Placeholders, in position order", "$3  name"},
+	} {
+		caption := strings.Index(out[at:], "  "+block.caption)
+		if caption < 0 {
+			t.Fatalf("the caption %q is missing after offset %d:\n%s", block.caption, at, out)
+		}
+		caption += at
+		last := strings.Index(out[caption:], block.last)
+		if last < 0 {
+			t.Fatalf("the block under %q lacks %q:\n%s", block.caption, block.last, out)
+		}
+		at = caption + last + len(block.last)
+		if !strings.HasSuffix(out[:caption], "\n\n") {
+			t.Errorf("no blank line precedes the caption %q:\n%s", block.caption, out)
+		}
+		if !strings.HasPrefix(out[at:], "\n\n") {
+			t.Errorf("no blank line follows the block under %q:\n%s", block.caption, out)
+		}
+	}
 	if strings.Contains(out, "[5/") {
 		t.Errorf("the scenario narrates more than four steps:\n%s", out)
 	}

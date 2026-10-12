@@ -71,7 +71,7 @@ func reset(ctx context.Context, n Nodes, inv *cli.Invocation, c *httpx.Client, r
 		return err
 	}
 	st := styleOf(n, inv)
-	if err := showApart(r, file, output.JSON(st, text)); err != nil {
+	if err := show(r, file, output.JSON(st, text)); err != nil {
 		return err
 	}
 	res, err := call(ctx, r, st, c, http.MethodPost, stateRoute, nil, database.Reset{State: seedState, Confirm: true})

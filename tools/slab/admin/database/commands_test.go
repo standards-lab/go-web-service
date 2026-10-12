@@ -569,8 +569,7 @@ func TestCommands_NeverColorAStreamThatIsNoTerminal(t *testing.T) {
 	}
 }
 
-// A root flag may come before the admin word, or between the words, as it
-// could under cobra.
+// A root flag may come before the admin word, or between the words.
 func TestCommands_TakeRootFlagsAtAnyDepth(t *testing.T) {
 	for name, args := range map[string][]string{
 		"before admin":            {"--base", "%s", "admin", "database", "diagnostics"},

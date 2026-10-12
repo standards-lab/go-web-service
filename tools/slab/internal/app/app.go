@@ -14,14 +14,12 @@ import (
 
 // App is the program: its dependency graph and the [Nodes] that describe
 // it, its command tree, the root flags every command accepts, and the
-// streams it reads from and reports to. Until each command family moves to
-// the tree, it also holds the bridge to the ones still on cobra.
+// streams it reads from and reports to.
 type App struct {
 	graph   *graph.Graph
 	nodes   Nodes
 	root    *cli.Command
 	streams cli.Streams
-	legacy  *legacy
 }
 
 // New describes the graph, layer by layer, lowest first, builds the command
@@ -48,7 +46,7 @@ func New(streams cli.Streams) *App {
 	a.root.Add(versionCommand())
 	a.root.Add(domainCommands(&a.nodes)...)
 	a.root.Add(adminCommand(&a.nodes))
-	a.legacy = mountLegacy(a.root, streams)
+	a.root.Add(demoCommand(&a.nodes), listCommand())
 	return a
 }
 
@@ -57,13 +55,9 @@ func New(streams cli.Streams) *App {
 // selected command's path declares with Use from the App's graph, with the
 // lifecycle configuration node, and shuts what it built down before Run
 // returns, so a Build, start, or shutdown error is reported with the
-// command's result. A command still on cobra is dispatched there instead,
-// as it was before the move. An App runs one command at a time, since a
-// graph.Graph is not safe for concurrent use.
+// command's result. An App runs one command at a time, since a graph.Graph
+// is not safe for concurrent use.
 func (a *App) Run(ctx context.Context, args []string) int {
-	if a.legacy.selects(a.root.Flags(), args) {
-		return a.legacy.run(ctx, args)
-	}
 	return cli.Run(ctx, a.root, args, a.streams, cli.WithGraph(a.graph, a.nodes.LifecycleConfig))
 }
 

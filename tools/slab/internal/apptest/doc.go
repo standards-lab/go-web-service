@@ -8,9 +8,7 @@
 // graph.Graph.Observe, so a test asserts which nodes a command builds from
 // what the graph reports. [Halt] fails the lifecycle configuration node,
 // which the dispatcher adds to every Build, so a run of a command that
-// declares nodes fails before anything starts. The command families still
-// on cobra, behind the App's temporary bridge, build nothing from the
-// graph, so neither fixture sees or stops their runs.
+// declares nodes fails before anything starts.
 //
 // The package exports:
 //

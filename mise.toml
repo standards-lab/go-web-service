@@ -116,10 +116,10 @@ run = "go mod tidy"
 description = "Run golangci-lint, the integration suite and the slab module included, then sqlint over the SQL files"
 run = "golangci-lint run --build-tags integration ./... && go tool sqlint && cd tools/slab && golangci-lint run ./..."
 
-# slab is its own module under tools/ so cobra never enters cmd/server's
-# dependency graph. Running from that directory, rather than passing through
-# at the root, means a clone without a go.work still resolves slab's
-# dependencies against the published releases.
+# slab is its own module under tools/ so go-cli-sdk, x/term, and x/sys never
+# enter cmd/server's dependency graph. Running from that directory, rather
+# than passing through at the root, means a clone without a go.work still
+# resolves slab's dependencies against the published releases.
 [tasks.slab]
 description = "Run slab, the narrated-scenario runner (`mise run slab -- list`)"
 dir = "tools/slab"

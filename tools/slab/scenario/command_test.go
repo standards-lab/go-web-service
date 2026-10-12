@@ -3,12 +3,14 @@ package scenario_test
 import (
 	"bytes"
 	"context"
-	"io"
+	"errors"
+	"flag"
+	"regexp"
 	"strings"
 	"testing"
 
-	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
+	"github.com/standards-lab/go-cli-sdk"
+	"github.com/standards-lab/go-core/process"
 
 	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
@@ -36,7 +38,7 @@ var (
 	stubTwo = scenario.Scenario{
 		Name:    "stub:two",
 		Summary: "the second stub",
-		Flags: func(f *pflag.FlagSet) {
+		Flags: func(f *flag.FlagSet) {
 			f.String("greeting", "hello", "what two says")
 		},
 		Steps: []scenario.Step{{
@@ -49,46 +51,45 @@ var (
 	}
 )
 
-// execute runs args against a throwaway root that carries a --base
-// persistent flag and mounts both stubs through Command, the way the demo
-// command mounts the real scenarios.
-func execute(t *testing.T, args ...string) (string, error) {
+// execute runs args against a throwaway root that carries a --base root
+// flag and mounts both stubs through Command, the way the demo command
+// mounts the real scenarios, and returns what the run wrote to stdout and
+// stderr and its exit code. The stubs' Source reads the flag rather than a
+// node, so the tree declares none and builds nothing.
+func execute(t *testing.T, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	var base string
-	root := &cobra.Command{
-		Use:           "root",
-		Args:          cobra.NoArgs,
-		SilenceUsage:  true,
-		SilenceErrors: true,
-		RunE:          func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
+	root := &cli.Command{Name: "root"}
+	root.Flags().StringVar(&base, "base", "http://default.test", "")
+	src := scenario.Source{
+		Env:      func(*cli.Invocation) env.Env { return env.Env{Base: base} },
+		Reporter: func(inv *cli.Invocation) *scenario.Reporter { return scenario.NewReporter(inv.Stdout, false) },
 	}
-	root.PersistentFlags().StringVar(&base, "base", "http://default.test", "")
-	runEnv := func() env.Env { return env.Env{Base: base} }
-	newReporter := func(w io.Writer) *scenario.Reporter { return scenario.NewReporter(w, false) }
-	root.AddCommand(scenario.Command(stubOne, runEnv, newReporter), scenario.Command(stubTwo, runEnv, newReporter))
+	root.Add(scenario.Command(stubOne, src), scenario.Command(stubTwo, src))
 
-	var out bytes.Buffer
-	root.SetOut(&out)
-	root.SetErr(&out)
-	root.SetArgs(args)
-	err := root.ExecuteContext(context.Background())
-	return out.String(), err
+	var out, errOut bytes.Buffer
+	code = cli.Run(context.Background(), root, args, cli.Streams{Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errOut})
+	return out.String(), errOut.String(), code
 }
 
 func TestCommand_IsNamedForTheScenarioWithItsSummary(t *testing.T) {
-	cmd := scenario.Command(stubTwo, func() env.Env { return env.Env{} }, nil)
-	if cmd.Use != "stub:two" || cmd.Short != "the second stub" {
-		t.Errorf("Command = %q %q; want the scenario's name and summary", cmd.Use, cmd.Short)
+	out, _, code := execute(t, "--help")
+	if code != process.ExitUsage {
+		t.Errorf("--help exited %d, want %d", code, process.ExitUsage)
 	}
-	if cmd.Flags().Lookup("greeting") == nil {
-		t.Error("Command did not add the scenario's own flag")
+	if !regexp.MustCompile(`(?m)^  stub:two +the second stub$`).MatchString(out) {
+		t.Errorf("help does not list stub:two with its summary:\n%s", out)
+	}
+	out, _, _ = execute(t, "stub:two", "--help")
+	if !strings.Contains(out, "--greeting string") {
+		t.Errorf("stub:two's help lacks the scenario's own flag:\n%s", out)
 	}
 }
 
 func TestCommand_DispatchesToTheNamedScenario(t *testing.T) {
-	out, err := execute(t, "stub:two")
-	if err != nil {
-		t.Fatalf("run stub:two: %v", err)
+	out, errOut, code := execute(t, "stub:two")
+	if code != process.ExitOK {
+		t.Fatalf("run stub:two exited %d: %s", code, errOut)
 	}
 	if !strings.Contains(out, "ran two") || strings.Contains(out, "ran one") {
 		t.Errorf("run stub:two dispatched wrongly:\n%s", out)
@@ -99,26 +100,70 @@ func TestCommand_DispatchesToTheNamedScenario(t *testing.T) {
 }
 
 func TestCommand_CarriesTheRootFlagsToTheScenario(t *testing.T) {
-	out, err := execute(t, "--base", "http://example.test:1", "stub:one")
-	if err != nil {
-		t.Fatalf("run stub:one: %v", err)
-	}
-	if !strings.Contains(out, "ran one against http://example.test:1") {
-		t.Errorf("the scenario did not see --base:\n%s", out)
+	for name, args := range map[string][]string{
+		"before": {"--base", "http://example.test:1", "stub:one"},
+		"after":  {"stub:one", "--base", "http://example.test:1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, errOut, code := execute(t, args...)
+			if code != process.ExitOK {
+				t.Fatalf("run stub:one exited %d: %s", code, errOut)
+			}
+			if !strings.Contains(out, "ran one against http://example.test:1") {
+				t.Errorf("the scenario did not see --base:\n%s", out)
+			}
+		})
 	}
 }
 
 func TestCommand_AcceptsTheScenarioOwnFlags(t *testing.T) {
-	if _, err := execute(t, "stub:two", "--greeting", "hi"); err != nil {
-		t.Errorf("run stub:two --greeting: %v", err)
+	if _, errOut, code := execute(t, "stub:two", "--greeting", "hi"); code != process.ExitOK {
+		t.Errorf("run stub:two --greeting exited %d: %s", code, errOut)
 	}
-	if _, err := execute(t, "stub:one", "--greeting", "hi"); err == nil {
-		t.Error("stub:one accepted stub:two's flag")
+	if _, errOut, code := execute(t, "stub:one", "--greeting", "hi"); code != process.ExitUsage || !strings.Contains(errOut, "flag provided but not defined: -greeting") {
+		t.Errorf("stub:one --greeting exited %d with %q, want stub:two's flag refused as a usage error", code, errOut)
 	}
 }
 
-func TestCommand_RejectsAnUnknownScenario(t *testing.T) {
-	if _, err := execute(t, "stub:none"); err == nil {
-		t.Error("run stub:none succeeded")
+func TestCommand_RejectsAnUnknownScenarioAndArguments(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args []string
+		want string
+	}{
+		"an unknown scenario": {[]string{"stub:none"}, `root: unknown command "stub:none"`},
+		"an argument":         {[]string{"stub:one", "extra"}, "root stub:one: accepts no arguments, got 1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, errOut, code := execute(t, tc.args...)
+			if code != process.ExitUsage || !strings.HasPrefix(errOut, tc.want) {
+				t.Errorf("exited %d with %q, want %d starting %q", code, errOut, process.ExitUsage, tc.want)
+			}
+			if strings.Contains(out, "ran ") {
+				t.Errorf("a scenario ran:\n%s", out)
+			}
+		})
+	}
+}
+
+// A failing step is the command's error, which the dispatcher reports once
+// on stderr with ExitFailure, naming the scenario's command path.
+func TestCommand_AFailedRunExitsOne(t *testing.T) {
+	failing := scenario.Scenario{
+		Name:  "stub:fail",
+		Steps: []scenario.Step{{Intent: "fail", Action: func(context.Context, *scenario.Reporter) error { return errors.New("boom") }}},
+	}
+	root := (&cli.Command{Name: "root"}).Add(scenario.Command(failing, scenario.Source{
+		Env:      func(*cli.Invocation) env.Env { return env.Env{} },
+		Reporter: func(inv *cli.Invocation) *scenario.Reporter { return scenario.NewReporter(inv.Stdout, false) },
+	}))
+	var out, errOut bytes.Buffer
+
+	code := cli.Run(context.Background(), root, []string{"stub:fail"}, cli.Streams{Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errOut})
+
+	if code != process.ExitFailure {
+		t.Errorf("exited %d, want %d", code, process.ExitFailure)
+	}
+	if want := "root stub:fail: stub:fail: step 1 (fail): boom\n"; errOut.String() != want {
+		t.Errorf("stderr = %q, want %q", errOut.String(), want)
 	}
 }

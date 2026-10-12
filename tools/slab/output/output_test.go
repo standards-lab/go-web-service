@@ -15,11 +15,10 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
-// plain returns an Output writing both streams to the returned buffer, with
-// color off.
+// plain returns an Output writing to the returned buffer, with color off.
 func plain() (*output.Output, *bytes.Buffer) {
 	var out bytes.Buffer
-	return output.New(&out, &out, nil), &out
+	return output.New(&out, nil), &out
 }
 
 func TestResponse_PrettyPrintsANonEmptyBody(t *testing.T) {
@@ -97,7 +96,7 @@ func TestResponse_WritesANonJSONBodyAsIs(t *testing.T) {
 func TestResponse_ColorsTheBodyAndStatusLineWhenOn(t *testing.T) {
 	on := style.New(true)
 	var out bytes.Buffer
-	o := output.New(&out, &out, func() bool { return true })
+	o := output.New(&out, func() bool { return true })
 	o.Response(http.StatusOK, []byte(`{"code":"acme"}`))
 	if want := on.Key(`"code"`) + ": " + on.Value(`"acme"`); !strings.Contains(out.String(), want) {
 		t.Errorf("Response wrote %q, want it colored as JSON", out.String())
@@ -116,7 +115,7 @@ func TestResponse_ColorsTheBodyAndStatusLineWhenOn(t *testing.T) {
 func TestNew_DecidesColorAtEachRenderNotAtConstruction(t *testing.T) {
 	color := false
 	var out bytes.Buffer
-	o := output.New(&out, &out, func() bool { return color })
+	o := output.New(&out, func() bool { return color })
 
 	o.Response(http.StatusNoContent, nil)
 	if got := out.String(); got != "204 No Content\n" {
@@ -136,80 +135,10 @@ func TestNew_DecidesColorAtEachRenderNotAtConstruction(t *testing.T) {
 
 func TestNew_NeverColorsWithoutADecision(t *testing.T) {
 	var out bytes.Buffer
-	o := output.New(&out, &out, nil)
+	o := output.New(&out, nil)
 	o.Response(http.StatusNoContent, nil)
 	if got := out.String(); got != "204 No Content\n" {
 		t.Errorf("Response wrote %q, want it plain", got)
-	}
-}
-
-func TestOutput_WritesResultsToStdoutAndFailuresToStderr(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	o := output.New(&stdout, &stderr, nil)
-	o.Response(http.StatusOK, []byte(`{}`))
-	o.Error(errors.New("boom"))
-	if got := stdout.String(); got != "{}\n" {
-		t.Errorf("stdout = %q, want the result alone", got)
-	}
-	if got := stderr.String(); got != "boom\n" {
-		t.Errorf("stderr = %q, want the failure alone", got)
-	}
-}
-
-func TestError_RendersAProblemDocumentMemberPerLine(t *testing.T) {
-	o, out := plain()
-	o.Error(web.Problem{
-		Type:     "https://example.test/problems/stale",
-		Title:    "Precondition Failed",
-		Status:   http.StatusPreconditionFailed,
-		Detail:   "If-Match names version 3, the row is at 4",
-		Instance: "/api/organizations/a1",
-		Extras:   map[string]any{"request_id": "abc", "attempt": float64(2), "hint": map[string]any{"fetch": true}},
-	})
-	want := "412 Precondition Failed\n" +
-		"detail: If-Match names version 3, the row is at 4\n" +
-		"instance: /api/organizations/a1\n" +
-		"type: https://example.test/problems/stale\n" +
-		"attempt: 2\n" +
-		"hint: {\"fetch\":true}\n" +
-		"request_id: abc\n"
-	if out.String() != want {
-		t.Errorf("Error wrote:\n%s\nwant:\n%s", out.String(), want)
-	}
-}
-
-func TestError_OmitsAbsentMembersAndTheBlankType(t *testing.T) {
-	o, out := plain()
-	o.Error(web.Problem{
-		Type: web.ProblemTypeBlank, Title: "Not Found", Status: http.StatusNotFound,
-	})
-	if got := out.String(); got != "404 Not Found\n" {
-		t.Errorf("Error wrote %q, want the status line alone", got)
-	}
-}
-
-func TestError_TitlesAnUntitledProblemWithTheStatusPhrase(t *testing.T) {
-	o, out := plain()
-	o.Error(web.Problem{Status: http.StatusConflict, Detail: "duplicate code"})
-	if got := out.String(); got != "409 Conflict\ndetail: duplicate code\n" {
-		t.Errorf("Error wrote %q", got)
-	}
-}
-
-func TestError_FindsAWrappedProblem(t *testing.T) {
-	o, out := plain()
-	p := web.Problem{Status: http.StatusBadRequest, Title: "Bad Request", Detail: "page = 0"}
-	o.Error(fmt.Errorf("org list: %w", p))
-	if got := out.String(); got != "400 Bad Request\ndetail: page = 0\n" {
-		t.Errorf("Error wrote %q, want the wrapped document rendered", got)
-	}
-}
-
-func TestError_WritesAPlainErrorAsItsMessage(t *testing.T) {
-	o, out := plain()
-	o.Error(errors.New(`GET /api/organizations: dial tcp 127.0.0.1:8080: connection refused`))
-	if got := out.String(); got != "GET /api/organizations: dial tcp 127.0.0.1:8080: connection refused\n" {
-		t.Errorf("Error wrote %q", got)
 	}
 }
 

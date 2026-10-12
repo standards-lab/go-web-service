@@ -3,42 +3,36 @@ package output
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
-
-	"github.com/standards-lab/go-web-sdk"
 
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
 // Output is where a direct command's result goes and how it looks: the
-// stream a success is written to, the stream a failure is written to, and
-// whether either is colored. The composition root constructs one and every
-// command family renders through it, so no command names a stream or a
-// style itself.
+// stream a success is written to, and whether it is colored. The
+// composition root constructs one and every command family renders through
+// it, so no command names a stream or a style itself. A failure is not
+// written here: a command returns it, and the dispatcher reports it.
 //
-// Whether to color is not known when the Output is constructed for a
-// family still on cobra, since --no-color is a persistent flag cobra parses
-// during execution. So Output holds the decision as a function and asks it
-// each time it renders, which is always from a command's run, after
-// parsing. Nothing about an Output changes after New, so one is safe to
-// share.
+// Output holds the color decision as a function and asks it each time it
+// renders, which is always from a command's run, after parsing. Nothing
+// about an Output changes after New, so one is safe to share.
 type Output struct {
-	stdout, stderr io.Writer
-	color          func() bool
+	stdout io.Writer
+	color  func() bool
 }
 
-// New returns an Output writing results to stdout and failures to stderr.
-// color reports, when asked, whether to emit ANSI color; it is asked at
-// each render, never at New. A nil color never colors.
-func New(stdout, stderr io.Writer, color func() bool) *Output {
+// New returns an Output writing results to stdout. color reports, when
+// asked, whether to emit ANSI color; it is asked at each render, never at
+// New. A nil color never colors.
+func New(stdout io.Writer, color func() bool) *Output {
 	if color == nil {
 		color = func() bool { return false }
 	}
-	return &Output{stdout: stdout, stderr: stderr, color: color}
+	return &Output{stdout: stdout, color: color}
 }
 
 // Style is the styling as the run stands now: color on when color says so.
@@ -118,17 +112,4 @@ func Expect(res *httpx.Response, status int) error {
 		return Report{Problem: p}
 	}
 	return res.Expect(status)
-}
-
-// Error writes a failure to stderr, for a command still on cobra, whose
-// root renders the error a command returns. When err is or wraps a
-// web.Problem, the document is written as its [Report]; any other error is
-// written as its message. A transport error that never reached a
-// response, an unexpected non-problem response, and a decoded problem
-// document all arrive here through the same parameter.
-func (o *Output) Error(err error) {
-	if p, ok := errors.AsType[web.Problem](err); ok {
-		err = Report{Problem: p}
-	}
-	_, _ = fmt.Fprintln(o.stderr, err.Error())
 }

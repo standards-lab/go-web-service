@@ -35,7 +35,7 @@ func newClient(config *graph.Node[Config]) func(*graph.Scope) (*httpx.Client, er
 
 // outputSource returns the output.Source a command family on the tree
 // renders through: the config node, which the family declares with Use,
-// and the Output over the invocation's streams, colored when stdout is a
+// and the Output over the invocation's stdout, colored when stdout is a
 // terminal and neither NO_COLOR nor the config's NoColor, the SLAB_NO_COLOR
 // variable or --no-color, says otherwise.
 func outputSource(n *Nodes) output.Source {
@@ -44,7 +44,7 @@ func outputSource(n *Nodes) output.Source {
 		Node: config,
 		New: func(inv *cli.Invocation) *output.Output {
 			noColor := inv.Get(config).NoColor
-			return output.New(inv.Stdout, inv.Stderr, func() bool {
+			return output.New(inv.Stdout, func() bool {
 				return style.ColorEnabled(inv.Stdout, noColor)
 			})
 		},

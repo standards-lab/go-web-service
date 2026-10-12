@@ -1,11 +1,8 @@
 package demo
 
 import (
-	"io"
+	"github.com/standards-lab/go-cli-sdk"
 
-	"github.com/spf13/cobra"
-
-	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 
@@ -15,19 +12,19 @@ func Scenarios() []scenario.Scenario {
 	return []scenario.Scenario{Compile(), Organization(), Problems(), Storage()}
 }
 
-// Commands builds the demo command with one subcommand per scenario, named
-// for the scenario.
-func Commands(runEnv func() env.Env, newReporter func(io.Writer) *scenario.Reporter) *cobra.Command {
-	demo := &cobra.Command{
-		Use:   "demo <scenario>",
-		Short: "Run one scenario",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return cmd.Help()
-		},
+// Commands builds the demo command on go-cli-sdk, with one subcommand per
+// scenario, named for the scenario, in presentation order. The demo command
+// declares with Use the one node its scenarios read, src's; the scenarios
+// construct their own HTTP clients from the environment src resolves,
+// since each addresses the stack it needs by name. Run with no scenario or
+// an unknown one, it is a usage error the dispatcher reports.
+func Commands(src scenario.Source) *cli.Command {
+	demo := &cli.Command{
+		Name:    "demo",
+		Summary: "Run one scenario",
 	}
 	for _, s := range Scenarios() {
-		demo.AddCommand(scenario.Command(s, runEnv, newReporter))
+		demo.Add(scenario.Command(s, src))
 	}
-	return demo
+	return demo.Use(src.Node)
 }

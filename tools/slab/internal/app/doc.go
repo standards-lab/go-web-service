@@ -12,27 +12,21 @@
 //     configuration nodes and the client node, the HTTP client to the
 //     service bound to the config's base URL; and the output source the
 //     families on the tree render through;
-//   - domain.go, admin.go, and demo.go: the domain commands on the tree
-//     (org and docs), the admin command on the tree over the database and
-//     storage families, and the demo mount and the scenario listing;
-//   - version.go: the version command, which declares no nodes;
-//   - legacy.go and commands.go: the temporary bridge to the command
-//     families still on cobra, and their list of mounts.
+//   - domain.go, admin.go, and demo.go: the domain commands (org and
+//     docs), the admin command over the database and storage families, and
+//     the demo command, over slab's own scenario runner, and list, the
+//     scenario listing;
+//   - version.go: the version command, which declares no nodes.
 //
 // [Nodes] holds one handle per node: each define function fills its own
 // part of one Nodes value. Defining the nodes constructs nothing. A command
 // declares the nodes it needs with Use; the dispatcher builds them, with
 // the lifecycle configuration node, only when the command runs, and shuts
 // them down when it returns. A run that builds nothing, such as help, a
-// usage error, or version, reads no configuration. The root's PreRun
+// usage error, version, or list, reads no configuration. The root's PreRun
 // records which root flags a dispatch set, so the config node applies a
-// flag over its variable only when the flag was given.
-//
-// The org, docs, and admin families are on the tree. The command families
-// demo and list are moving onto it one by one. Until each moves,
-// [App.Run] hands a run that selects it to a cobra tree built per run as
-// before the move, with its own flags, words, requests, and exit codes;
-// the root's help lists them beside the commands on the tree.
+// flag over its variable only when the flag was given. Every command
+// dispatches through go-cli-sdk.
 //
 // The App publishes its composition: [App.Graph], [App.Nodes], and
 // [App.Root] return the graph, a handle on each of its nodes, and the

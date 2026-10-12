@@ -66,7 +66,7 @@ Door          Two-way: no release (go-web-service is untagged); the exit-code
 
 ## Progress
 
-slices 5/6 committed · standards — · spec — · editor —
+slices 6/6 committed · standards — · spec — · editor —
 
 ## Decisions
 

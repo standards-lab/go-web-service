@@ -1,23 +1,20 @@
-package document_test
+package app_test
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/spf13/cobra"
+	"github.com/standards-lab/go-core/process"
 	"github.com/standards-lab/go-web-sdk"
 
 	"github.com/standards-lab/go-web-service/tools/slab/domain/document"
-	"github.com/standards-lab/go-web-service/tools/slab/httpx"
-	"github.com/standards-lab/go-web-service/tools/slab/output"
 )
 
 // The organization and the ids the commands address.
@@ -27,99 +24,33 @@ const (
 	file = "00000000-0000-7000-8000-000000000003"
 )
 
-// exchange is one request as the fake service received it.
-type exchange struct {
-	method, uri, ifMatch, contentType, body string
-}
-
-// service is a fake that answers every request with one canned reply and
-// records what it received.
-type service struct {
-	status   int
-	reply    string
-	location string
-	received []exchange
-}
-
-func newService(t *testing.T, status int, reply string) (*service, *httptest.Server) {
+// runDocs runs a fresh App over "docs" and args, with --base naming
+// srv, and returns what it did.
+func runDocs(t *testing.T, srv *httptest.Server, args ...string) result {
 	t.Helper()
-	s := &service{status: status, reply: reply}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		s.received = append(s.received, exchange{
-			method:      r.Method,
-			uri:         r.URL.RequestURI(),
-			ifMatch:     r.Header.Get("If-Match"),
-			contentType: r.Header.Get("Content-Type"),
-			body:        string(body),
-		})
-		if s.location != "" {
-			w.Header().Set("Location", s.location)
+	return runFamily(t, nil, []string{"docs"}, srv, args...)
+}
+
+// Run without a leaf, docs and each group print their help, listing the
+// subcommands, as a usage error that builds nothing.
+func TestDocs_MountsOneSubcommandPerEndpoint(t *testing.T) {
+	_, srv := newService(t, http.StatusOK, `{}`)
+	for args, wants := range map[string][]string{
+		"":      {"dirs", "files"},
+		"dirs":  {"create", "get", "list", "move", "delete"},
+		"files": {"list", "put", "show", "get", "move", "delete"},
+	} {
+		r := runDocs(t, srv, strings.Fields(args)...)
+		if r.code != process.ExitUsage {
+			t.Errorf("docs %s: code = %d, want the help's %d", args, r.code, process.ExitUsage)
 		}
-		// The service answers an error status with a problem document.
-		if s.status >= http.StatusBadRequest {
-			w.Header().Set("Content-Type", web.ProblemMediaType)
-		} else {
-			w.Header().Set("Content-Type", web.JSONMediaType)
+		for _, want := range wants {
+			if !strings.Contains(r.stdout, "\n  "+want+" ") {
+				t.Errorf("docs %s help lacks %q:\n%s", args, want, r.stdout)
+			}
 		}
-		w.WriteHeader(s.status)
-		_, _ = io.WriteString(w, s.reply)
-	}))
-	t.Cleanup(srv.Close)
-	return s, srv
-}
-
-// only is the one request the service received, failing when it received
-// any other number.
-func (s *service) only(t *testing.T) exchange {
-	t.Helper()
-	if len(s.received) != 1 {
-		t.Fatalf("the service received %d requests, want 1: %+v", len(s.received), s.received)
-	}
-	return s.received[0]
-}
-
-// run executes docs with args against srv and returns what it wrote to
-// stdout and the error it returned.
-func run(t *testing.T, srv *httptest.Server, args ...string) (string, error) {
-	t.Helper()
-	var out, errOut bytes.Buffer
-	docs := document.Commands(func() *document.Client {
-		return document.NewClient(httpx.NewClient(srv.URL))
-	}, output.New(&out, &errOut, nil))
-	docs.SetOut(&out)
-	docs.SetErr(&errOut)
-	docs.SilenceUsage = true
-	docs.SilenceErrors = true
-	docs.SetArgs(args)
-	err := docs.Execute()
-	return out.String(), err
-}
-
-// names is the subcommands of cmd, in cobra's sorted order.
-func names(cmd *cobra.Command) string {
-	var all []string
-	for _, c := range cmd.Commands() {
-		all = append(all, c.Name())
-	}
-	return strings.Join(all, ",")
-}
-
-func TestCommands_MountsOneSubcommandPerEndpoint(t *testing.T) {
-	docs := document.Commands(nil, nil)
-	if docs.Name() != "docs" {
-		t.Errorf("Commands().Name() = %q; want docs", docs.Name())
-	}
-	if got := names(docs); got != "dirs,files" {
-		t.Errorf("docs subcommands = %s", got)
-	}
-	for _, group := range docs.Commands() {
-		want := map[string]string{
-			"dirs":  "create,delete,get,list,move",
-			"files": "delete,get,list,move,put,show",
-		}[group.Name()]
-		if got := names(group); got != want {
-			t.Errorf("docs %s subcommands = %s, want %s", group.Name(), got, want)
+		if len(r.built) != 0 {
+			t.Errorf("docs %s: nodes built = %q, want none", args, r.built)
 		}
 	}
 }
@@ -127,7 +58,7 @@ func TestCommands_MountsOneSubcommandPerEndpoint(t *testing.T) {
 // Every command sends its one request: the method, the URI with each
 // segment escaped, and the body and headers the flags build. An upload's
 // raw body is covered by the put tests below.
-func TestCommands_SendTheRequestTheirRouteNames(t *testing.T) {
+func TestDocs_SendTheRequestTheirRouteNames(t *testing.T) {
 	base := "/api/documents/" + org
 	for name, tc := range map[string]struct {
 		args                              []string
@@ -216,9 +147,7 @@ func TestCommands_SendTheRequestTheirRouteNames(t *testing.T) {
 			if tc.status == http.StatusAccepted {
 				s.location = base + "/directories/" + dir
 			}
-			if _, err := run(t, srv, tc.args...); err != nil {
-				t.Fatal(err)
-			}
+			runDocs(t, srv, tc.args...).ok(t)
 			got := s.only(t)
 			if got.method != tc.method || got.uri != tc.uri {
 				t.Errorf("request = %s %s, want %s %s", got.method, got.uri, tc.method, tc.uri)
@@ -230,24 +159,26 @@ func TestCommands_SendTheRequestTheirRouteNames(t *testing.T) {
 	}
 }
 
-func TestCommands_RenderTheReply(t *testing.T) {
+func TestDocs_RenderTheReply(t *testing.T) {
 	s, srv := newService(t, http.StatusCreated, `{"id":"n1","version":1}`)
-	out, err := run(t, srv, "dirs", "create", org, "--parent-id", "root", "--name", "reports")
-	if err != nil {
-		t.Fatal(err)
-	}
+	r := runDocs(t, srv, "dirs", "create", org, "--parent-id", "root", "--name", "reports")
+	r.ok(t)
 	s.only(t)
-	if want := "{\n  \"id\": \"n1\",\n  \"version\": 1\n}\n"; out != want {
-		t.Errorf("stdout = %q, want %q", out, want)
+	if want := "{\n  \"id\": \"n1\",\n  \"version\": 1\n}\n"; r.stdout != want {
+		t.Errorf("stdout = %q, want %q", r.stdout, want)
+	}
+	if r.stderr != "" {
+		t.Errorf("stderr = %q, want empty", r.stderr)
 	}
 	_, srv = newService(t, http.StatusNoContent, "")
-	out, err = run(t, srv, "files", "delete", org, file, "--version", "1")
-	if err != nil || out != "204 No Content\n" {
-		t.Errorf("delete = %q, %v; want the status line", out, err)
+	r = runDocs(t, srv, "files", "delete", org, file, "--version", "1")
+	r.ok(t)
+	if r.stdout != "204 No Content\n" {
+		t.Errorf("delete = %q; want the status line", r.stdout)
 	}
 }
 
-func TestCommands_ExpectTheirOneStatus(t *testing.T) {
+func TestDocs_ExpectTheirOneStatus(t *testing.T) {
 	upload := filepath.Join(t.TempDir(), "a.txt")
 	if err := os.WriteFile(upload, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -260,102 +191,148 @@ func TestCommands_ExpectTheirOneStatus(t *testing.T) {
 		"dirs delete": {[]string{"dirs", "delete", org, dir, "--version", "1"}, "want 204"},
 		"files put":   {[]string{"files", "put", org, "root", upload}, "want 201"},
 	} {
-		_, srv := newService(t, http.StatusAccepted, `{}`)
-		if _, err := run(t, srv, tc.args...); err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("%s: err = %v, want the status mismatch", name, err)
-		}
+		t.Run(name, func(t *testing.T) {
+			_, srv := newService(t, http.StatusAccepted, `{}`)
+			r := runDocs(t, srv, tc.args...)
+			r.failed(t, strings.Join(tc.args[:2], " "), tc.want)
+			if r.stdout != "" {
+				t.Errorf("stdout = %q, want empty", r.stdout)
+			}
+		})
 	}
 }
 
-func TestCommands_ReturnTheProblemAnErrorStatusCarries(t *testing.T) {
+// A problem response is reported once, every member of the document on
+// its own line after the command's path, with nothing on stdout.
+func TestDocs_ReportTheProblemAnErrorStatusCarries(t *testing.T) {
 	_, srv := newService(t, http.StatusNotFound, `{"type":"about:blank","title":"Not Found","status":404,"detail":"no such directory"}`)
-	_, err := run(t, srv, "dirs", "get", org, dir)
-	var p web.Problem
-	if !errors.As(err, &p) {
-		t.Fatalf("err = %v (%T), want a web.Problem", err, err)
-	}
-	if p.Status != 404 || p.Detail != "no such directory" {
-		t.Errorf("problem = %+v", p)
-	}
+	runDocs(t, srv, "dirs", "get", org, dir).failure(t, "slab docs dirs get: 404 Not Found\ndetail: no such directory\n")
 }
 
-// Every field-flag refusal happens before the request fires.
-func TestCommands_RefuseMissingInputBeforeAnyRequest(t *testing.T) {
+// Every input refusal is a usage error, before anything is built or the
+// request fires.
+func TestDocs_RefuseMissingInputBeforeAnyRequest(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args []string
 		want string
 	}{
-		"dirs create nothing":     {[]string{"dirs", "create", org}, "--parent-id and --name are required"},
+		"dirs create nothing":     {[]string{"dirs", "create", org}, "slab docs dirs create: --parent-id and --name are required unless --body is given"},
 		"dirs create no name":     {[]string{"dirs", "create", org, "--parent-id", "root"}, "--parent-id and --name are required"},
 		"dirs create no parent":   {[]string{"dirs", "create", org, "--name", "x"}, "--parent-id and --name are required"},
-		"dirs move no version":    {[]string{"dirs", "move", org, dir, "--parent-id", "root", "--name", "x"}, `required flag(s) "version" not set`},
+		"dirs move no version":    {[]string{"dirs", "move", org, dir, "--parent-id", "root", "--name", "x"}, "slab docs dirs move: required flag --version not set"},
 		"dirs move no name":       {[]string{"dirs", "move", org, dir, "--version", "1", "--parent-id", "root"}, "--parent-id and --name are required"},
 		"dirs move body no key":   {[]string{"dirs", "move", org, dir, "--body", `{"parent_id":"root","name":"x"}`}, "--version is required"},
-		"files move no version":   {[]string{"files", "move", org, file, "--directory-id", "root", "--name", "x"}, `required flag(s) "version" not set`},
+		"files move no version":   {[]string{"files", "move", org, file, "--directory-id", "root", "--name", "x"}, "slab docs files move: required flag --version not set"},
 		"files move no dir":       {[]string{"files", "move", org, file, "--version", "1", "--name", "x"}, "--directory-id and --name are required"},
 		"files move body no key":  {[]string{"files", "move", org, file, "--body", `{"directory_id":"root","name":"x"}`}, "--version is required"},
-		"dirs delete no version":  {[]string{"dirs", "delete", org, dir, "--recursive"}, `required flag(s) "version" not set`},
-		"files delete no version": {[]string{"files", "delete", org, file}, `required flag(s) "version" not set`},
-		"wait without recursive":  {[]string{"dirs", "delete", org, dir, "--version", "1", "--wait", "5s"}, "--wait needs --recursive"},
-		"negative wait":           {[]string{"dirs", "delete", org, dir, "--version", "1", "--recursive", "--wait", "-1s"}, "--wait -1s"},
-		"files put no file":       {[]string{"files", "put", org, "root", filepath.Join(t.TempDir(), "missing")}, "no such file"},
-		"list nameless filter":    {[]string{"files", "list", org, "root", "--filter", "=x"}, "--filter"},
-		"list page and cursor":    {[]string{"dirs", "list", org, "root", "--page", "2", "--cursor", "c"}, "if any flags in the group [page cursor] are set none of the others can be"},
+		"dirs delete no version":  {[]string{"dirs", "delete", org, dir, "--recursive"}, "slab docs dirs delete: required flag --version not set"},
+		"files delete no version": {[]string{"files", "delete", org, file}, "slab docs files delete: required flag --version not set"},
+		"wait without recursive":  {[]string{"dirs", "delete", org, dir, "--version", "1", "--wait", "5s"}, "slab docs dirs delete: --wait needs --recursive"},
+		"negative wait":           {[]string{"dirs", "delete", org, dir, "--version", "1", "--recursive", "--wait", "-1s"}, "slab docs dirs delete: --wait -1s: want a positive duration"},
+		"list nameless filter":    {[]string{"files", "list", org, "root", "--filter", "=x"}, `slab docs files list: --filter "=x": want field=value`},
+		"list page and cursor":    {[]string{"dirs", "list", org, "root", "--page", "2", "--cursor", "c"}, "slab docs dirs list: flags --page, --cursor cannot be used together"},
+		"an unknown flag":         {[]string{"dirs", "get", org, dir, "--bogus"}, "slab docs dirs get: flag provided but not defined: -bogus"},
 	} {
-		s, srv := newService(t, http.StatusOK, `{}`)
-		if _, err := run(t, srv, tc.args...); err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("%s: err = %v, want %q", name, err, tc.want)
-		}
-		if len(s.received) != 0 {
-			t.Errorf("%s: the request fired anyway", name)
-		}
+		t.Run(name, func(t *testing.T) {
+			s, srv := newService(t, http.StatusOK, `{}`)
+			runDocs(t, srv, tc.args...).usage(t, tc.want)
+			if len(s.received) != 0 {
+				t.Errorf("the request fired anyway: %+v", s.received)
+			}
+		})
 	}
 }
 
-func TestCommands_RefuseBodyAlongsideAFieldFlag(t *testing.T) {
+// A file that cannot be read is a failure, not a usage error, and no
+// request fires.
+func TestFilesPut_FailsOnAnUnreadableFile(t *testing.T) {
+	s, srv := newService(t, http.StatusCreated, `{}`)
+	runDocs(t, srv, "files", "put", org, "root", filepath.Join(t.TempDir(), "missing")).failed(t, "files put", "no such file")
+	if len(s.received) != 0 {
+		t.Error("the request fired anyway")
+	}
+}
+
+func TestDocs_RefuseBodyAlongsideAFieldFlag(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args  []string
-		group string
+		flags string
 	}{
-		"dirs create parent": {[]string{"dirs", "create", org, "--body", `{}`, "--parent-id", "root"}, "[body parent-id]"},
-		"dirs create name":   {[]string{"dirs", "create", org, "--body", `{}`, "--name", "x"}, "[body name]"},
-		"dirs move parent":   {[]string{"dirs", "move", org, dir, "--body", `{"version":1}`, "--parent-id", "root"}, "[body parent-id]"},
-		"dirs move name":     {[]string{"dirs", "move", org, dir, "--body", `{"version":1}`, "--name", "x"}, "[body name]"},
-		"files move dir":     {[]string{"files", "move", org, file, "--body", `{"version":1}`, "--directory-id", "root"}, "[body directory-id]"},
-		"files move name":    {[]string{"files", "move", org, file, "--body", `{"version":1}`, "--name", "x"}, "[body name]"},
+		"dirs create parent": {[]string{"dirs", "create", org, "--body", `{}`, "--parent-id", "root"}, "--body, --parent-id"},
+		"dirs create name":   {[]string{"dirs", "create", org, "--body", `{}`, "--name", "x"}, "--body, --name"},
+		"dirs move parent":   {[]string{"dirs", "move", org, dir, "--body", `{"version":1}`, "--parent-id", "root"}, "--body, --parent-id"},
+		"dirs move name":     {[]string{"dirs", "move", org, dir, "--body", `{"version":1}`, "--name", "x"}, "--body, --name"},
+		"files move dir":     {[]string{"files", "move", org, file, "--body", `{"version":1}`, "--directory-id", "root"}, "--body, --directory-id"},
+		"files move name":    {[]string{"files", "move", org, file, "--body", `{"version":1}`, "--name", "x"}, "--body, --name"},
 	} {
-		s, srv := newService(t, http.StatusOK, `{}`)
-		_, err := run(t, srv, tc.args...)
-		if err == nil || !strings.Contains(err.Error(), "if any flags in the group "+tc.group+" are set none of the others can be") {
-			t.Errorf("%s: err = %v, want cobra's mutual exclusion error", name, err)
-		}
-		if len(s.received) != 0 {
-			t.Errorf("%s: the request fired anyway", name)
-		}
+		t.Run(name, func(t *testing.T) {
+			s, srv := newService(t, http.StatusOK, `{}`)
+			runDocs(t, srv, tc.args...).usage(t, "flags "+tc.flags+" cannot be used together")
+			if len(s.received) != 0 {
+				t.Error("the request fired anyway")
+			}
+		})
 	}
 }
 
 func TestPositionalArguments_AreRequiredForEveryPathSegment(t *testing.T) {
-	_, srv := newService(t, http.StatusOK, `{}`)
 	for _, tc := range []struct {
 		args []string
 		want string
 	}{
-		{[]string{"dirs", "create"}, "accepts 1 arg(s), received 0"},
-		{[]string{"dirs", "get", org}, "accepts 2 arg(s), received 1"},
-		{[]string{"dirs", "list", org}, "accepts 2 arg(s), received 1"},
-		{[]string{"dirs", "move", org}, "accepts 2 arg(s), received 1"},
-		{[]string{"dirs", "delete", org}, "accepts 2 arg(s), received 1"},
-		{[]string{"files", "list", org}, "accepts 2 arg(s), received 1"},
-		{[]string{"files", "put", org, "root"}, "accepts 3 arg(s), received 2"},
-		{[]string{"files", "show", org}, "accepts 2 arg(s), received 1"},
-		{[]string{"files", "get", org}, "accepts 2 arg(s), received 1"},
-		{[]string{"files", "move", org}, "accepts 2 arg(s), received 1"},
-		{[]string{"files", "delete", org}, "accepts 2 arg(s), received 1"},
+		{[]string{"dirs", "create"}, "accepts 1 argument, got 0"},
+		{[]string{"dirs", "get", org}, "accepts 2 arguments, got 1"},
+		{[]string{"dirs", "list", org}, "accepts 2 arguments, got 1"},
+		{[]string{"dirs", "move", org}, "accepts 2 arguments, got 1"},
+		{[]string{"dirs", "delete", org}, "accepts 2 arguments, got 1"},
+		{[]string{"files", "list", org}, "accepts 2 arguments, got 1"},
+		{[]string{"files", "put", org, "root"}, "accepts 3 arguments, got 2"},
+		{[]string{"files", "show", org}, "accepts 2 arguments, got 1"},
+		{[]string{"files", "get", org}, "accepts 2 arguments, got 1"},
+		{[]string{"files", "move", org}, "accepts 2 arguments, got 1"},
+		{[]string{"files", "delete", org}, "accepts 2 arguments, got 1"},
 	} {
-		if _, err := run(t, srv, tc.args...); err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("%s: err = %v, want %q", strings.Join(tc.args, " "), err, tc.want)
-		}
+		t.Run(strings.Join(tc.args[:2], " "), func(t *testing.T) {
+			s, srv := newService(t, http.StatusOK, `{}`)
+			runDocs(t, srv, tc.args...).usage(t, "slab docs "+strings.Join(tc.args[:2], " ")+": "+tc.want)
+			if len(s.received) != 0 {
+				t.Error("the request fired anyway")
+			}
+		})
+	}
+}
+
+// Every docs command builds the nodes it declares, no color and
+// client, the base node the client is bound to, and the lifecycle
+// configuration, and nothing else.
+func TestDocs_BuildOnlyTheColorTheClientAndItsBase(t *testing.T) {
+	upload := filepath.Join(t.TempDir(), "a.txt")
+	if err := os.WriteFile(upload, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"dirs", "create", org, "--parent-id", "root", "--name", "x"},
+		{"dirs", "get", org, dir},
+		{"dirs", "list", org, dir},
+		{"dirs", "move", org, dir, "--version", "1", "--parent-id", "root", "--name", "x"},
+		{"dirs", "delete", org, dir, "--version", "1"},
+		{"files", "list", org, dir},
+		{"files", "put", org, dir, upload},
+		{"files", "show", org, file},
+		{"files", "get", org, file},
+		{"files", "move", org, file, "--version", "1", "--directory-id", "root", "--name", "x"},
+		{"files", "delete", org, file, "--version", "1"},
+	} {
+		t.Run(strings.Join(args[:2], " "), func(t *testing.T) {
+			_, srv := newService(t, http.StatusTeapot, `{"status":418}`)
+			r := runDocs(t, srv, args...)
+			if r.code != process.ExitFailure {
+				t.Errorf("code = %d, want the problem's %d; stderr = %q", r.code, process.ExitFailure, r.stderr)
+			}
+			if !slices.Equal(r.built, familyBuilt) {
+				t.Errorf("nodes built = %q, want %q", r.built, familyBuilt)
+			}
+		})
 	}
 }
 
@@ -386,9 +363,7 @@ func TestFilesPut_SendsTheFileUnderItsNameAndMediaType(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, srv := newService(t, http.StatusCreated, `{"id":"f","version":1}`)
-			if _, err := run(t, srv, append([]string{"files", "put", org, "root"}, tc.args...)...); err != nil {
-				t.Fatal(err)
-			}
+			runDocs(t, srv, append([]string{"files", "put", org, "root"}, tc.args...)...).ok(t)
 			got := s.only(t)
 			if got.method != http.MethodPost || got.uri != tc.uri || got.contentType != tc.contentType || got.body != "bytes" {
 				t.Errorf("sent %s %s as %q: %q; want POST %s as %q", got.method, got.uri, got.contentType, got.body, tc.uri, tc.contentType)
@@ -414,10 +389,9 @@ func TestFilesGet_WritesTheBytesToOut(t *testing.T) {
 	defer srv.Close()
 	path := filepath.Join(t.TempDir(), "a.txt")
 
-	out, err := run(t, srv, "files", "get", org, file, "--out", path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	r := runDocs(t, srv, "files", "get", org, file, "--out", path)
+	r.ok(t)
+	out := r.stdout
 	b, _ := os.ReadFile(path)
 	if string(b) != "secret" || strings.Contains(out, "secret") {
 		t.Errorf("file = %q, stdout = %q; want the bytes in the file only", b, out)
@@ -429,9 +403,10 @@ func TestFilesGet_WritesTheBytesToOut(t *testing.T) {
 	}
 
 	unsaved := filepath.Join(t.TempDir(), "b.txt")
-	out, err = run(t, srv, "files", "get", org, file, "--if-none-match", `"e1"`, "--out", unsaved)
-	if err != nil || !strings.HasPrefix(out, "304 Not Modified") {
-		t.Errorf("revalidation = %q, %v", out, err)
+	r = runDocs(t, srv, "files", "get", org, file, "--if-none-match", `"e1"`, "--out", unsaved)
+	r.ok(t)
+	if !strings.HasPrefix(r.stdout, "304 Not Modified") {
+		t.Errorf("revalidation = %q", r.stdout)
 	}
 	if _, err := os.Stat(unsaved); !os.IsNotExist(err) {
 		t.Errorf("a 304 wrote %s: %v", unsaved, err)
@@ -445,25 +420,19 @@ func TestDirsDelete_RecursiveReportsTheAcceptedBranch(t *testing.T) {
 	loc := "/api/documents/" + org + "/directories/" + dir
 	s, srv := newService(t, http.StatusAccepted, "")
 	s.location = loc
-	out, err := run(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive")
-	if err != nil {
-		t.Fatal(err)
-	}
+	r := runDocs(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive")
+	r.ok(t)
 	want := "202 Accepted\n" +
 		"Location: " + loc + "\n" +
 		"the branch is deleting; the sweep removes it, and the Location answers 404 once it has\n"
-	if out != want {
-		t.Errorf("stdout = %q, want %q", out, want)
+	if r.stdout != want {
+		t.Errorf("stdout = %q, want %q", r.stdout, want)
 	}
 
 	_, srv = newService(t, http.StatusNoContent, "")
-	if _, err := run(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive"); err == nil || !strings.Contains(err.Error(), "want 202") {
-		t.Errorf("a 204 to a recursive delete: err = %v, want the status mismatch", err)
-	}
+	runDocs(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive").failed(t, "dirs delete", "want 202")
 	_, srv = newService(t, http.StatusAccepted, "")
-	if _, err := run(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive"); err == nil || !strings.Contains(err.Error(), "no Location") {
-		t.Errorf("a 202 without Location: err = %v, want the refusal", err)
-	}
+	runDocs(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive").failed(t, "dirs delete", "no Location")
 }
 
 // sweeping is a fake service whose recursive delete answers 202, and whose
@@ -498,10 +467,9 @@ func sweeping(t *testing.T, reads int) (*httptest.Server, *[]string) {
 func TestDirsDelete_WaitPollsTheLocationUntilTheSweepIsDone(t *testing.T) {
 	loc := "/api/documents/" + org + "/directories/" + dir
 	srv, seen := sweeping(t, 1)
-	out, err := run(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive", "--wait", "10s")
-	if err != nil {
-		t.Fatal(err)
-	}
+	r := runDocs(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive", "--wait", "10s")
+	r.ok(t)
+	out := r.stdout
 	want := []string{"DELETE " + loc + "?recursive=true", "GET " + loc, "GET " + loc}
 	if strings.Join(*seen, ",") != strings.Join(want, ",") {
 		t.Errorf("requests = %q, want %q", *seen, want)
@@ -511,20 +479,16 @@ func TestDirsDelete_WaitPollsTheLocationUntilTheSweepIsDone(t *testing.T) {
 	}
 
 	srv, _ = sweeping(t, 1000)
-	if _, err := run(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive", "--wait", "100ms"); err == nil || !strings.Contains(err.Error(), "still answers 200 after 100ms") {
-		t.Errorf("err = %v, want the wait to run out", err)
-	}
+	runDocs(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive", "--wait", "100ms").failed(t, "dirs delete", "still answers 200 after 100ms")
 }
 
 // dirs get prints the read as the service wrote it, its status among the
 // members, and the entity restates the member.
 func TestDirsGet_ShowsTheStatus(t *testing.T) {
 	_, srv := newService(t, http.StatusOK, `{"id":"`+dir+`","parent_id":null,"name":"reports","path":"/reports","status":"deleting","version":5}`)
-	out, err := run(t, srv, "dirs", "get", org, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out, `"status": "deleting"`) {
+	r := runDocs(t, srv, "dirs", "get", org, dir)
+	r.ok(t)
+	if out := r.stdout; !strings.Contains(out, `"status": "deleting"`) {
 		t.Errorf("stdout lacks the status:\n%s", out)
 	}
 	var d document.Directory
@@ -533,9 +497,9 @@ func TestDirsGet_ShowsTheStatus(t *testing.T) {
 	}
 }
 
-// The guarded deletes' refusals print through the root's problem printer
-// as the service wrote them: the status and title, then the detail.
-func TestDeletes_PrintThePreconditionAndConflictProblems(t *testing.T) {
+// The guarded deletes' refusals are reported as the service wrote them,
+// after the command's path: the status and title, then the detail.
+func TestDeletes_ReportThePreconditionAndConflictProblems(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args   []string
 		status int
@@ -545,28 +509,22 @@ func TestDeletes_PrintThePreconditionAndConflictProblems(t *testing.T) {
 		"428": {
 			[]string{"files", "delete", org, file, "--version", "1"}, http.StatusPreconditionRequired,
 			`{"title":"Precondition Required","status":428,"detail":"the request requires an If-Match header"}`,
-			"428 Precondition Required\ndetail: the request requires an If-Match header\n",
+			"slab docs files delete: 428 Precondition Required\ndetail: the request requires an If-Match header\n",
 		},
 		"412": {
 			[]string{"dirs", "delete", org, dir, "--version", "1"}, http.StatusPreconditionFailed,
 			`{"title":"Precondition Failed","status":412}`,
-			"412 Precondition Failed\n",
+			"slab docs dirs delete: 412 Precondition Failed\n",
 		},
 		"409": {
 			[]string{"dirs", "delete", org, dir, "--version", "1"}, http.StatusConflict,
 			`{"title":"Conflict","status":409,"detail":"the directory is not empty"}`,
-			"409 Conflict\ndetail: the directory is not empty\n",
+			"slab docs dirs delete: 409 Conflict\ndetail: the directory is not empty\n",
 		},
 	} {
-		_, srv := newService(t, tc.status, tc.reply)
-		_, err := run(t, srv, tc.args...)
-		if err == nil {
-			t.Fatalf("%s: no error", name)
-		}
-		var printed bytes.Buffer
-		output.New(io.Discard, &printed, nil).Error(err)
-		if printed.String() != tc.want {
-			t.Errorf("%s: printed %q, want %q", name, printed.String(), tc.want)
-		}
+		t.Run(name, func(t *testing.T) {
+			_, srv := newService(t, tc.status, tc.reply)
+			runDocs(t, srv, tc.args...).failure(t, tc.want)
+		})
 	}
 }

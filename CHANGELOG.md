@@ -54,6 +54,7 @@ accumulate under [Unreleased] until the first cut.
 - The storage seeds: the `default` state stores a logo per organization and acme's document
   tree under fixed `5eed…` ids, so a rerun finds each file and a reset, which leaves the objects
   in the container, writes it again under the same key.
+- `slab version`, which prints the module version slab was built at, or `(devel)`.
 - `slab demo storage`, a narrated scenario of the storage end to end, and slab's `org logo`,
   `docs`, and `admin storage` commands.
 - The integration tier's storage cases (`TestDocument`, `TestDocumentRefusedUpload`,
@@ -122,6 +123,16 @@ accumulate under [Unreleased] until the first cut.
 
 ### Changed
 
+- slab runs on go-cli-sdk v0.2.0, in place of cobra and pflag, with a composition root modeled
+  on go-cli-sdk-template's. Help, a parent run with no or an unknown subcommand, and every usage
+  error exit 2; help exited 0 and a usage error 1 before. Input a command refuses before it
+  sends, such as a malformed `--body`, is a usage error. A command builds only the settings and
+  client it declares, so help, `list`, and `version` read no configuration. Every root flag has
+  a `SLAB_*` variable, which the flag overrides wherever it is given on the command line;
+  `SLAB_REPO` and `SLAB_NO_COLOR` are new. A problem response prints nothing on stdout and one
+  report on stderr: `slab <command path>: `, then every member of the document on its own line.
+- Pins: go-core v0.8.0 and go-web-sdk v0.15.2, in both modules; their own changes are in their
+  CHANGELOGs.
 - Every time the API's JSON carries (an organization's, a directory's, and a file's
   `created_at` and `updated_at`) is in UTC, ending in `Z`, whatever zone the process runs in. It
   carried the host's offset before. The UTC guarantee comes from the libraries' releases, which

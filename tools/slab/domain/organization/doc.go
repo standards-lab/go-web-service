@@ -13,14 +13,16 @@
 //   - [CreateOrganization], [EditOrganization], and [TransferOrganization],
 //     the command bodies
 //   - [Organization], [Page], and [Identity], the replies
-//   - [Commands], which builds the org command over a Client
+//   - [Commands], which builds the org command on go-cli-sdk over the
+//     client node and the output source the composition root gives it
 //
 // The package has one file per role. entities.go restates the wire types the
 // service defines, with the same json tags, so a server-side rename breaks
 // slab rather than being followed silently. client.go names the routes and
-// sends one request per endpoint through httpx; it is the only file here
-// that imports httpx. commands.go builds the org command, its seven
+// sends one request per endpoint through httpx; no other file here sends
+// one. commands.go builds the org command, its seven
 // subcommands, and the logo group's three over a Client, each resolving its
-// input from field flags or a verbatim --body and rendering what came back
-// through output.
+// input from field flags or a verbatim --body in its Validate, before
+// anything is built, and rendering what came back through output, or
+// returning the output.Report of a problem response.
 package organization

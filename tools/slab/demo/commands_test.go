@@ -2,18 +2,19 @@ package demo_test
 
 import (
 	"bytes"
-	"io"
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/standards-lab/go-cli-sdk"
+	"github.com/standards-lab/go-core/graph"
+	"github.com/standards-lab/go-core/lifecycle"
+	"github.com/standards-lab/go-core/process"
 
 	"github.com/standards-lab/go-web-service/tools/slab/demo"
 	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
-
-func noEnv() env.Env { return env.Env{} }
-
-func plainReporter(w io.Writer) *scenario.Reporter { return scenario.NewReporter(w, false) }
 
 func TestScenarios_ListsEachOnceInPresentationOrder(t *testing.T) {
 	var names []string
@@ -25,19 +26,45 @@ func TestScenarios_ListsEachOnceInPresentationOrder(t *testing.T) {
 	}
 }
 
-// cobra sorts a command's subcommands by name, so the test checks the set
-// and not the order; the order Scenarios returns is the listing's concern.
+// The demo command's help lists one subcommand per scenario, each with its
+// summary, in presentation order. Help builds nothing, so the node the
+// Source names is never constructed.
 func TestCommands_MountsOneSubcommandPerScenario(t *testing.T) {
-	cmd := demo.Commands(noEnv, plainReporter)
-	if cmd.Name() != "demo" {
-		t.Errorf("Commands().Name() = %q; want demo", cmd.Name())
+	g := graph.New()
+	node := g.Define("setting", func(*graph.Scope) (struct{}, error) { return struct{}{}, nil })
+	lc := g.Define("lifecycle config", func(*graph.Scope) (lifecycle.Config, error) {
+		var c lifecycle.Config
+		return c, c.Finalize("")
+	})
+	root := (&cli.Command{Name: "slab"}).Add(demo.Commands(scenario.Source{
+		Nodes:    []graph.Ref{node},
+		Env:      func(*cli.Invocation) env.Env { return env.Env{} },
+		Reporter: func(inv *cli.Invocation) *scenario.Reporter { return scenario.NewReporter(inv.Stdout, false) },
+	}))
+	var out, errOut bytes.Buffer
+
+	code := cli.Run(context.Background(), root, []string{"demo", "--help"}, cli.Streams{Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errOut}, cli.WithGraph(g, lc))
+
+	if code != process.ExitUsage {
+		t.Errorf("demo --help exited %d, want %d; stderr = %q", code, process.ExitUsage, errOut.String())
+	}
+	if !strings.HasPrefix(out.String(), "Run one scenario\n\nUsage:\n  slab demo <command> [flags]\n") {
+		t.Errorf("demo help does not open with its summary and usage:\n%s", out.String())
 	}
 	var names []string
-	for _, sub := range cmd.Commands() {
-		names = append(names, sub.Name())
+	for _, s := range demo.Scenarios() {
+		if !strings.Contains(out.String(), "  "+s.Name+" ") || !strings.Contains(out.String(), s.Summary) {
+			t.Errorf("demo help lacks %s with its summary:\n%s", s.Name, out.String())
+		}
+		names = append(names, s.Name)
 	}
-	if got := strings.Join(names, ","); got != "domain,problems,sqlate,storage" {
-		t.Errorf("Commands() subcommands = %s; want domain,problems,sqlate,storage", got)
+	at := -1
+	for _, name := range names {
+		i := strings.Index(out.String(), "\n  "+name+" ")
+		if i < at {
+			t.Errorf("demo help lists %s out of presentation order %q:\n%s", name, names, out.String())
+		}
+		at = i
 	}
 }
 

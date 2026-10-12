@@ -5,126 +5,109 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/spf13/cobra"
+	"github.com/standards-lab/go-cli-sdk"
+	"github.com/standards-lab/go-core/graph"
 
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 	"github.com/standards-lab/go-web-service/tools/slab/input"
 	"github.com/standards-lab/go-web-service/tools/slab/output"
 )
 
-// deps is what every leaf command needs: the client constructor and the
-// output to render its reply through. Bundled once here so a leaf builder
-// is a method taking neither, rather than a free function repeating both.
-type deps struct {
-	newClient func() *Client
-	out       *output.Output
+// Commands builds the database command, on go-cli-sdk: the schema
+// subcommand over the migration operations, and one subcommand per
+// remaining endpoint, and returns it alone in the slice the composition
+// root mounts with admin.Add(Commands(...)...). The database command declares with Use the two nodes
+// every leaf below it needs, out's color node and client, the HTTP
+// client bound to the service's base URL; the dispatcher builds them only
+// when a leaf runs, and a leaf reads the client through its Invocation then.
+//
+// A leaf checks its input in Validate, before anything is built, so a
+// missing field flag is a usage error. A leaf's Run sends one request,
+// checks for 200 with output.Expect, and renders the reply through out; the
+// error it returns, such as the output.Report of a problem response, is
+// printed once by the dispatcher.
+func Commands(client *graph.Node[*httpx.Client], out output.Source) []*cli.Command {
+	database := &cli.Command{
+		Name:    "database",
+		Summary: "Call the database admin service's endpoints",
+	}
+	database.Add(
+		schemaCommands(client, out),
+		seedCommand(client, out),
+		stateCommand(client, out),
+		fixedCommand(client, out, "diagnostics", "Read the database's health: dialect, ping, server version, and pool counters", (*Client).Diagnose),
+		fixedCommand(client, out, "patterns", "Read the pattern catalog", (*Client).Catalog),
+		fixedCommand(client, out, "statements", "Read the statements registry, every domain's compiled inventory", (*Client).Statements),
+		fixedCommand(client, out, "states", "List the named states the seeder declares", (*Client).States),
+	).Use(out.Node, client)
+	return []*cli.Command{database}
 }
 
-// Commands builds the database command: the schema subcommand over the
-// migration operations, and one subcommand per remaining endpoint. Each leaf
-// subcommand's RunE calls newClient when it runs, not when the tree is
-// built: the composition root closes newClient over its persistent flags,
-// which cobra parses during execution, so the base URL is unknown until
-// then. out is the output every subcommand renders its reply through,
-// constructed by the same root. A subcommand returns its error unrendered;
-// the root writes it through out's Error and sets the exit code.
-func Commands(newClient func() *Client, out *output.Output) *cobra.Command {
-	d := deps{newClient: newClient, out: out}
-	database := &cobra.Command{
-		Use:   "database",
-		Short: "Call the database admin service's endpoints",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return cmd.Help()
+// fixedCommand builds the leaf for an endpoint that takes no input: it
+// accepts no arguments, and its Run sends the one request op, a Client
+// method expression, stands for.
+func fixedCommand(client *graph.Node[*httpx.Client], out output.Source, name, summary string, op func(*Client, context.Context) (*httpx.Response, error)) *cli.Command {
+	return &cli.Command{
+		Name:    name,
+		Summary: summary,
+		Args:    cli.NoArgs,
+		Run: func(ctx context.Context, inv *cli.Invocation) error {
+			res, err := op(NewClient(inv.Get(client)), ctx)
+			return out.Respond(inv, res, err, http.StatusOK)
 		},
 	}
-	database.AddCommand(
-		d.schemaCommands(),
-		d.seedCommand(),
-		d.stateCommand(),
-		d.out.FixedCommand("diagnostics", "Read the database's health: dialect, ping, server version, and pool counters", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
-			return d.newClient().Diagnose(ctx)
-		}),
-		d.out.FixedCommand("patterns", "Read the pattern catalog", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
-			return d.newClient().Catalog(ctx)
-		}),
-		d.out.FixedCommand("statements", "Read the statements registry, every domain's compiled inventory", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
-			return d.newClient().Statements(ctx)
-		}),
-		d.out.FixedCommand("states", "List the named states the seeder declares", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
-			return d.newClient().States(ctx)
-		}),
-	)
-	return database
 }
 
 // schemaCommands builds the schema subcommand: the migration operations,
 // each answering with the schema's resulting status.
-func (d deps) schemaCommands() *cobra.Command {
-	schema := &cobra.Command{
-		Use:   "schema",
-		Short: "Read and operate on the schema's migration history",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return cmd.Help()
-		},
+func schemaCommands(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
+	schema := &cli.Command{
+		Name:    "schema",
+		Summary: "Read and operate on the schema's migration history",
 	}
-	schema.AddCommand(
-		d.out.FixedCommand("status", "Read the schema's status against the migration set", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
-			return d.newClient().Status(ctx)
-		}),
-		d.out.FixedCommand("verify", "Check that the schema is at the set's clean head and the seeder's statements prepare against it", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
-			return d.newClient().Verify(ctx)
-		}),
-		d.out.FixedCommand("up", "Apply every pending migration", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
-			return d.newClient().Up(ctx)
-		}),
-		d.downCommand(),
-		d.stepsCommand(),
-		d.forceCommand(),
+	return schema.Add(
+		fixedCommand(client, out, "status", "Read the schema's status against the migration set", (*Client).Status),
+		fixedCommand(client, out, "verify", "Check that the schema is at the set's clean head and the seeder's statements prepare against it", (*Client).Verify),
+		fixedCommand(client, out, "up", "Apply every pending migration", (*Client).Up),
+		downCommand(client, out),
+		stepsCommand(client, out),
+		forceCommand(client, out),
 	)
-	return schema
 }
 
 // downCommand is POST Database/schema/down. The body is --body verbatim,
 // or Down built from --set, which must be given, and --steps, omitted when
 // unset: the service reverts one migration of the set then, and the default
 // is left to it rather than restated here.
-func (d deps) downCommand() *cobra.Command {
+func downCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		raw, set string
 		steps    int
+		body     []byte
 	)
-	cmd := &cobra.Command{
-		Use:   "down",
-		Short: "Revert a set's most recent migrations, one when --steps is unset",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			body, err := input.Body(cmd, raw, func() (any, error) {
-				if !cmd.Flags().Changed("set") {
+	cmd := &cli.Command{
+		Name:    "down",
+		Summary: "Revert a set's most recent migrations, one when --steps is unset",
+		Args:    cli.NoArgs,
+		Validate: func(inv *cli.Invocation) (err error) {
+			body, err = input.Body(inv, raw, func() (any, error) {
+				if !inv.Changed("set") {
 					return nil, errSetRequired
 				}
 				return Down{Set: set, Steps: steps}, nil
 			})
-			if err != nil {
-				return err
-			}
-			res, err := d.newClient().Down(cmd.Context(), body)
-			if err != nil {
-				return err
-			}
-			if err := output.Expect(res, http.StatusOK); err != nil {
-				return err
-			}
-			d.out.Response(res.Status, res.Body)
-			return nil
+			return err
+		},
+		Run: func(ctx context.Context, inv *cli.Invocation) error {
+			res, err := NewClient(inv.Get(client)).Down(ctx, body)
+			return out.Respond(inv, res, err, http.StatusOK)
 		},
 	}
 	setFlag(cmd, &set)
 	cmd.Flags().IntVar(&steps, "steps", 0, "how many migrations to revert; the service's default (1) when unset")
-	cmd.Flags().StringVar(&raw, "body", "", "the request body as JSON, sent verbatim in place of the field flags")
-	cmd.MarkFlagsMutuallyExclusive("body", "set")
-	cmd.MarkFlagsMutuallyExclusive("body", "steps")
+	bodyFlag(cmd, &raw)
+	cmd.Exclusive("body", "set")
+	cmd.Exclusive("body", "steps")
 	return cmd
 }
 
@@ -133,52 +116,52 @@ func (d deps) downCommand() *cobra.Command {
 var errSetRequired = errors.New("--set is required unless --body is given; schema status lists the sets")
 
 // setFlag declares --set, the migration set a schema operation acts on.
-func setFlag(cmd *cobra.Command, set *string) {
+func setFlag(cmd *cli.Command, set *string) {
 	cmd.Flags().StringVar(set, "set", "", "the migration set to act on, one of the names schema status lists")
+}
+
+// bodyFlag declares --body, the escape hatch every body-sending leaf
+// offers in place of its field flags.
+func bodyFlag(cmd *cli.Command, raw *string) {
+	cmd.Flags().StringVar(raw, "body", "", "the request body as JSON, sent verbatim in place of the field flags")
 }
 
 // stepsCommand is POST Database/schema/steps. The body is --body verbatim,
 // or Steps built from --set and --steps, both of which must be given: the
 // service rejects an empty set and zero steps, so an unset flag is refused
 // here rather than sent.
-func (d deps) stepsCommand() *cobra.Command {
+func stepsCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		raw, set string
 		steps    int
+		body     []byte
 	)
-	cmd := &cobra.Command{
-		Use:   "steps",
-		Short: "Apply --steps of a set's pending migrations, or revert that many when negative",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			body, err := input.Body(cmd, raw, func() (any, error) {
-				if !cmd.Flags().Changed("set") {
+	cmd := &cli.Command{
+		Name:    "steps",
+		Summary: "Apply --steps of a set's pending migrations, or revert that many when negative",
+		Args:    cli.NoArgs,
+		Validate: func(inv *cli.Invocation) (err error) {
+			body, err = input.Body(inv, raw, func() (any, error) {
+				if !inv.Changed("set") {
 					return nil, errSetRequired
 				}
-				if !cmd.Flags().Changed("steps") {
+				if !inv.Changed("steps") {
 					return nil, errors.New("--steps is required unless --body is given")
 				}
 				return Steps{Set: set, Steps: steps}, nil
 			})
-			if err != nil {
-				return err
-			}
-			res, err := d.newClient().Steps(cmd.Context(), body)
-			if err != nil {
-				return err
-			}
-			if err := output.Expect(res, http.StatusOK); err != nil {
-				return err
-			}
-			d.out.Response(res.Status, res.Body)
-			return nil
+			return err
+		},
+		Run: func(ctx context.Context, inv *cli.Invocation) error {
+			res, err := NewClient(inv.Get(client)).Steps(ctx, body)
+			return out.Respond(inv, res, err, http.StatusOK)
 		},
 	}
 	setFlag(cmd, &set)
 	cmd.Flags().IntVar(&steps, "steps", 0, "how many migrations to apply when positive, or revert when negative")
-	cmd.Flags().StringVar(&raw, "body", "", "the request body as JSON, sent verbatim in place of the field flags")
-	cmd.MarkFlagsMutuallyExclusive("body", "set")
-	cmd.MarkFlagsMutuallyExclusive("body", "steps")
+	bodyFlag(cmd, &raw)
+	cmd.Exclusive("body", "set")
+	cmd.Exclusive("body", "steps")
 	return cmd
 }
 
@@ -186,44 +169,38 @@ func (d deps) stepsCommand() *cobra.Command {
 // or Force built from --set and --version, both of which must be given: 0
 // is a meaningful version (an empty history), so an unset flag is refused
 // rather than sent.
-func (d deps) forceCommand() *cobra.Command {
+func forceCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		raw, set string
 		version  int
+		body     []byte
 	)
-	cmd := &cobra.Command{
-		Use:   "force",
-		Short: "Set a set's migration history to --version without running any file",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			body, err := input.Body(cmd, raw, func() (any, error) {
-				if !cmd.Flags().Changed("set") {
+	cmd := &cli.Command{
+		Name:    "force",
+		Summary: "Set a set's migration history to --version without running any file",
+		Args:    cli.NoArgs,
+		Validate: func(inv *cli.Invocation) (err error) {
+			body, err = input.Body(inv, raw, func() (any, error) {
+				if !inv.Changed("set") {
 					return nil, errSetRequired
 				}
-				if !cmd.Flags().Changed("version") {
+				if !inv.Changed("version") {
 					return nil, errors.New("--version is required unless --body is given")
 				}
 				return Force{Set: set, Version: version}, nil
 			})
-			if err != nil {
-				return err
-			}
-			res, err := d.newClient().Force(cmd.Context(), body)
-			if err != nil {
-				return err
-			}
-			if err := output.Expect(res, http.StatusOK); err != nil {
-				return err
-			}
-			d.out.Response(res.Status, res.Body)
-			return nil
+			return err
+		},
+		Run: func(ctx context.Context, inv *cli.Invocation) error {
+			res, err := NewClient(inv.Get(client)).Force(ctx, body)
+			return out.Respond(inv, res, err, http.StatusOK)
 		},
 	}
 	setFlag(cmd, &set)
 	cmd.Flags().IntVar(&version, "version", 0, "the version the history is set to; 0 empties it")
-	cmd.Flags().StringVar(&raw, "body", "", "the request body as JSON, sent verbatim in place of the field flags")
-	cmd.MarkFlagsMutuallyExclusive("body", "set")
-	cmd.MarkFlagsMutuallyExclusive("body", "version")
+	bodyFlag(cmd, &raw)
+	cmd.Exclusive("body", "set")
+	cmd.Exclusive("body", "version")
 	return cmd
 }
 
@@ -234,37 +211,32 @@ func (d deps) forceCommand() *cobra.Command {
 // named set's rows idempotently over the schema as it stands, so seeding
 // an empty set onto a populated database leaves the existing rows in
 // place. stateCommand is the one that clears first.
-func (d deps) seedCommand() *cobra.Command {
-	var raw, state string
-	cmd := &cobra.Command{
-		Use:   "seed",
-		Short: "Apply a named set's rows on top of the schema as it stands (additive, never a reset); the service's configured set when --state is unset",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			var body []byte
-			if cmd.Flags().Changed("body") || cmd.Flags().Changed("state") {
-				var err error
-				body, err = input.Body(cmd, raw, func() (any, error) {
+func seedCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
+	var (
+		raw, state string
+		body       []byte
+	)
+	cmd := &cli.Command{
+		Name:    "seed",
+		Summary: "Apply a named set's rows on top of the schema as it stands (additive, never a reset); the service's configured set when --state is unset",
+		Args:    cli.NoArgs,
+		Validate: func(inv *cli.Invocation) (err error) {
+			body = nil
+			if inv.Changed("body") || inv.Changed("state") {
+				body, err = input.Body(inv, raw, func() (any, error) {
 					return State{State: state}, nil
 				})
-				if err != nil {
-					return err
-				}
 			}
-			res, err := d.newClient().Seed(cmd.Context(), body)
-			if err != nil {
-				return err
-			}
-			if err := output.Expect(res, http.StatusOK); err != nil {
-				return err
-			}
-			d.out.Response(res.Status, res.Body)
-			return nil
+			return err
+		},
+		Run: func(ctx context.Context, inv *cli.Invocation) error {
+			res, err := NewClient(inv.Get(client)).Seed(ctx, body)
+			return out.Respond(inv, res, err, http.StatusOK)
 		},
 	}
 	cmd.Flags().StringVar(&state, "state", "", "the state whose set to apply; the service's configured set when unset")
-	cmd.Flags().StringVar(&raw, "body", "", "the request body as JSON, sent verbatim in place of the field flags")
-	cmd.MarkFlagsMutuallyExclusive("body", "state")
+	bodyFlag(cmd, &raw)
+	cmd.Exclusive("body", "state")
 	return cmd
 }
 
@@ -273,40 +245,34 @@ func (d deps) seedCommand() *cobra.Command {
 // empty name, so an unset flag is refused here before the request fires.
 // --confirm is sent as given: the service refuses an unconfirmed reset, and
 // that refusal is the service's to state, not restated here.
-func (d deps) stateCommand() *cobra.Command {
+func stateCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		raw, state string
 		confirm    bool
+		body       []byte
 	)
-	cmd := &cobra.Command{
-		Use:   "state",
-		Short: "Reset the database to a named state: revert every migration set, apply the sets, and seed; requires --confirm",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			body, err := input.Body(cmd, raw, func() (any, error) {
-				if !cmd.Flags().Changed("state") {
+	cmd := &cli.Command{
+		Name:    "state",
+		Summary: "Reset the database to a named state: revert every migration set, apply the sets, and seed; requires --confirm",
+		Args:    cli.NoArgs,
+		Validate: func(inv *cli.Invocation) (err error) {
+			body, err = input.Body(inv, raw, func() (any, error) {
+				if !inv.Changed("state") {
 					return nil, errors.New("--state is required unless --body is given")
 				}
 				return Reset{State: state, Confirm: confirm}, nil
 			})
-			if err != nil {
-				return err
-			}
-			res, err := d.newClient().Reset(cmd.Context(), body)
-			if err != nil {
-				return err
-			}
-			if err := output.Expect(res, http.StatusOK); err != nil {
-				return err
-			}
-			d.out.Response(res.Status, res.Body)
-			return nil
+			return err
+		},
+		Run: func(ctx context.Context, inv *cli.Invocation) error {
+			res, err := NewClient(inv.Get(client)).Reset(ctx, body)
+			return out.Respond(inv, res, err, http.StatusOK)
 		},
 	}
 	cmd.Flags().StringVar(&state, "state", "", "the state to reset to, one of the names states lists")
 	cmd.Flags().BoolVar(&confirm, "confirm", false, "confirm the reset, which reverts every migration set and its rows")
-	cmd.Flags().StringVar(&raw, "body", "", "the request body as JSON, sent verbatim in place of the field flags")
-	cmd.MarkFlagsMutuallyExclusive("body", "state")
-	cmd.MarkFlagsMutuallyExclusive("body", "confirm")
+	bodyFlag(cmd, &raw)
+	cmd.Exclusive("body", "state")
+	cmd.Exclusive("body", "confirm")
 	return cmd
 }

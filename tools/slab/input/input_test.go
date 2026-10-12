@@ -1,11 +1,13 @@
 package input_test
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"strings"
 	"testing"
 
-	"github.com/spf13/cobra"
+	"github.com/standards-lab/go-cli-sdk"
 
 	"github.com/standards-lab/go-web-service/tools/slab/input"
 )
@@ -16,18 +18,23 @@ type fields struct {
 	Name string `json:"name"`
 }
 
-// parsed is a command with the --body and --version flags every body-sending
-// command binds, after parsing args, along with the flag values as the
-// command's RunE would hold them.
-func parsed(t *testing.T, args ...string) (cmd *cobra.Command, raw string, version int64) {
+// parsed dispatches a command with the --body and --version flags every
+// body-sending command binds over args, and returns the Invocation it ran
+// with, along with the flag values as the command's Validate would hold
+// them.
+func parsed(t *testing.T, args ...string) (inv *cli.Invocation, raw string, version int64) {
 	t.Helper()
-	cmd = &cobra.Command{Use: "x"}
+	cmd := &cli.Command{Name: "x", Run: func(_ context.Context, got *cli.Invocation) error {
+		inv = got
+		return nil
+	}}
 	cmd.Flags().StringVar(&raw, "body", "", "")
 	cmd.Flags().Int64Var(&version, "version", 0, "")
-	if err := cmd.ParseFlags(args); err != nil {
-		t.Fatal(err)
+	var stderr bytes.Buffer
+	if code := cli.Run(context.Background(), cmd, args, cli.Streams{Stdout: &stderr, Stderr: &stderr}); code != 0 {
+		t.Fatalf("dispatch of %q exited %d: %s", args, code, stderr.String())
 	}
-	return cmd, raw, version
+	return inv, raw, version
 }
 
 // built is a fromFlags that returns v.
@@ -51,8 +58,8 @@ func TestBody_SendsTheBodyFlagVerbatim(t *testing.T) {
 		"not json at all",
 		"",
 	} {
-		cmd, got, _ := parsed(t, "--body", raw)
-		body, err := input.Body(cmd, got, never(t))
+		inv, got, _ := parsed(t, "--body", raw)
+		body, err := input.Body(inv, got, never(t))
 		if err != nil {
 			t.Fatalf("Body(--body %q) = %v", raw, err)
 		}
@@ -63,8 +70,8 @@ func TestBody_SendsTheBodyFlagVerbatim(t *testing.T) {
 }
 
 func TestBody_MarshalsWhatTheFlagsBuild(t *testing.T) {
-	cmd, raw, _ := parsed(t)
-	body, err := input.Body(cmd, raw, built(fields{Code: "x", Name: "y"}))
+	inv, raw, _ := parsed(t)
+	body, err := input.Body(inv, raw, built(fields{Code: "x", Name: "y"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,9 +81,9 @@ func TestBody_MarshalsWhatTheFlagsBuild(t *testing.T) {
 }
 
 func TestBody_ReturnsTheFlagsPathError(t *testing.T) {
-	cmd, raw, _ := parsed(t)
+	inv, raw, _ := parsed(t)
 	want := errors.New("--code and --name are required unless --body is given")
-	body, err := input.Body(cmd, raw, func() (any, error) { return nil, want })
+	body, err := input.Body(inv, raw, func() (any, error) { return nil, want })
 	if err != want {
 		t.Errorf("err = %v, want fromFlags's error as is", err)
 	}
@@ -86,8 +93,8 @@ func TestBody_ReturnsTheFlagsPathError(t *testing.T) {
 }
 
 func TestBody_ReturnsTheMarshalError(t *testing.T) {
-	cmd, raw, _ := parsed(t)
-	if _, err := input.Body(cmd, raw, built(make(chan int))); err == nil {
+	inv, raw, _ := parsed(t)
+	if _, err := input.Body(inv, raw, built(make(chan int))); err == nil {
 		t.Error("Body marshaled a channel without error")
 	}
 }
@@ -128,12 +135,12 @@ func TestGuardedBody_ResolvesTheVersionFromTheFlagOrTheBody(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			cmd, raw, version := parsed(t, tc.args...)
+			inv, raw, version := parsed(t, tc.args...)
 			fromFlags := never(t)
-			if !cmd.Flags().Changed("body") {
+			if !inv.Changed("body") {
 				fromFlags = built(fields{Code: "x", Name: "y"})
 			}
-			body, ifMatch, err := input.GuardedBody(cmd, raw, version, fromFlags)
+			body, ifMatch, err := input.GuardedBody(inv, raw, version, fromFlags)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -152,15 +159,15 @@ func TestGuardedBody_RefusesARequestWithoutAVersion(t *testing.T) {
 		args []string
 		want string
 	}{
-		"flags path":         {nil, `required flag(s) "version" not set`},
+		"flags path":         {nil, "required flag --version not set"},
 		"body without key":   {[]string{"--body", `{"code":"x","name":"y"}`}, `--version is required, as the flag or as a top-level "version" number in --body`},
 		"body with a string": {[]string{"--body", `{"code":"x","version":"4"}`}, `--body: "version" is not an integer: "4"`},
 		"body with a float":  {[]string{"--body", `{"version":1.5}`}, `--body: "version" is not an integer: 1.5`},
 		"body not an object": {[]string{"--body", `[1]`}, "--body is not a JSON object"},
 		"body not JSON":      {[]string{"--body", `nope`}, "--body is not a JSON object"},
 	} {
-		cmd, raw, version := parsed(t, tc.args...)
-		body, ifMatch, err := input.GuardedBody(cmd, raw, version, built(fields{}))
+		inv, raw, version := parsed(t, tc.args...)
+		body, ifMatch, err := input.GuardedBody(inv, raw, version, built(fields{}))
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want %q", name, err, tc.want)
 		}
@@ -171,9 +178,9 @@ func TestGuardedBody_RefusesARequestWithoutAVersion(t *testing.T) {
 }
 
 func TestGuardedBody_ReturnsTheFlagsPathError(t *testing.T) {
-	cmd, raw, version := parsed(t, "--version", "1")
+	inv, raw, version := parsed(t, "--version", "1")
 	want := errors.New("--parent-id is required unless --body is given")
-	body, ifMatch, err := input.GuardedBody(cmd, raw, version, func() (any, error) { return nil, want })
+	body, ifMatch, err := input.GuardedBody(inv, raw, version, func() (any, error) { return nil, want })
 	if err != want {
 		t.Errorf("err = %v, want fromFlags's error as is", err)
 	}
@@ -183,9 +190,9 @@ func TestGuardedBody_ReturnsTheFlagsPathError(t *testing.T) {
 }
 
 func TestGuardedBody_ChecksTheVersionBeforeBuildingFromFlags(t *testing.T) {
-	cmd, raw, version := parsed(t)
-	_, _, err := input.GuardedBody(cmd, raw, version, never(t))
-	if err == nil || !strings.Contains(err.Error(), `required flag(s) "version" not set`) {
+	inv, raw, version := parsed(t)
+	_, _, err := input.GuardedBody(inv, raw, version, never(t))
+	if err == nil || !strings.Contains(err.Error(), "required flag --version not set") {
 		t.Errorf("err = %v, want the missing version refused first", err)
 	}
 }

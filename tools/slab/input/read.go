@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/spf13/cobra"
+	"github.com/standards-lab/go-cli-sdk"
 )
 
 // DefaultPageSize is the page size a collection read gets when it names
@@ -22,33 +22,35 @@ type ReadFlags struct {
 	filters      []string
 }
 
-// Bind registers the read flags on cmd, --page and --cursor mutually
-// exclusive.
-func (r *ReadFlags) Bind(cmd *cobra.Command) {
-	cmd.Flags().IntVar(&r.page, "page", 0, "the 1-based page to return; the first when unset")
-	cmd.Flags().StringVar(&r.cursor, "cursor", "", "continue after the page whose next token this is, in place of --page")
-	cmd.Flags().IntVar(&r.size, "size", 0, fmt.Sprintf("the page size, up to the configured maximum; the service's default (%d) when unset", DefaultPageSize))
-	cmd.Flags().StringVar(&r.sort, "sort", "", "comma-separated field names, each with a leading - for descending")
-	cmd.Flags().StringArrayVar(&r.filters, "filter", nil, "a filter, field=value or field[op]=value; repeatable")
-	cmd.MarkFlagsMutuallyExclusive("page", "cursor")
+// Bind defines the read flags on cmd, --page and --cursor an exclusive
+// group, so giving both is a usage error before anything is built.
+func (r *ReadFlags) Bind(cmd *cli.Command) {
+	fs := cmd.Flags()
+	fs.IntVar(&r.page, "page", 0, "the 1-based page to return; the first when unset")
+	fs.StringVar(&r.cursor, "cursor", "", "continue after the page whose next token this is, in place of --page")
+	fs.IntVar(&r.size, "size", 0, fmt.Sprintf("the page size, up to the configured maximum; the service's default (%d) when unset", DefaultPageSize))
+	fs.StringVar(&r.sort, "sort", "", "comma-separated field names, each with a leading - for descending")
+	cli.StringsVar(fs, &r.filters, "filter", nil, "a filter, field=value or field[op]=value")
+	cmd.Exclusive("page", "cursor")
 }
 
-// Query is the read's query pairs from the flags cmd was given, in a fixed
+// Query is the read's query pairs from the flags inv was given, in a fixed
 // order (page, cursor, size, sort, then each filter as given): an unset
 // flag sends nothing, and a filter without a name is refused before the
-// request fires.
-func (r *ReadFlags) Query(cmd *cobra.Command) ([][2]string, error) {
+// request fires. A command calls it from its Validate, so the refusal is a
+// usage error and nothing is built.
+func (r *ReadFlags) Query(inv *cli.Invocation) ([][2]string, error) {
 	var query [][2]string
-	if cmd.Flags().Changed("page") {
+	if inv.Changed("page") {
 		query = append(query, [2]string{"page", strconv.Itoa(r.page)})
 	}
-	if cmd.Flags().Changed("cursor") {
+	if inv.Changed("cursor") {
 		query = append(query, [2]string{"cursor", r.cursor})
 	}
-	if cmd.Flags().Changed("size") {
+	if inv.Changed("size") {
 		query = append(query, [2]string{"size", strconv.Itoa(r.size)})
 	}
-	if cmd.Flags().Changed("sort") {
+	if inv.Changed("sort") {
 		query = append(query, [2]string{"sort", r.sort})
 	}
 	for _, f := range r.filters {

@@ -71,8 +71,8 @@ github.com/standards-lab/blobfs v0.6.0 h1:ruNVhWYgIclLD3qnNfy6zG+99c4F25NSrPrISD
 github.com/standards-lab/blobfs v0.6.0/go.mod h1:TPVserSOd5D6G/G1s9eIFy3Ta6vvZzBEBnwB15FYBq4=
 github.com/standards-lab/blobfs/postgres v0.4.0 h1:Z3iZ/Z7xWtHLrKB/3oAuBCNPeLve0pk7G89MHlIKVpg=
 github.com/standards-lab/blobfs/postgres v0.4.0/go.mod h1:OXQqfiYrWmYTKjLd6MqHVTJOX3DJ0+ziLgutl8GOXnE=
-github.com/standards-lab/go-core v0.7.0 h1:eVBSSZ3axkQfh0+iYfuim6oXiOBR+DRXHn4fzlEDP4E=
-github.com/standards-lab/go-core v0.7.0/go.mod h1:Yl/R+gM9YWczsePBCKXdPGh3FSdZ/5i8SapLIh3BDHU=
+github.com/standards-lab/go-core v0.8.0 h1:pSExCRKlClxXbhEvcO/r8sJYhCE2scOHIUr1edEa5VI=
+github.com/standards-lab/go-core v0.8.0/go.mod h1:Yl/R+gM9YWczsePBCKXdPGh3FSdZ/5i8SapLIh3BDHU=
 github.com/standards-lab/go-database v0.8.0 h1:dAY5prMLxGcaeEXE5fTVRFj+VW8JYj1vj9UKYofMEy4=
 github.com/standards-lab/go-database v0.8.0/go.mod h1:zpR4hdn7LbfaeuoJdtNPqGdir3CzZjhcJFXbECy++ck=
 github.com/standards-lab/go-database/postgres v0.5.0 h1:LZ8kFErbUxBfD/NUAhN1eyHGDUhw9+c7j7zWNyZ4ZWo=
@@ -85,8 +85,8 @@ github.com/standards-lab/go-storage v0.6.0 h1:QGuZgshPPzhBhZpWmWh0U8yqNHR+6dxjXH
 github.com/standards-lab/go-storage v0.6.0/go.mod h1:205dVOS4pLz4hhcFxw41v1BkNy7Zl/97WM/DylHPXyM=
 github.com/standards-lab/go-storage/azureblob v0.5.0 h1:LbZ9N8ryDEdXYM7CCC3qu0dCzyA2NNECCvfCapvxuMY=
 github.com/standards-lab/go-storage/azureblob v0.5.0/go.mod h1:v8EbSiReBPil55VAQzKoZP23MHzkO7tNjtnT2BAdcoI=
-github.com/standards-lab/go-web-sdk v0.15.1 h1:ZuTGjsVBns84oorrI+p5kJTesjdf6f3e0MWUG0Md5Sk=
-github.com/standards-lab/go-web-sdk v0.15.1/go.mod h1:+NBnKZ7L+mWN+1a5YLhUhHy+RNlV/UwfTS4C7y3EC9M=
+github.com/standards-lab/go-web-sdk v0.15.2 h1:5Kha74IY8wT0XPcQEnZ/1bLBkxy13r33cgT6i2/X3E0=
+github.com/standards-lab/go-web-sdk v0.15.2/go.mod h1:aQyDvkE5cfwL1n1s79X5UnNmSPwtDTqhoFcsHKsdyJQ=
 github.com/standards-lab/go-web-sdk/middleware/rate-limit v0.3.0 h1:bXlTi5E9EF2UXG/wdjcJzdFYXs7reh3IsEQbo1OQeMI=
 github.com/standards-lab/go-web-sdk/middleware/rate-limit v0.3.0/go.mod h1:Pvd6hVC+ecfj2namNmtYKAvjl9hreWcfQrhQmsVRdps=
 github.com/standards-lab/sqlate v0.5.0 h1:2QEbhIzy2mtMxY2XMfqqqzOlCZs2I3vZNN7fB9daBjw=

@@ -4,31 +4,39 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/spf13/cobra"
+	"github.com/standards-lab/go-cli-sdk"
+	"github.com/standards-lab/go-core/graph"
 
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 	"github.com/standards-lab/go-web-service/tools/slab/output"
 )
 
-// Commands builds the storage command, one subcommand per endpoint. Each
-// leaf calls newClient when it runs, not when the tree is built, for the
-// reason the database command's do, and renders its reply through out.
-func Commands(newClient func() *Client, out *output.Output) *cobra.Command {
-	storage := &cobra.Command{
-		Use:   "storage",
-		Short: "Call the object store's admin endpoints",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return cmd.Help()
-		},
+// Commands builds the storage command, on go-cli-sdk, with one subcommand
+// per endpoint, and returns it alone in the slice the composition root
+// mounts with admin.Add(Commands(...)...). The storage command declares with Use out's color
+// node and client, the HTTP client bound to the service's base URL, as the
+// database command does; neither endpoint takes input, so a leaf accepts
+// no arguments, and its Run sends its one request, checks for 200 with
+// output.Expect, and renders the reply through out.
+func Commands(client *graph.Node[*httpx.Client], out output.Source) []*cli.Command {
+	fixed := func(name, summary string, op func(*Client, context.Context) (*httpx.Response, error)) *cli.Command {
+		return &cli.Command{
+			Name:    name,
+			Summary: summary,
+			Args:    cli.NoArgs,
+			Run: func(ctx context.Context, inv *cli.Invocation) error {
+				res, err := op(NewClient(inv.Get(client)), ctx)
+				return out.Respond(inv, res, err, http.StatusOK)
+			},
+		}
 	}
-	storage.AddCommand(
-		out.FixedCommand("diagnostics", "Read the object store's readiness (a live probe), its container, and its key length bound", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
-			return newClient().Diagnostics(ctx)
-		}),
-		out.FixedCommand("container", "Create the configured container, succeeding when it exists", http.StatusOK, func(ctx context.Context) (*httpx.Response, error) {
-			return newClient().Container(ctx)
-		}),
-	)
-	return storage
+	storage := &cli.Command{
+		Name:    "storage",
+		Summary: "Call the object store's admin endpoints",
+	}
+	storage.Add(
+		fixed("diagnostics", "Read the object store's readiness (a live probe), its container, and its key length bound", (*Client).Diagnostics),
+		fixed("container", "Create the configured container, succeeding when it exists", (*Client).Container),
+	).Use(out.Node, client)
+	return []*cli.Command{storage}
 }

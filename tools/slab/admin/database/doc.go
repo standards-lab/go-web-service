@@ -13,7 +13,8 @@
 //   - [Database], the route the admin service is mounted at
 //   - [Client] and [NewClient], one request per endpoint
 //   - [Down], [Force], [Reset], [State], and [Steps], the request bodies
-//   - [Commands], which builds the database command over a Client
+//   - [Commands], which builds the database command on go-cli-sdk over the
+//     client node
 //
 // The package has one file per role. entities.go restates the request bodies
 // the service defines, with the same json tags, so a server-side rename

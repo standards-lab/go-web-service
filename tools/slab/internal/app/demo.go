@@ -1,35 +1,49 @@
 package app
 
 import (
+	"context"
 	"io"
 
-	"github.com/spf13/cobra"
+	"github.com/standards-lab/go-cli-sdk"
+	"github.com/standards-lab/go-core/graph"
 
 	"github.com/standards-lab/go-web-service/tools/slab/demo"
+	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
-// mountDemo builds the demo mount over cfg: each scenario reads the
-// environment cfg resolves and narrates through a reporter colored as cfg
-// and the stream it writes to say. Both are read when the scenario runs,
-// after cobra parses. The scenarios construct their own HTTP clients from
-// that environment rather than through the infrastructure, since each one
-// addresses the stack it needs (the service, Grafana, Tempo) by name.
-func mountDemo(cfg *Config) *cobra.Command {
-	return demo.Commands(cfg.runEnv, func(w io.Writer) *scenario.Reporter {
-		return scenario.NewReporter(w, style.ColorEnabled(w, cfg.NoColor))
+// demoCommand builds the demo command on the tree over the nodes from n its
+// scenarios read: the base, grafana, tempo, and repo nodes, which make up
+// the environment each scenario runs with on slab's own scenario runner,
+// and the no color node, for the reporter it narrates through over the
+// invocation's stdout, colored when stdout is a terminal and neither
+// NO_COLOR nor the no color node says otherwise. The scenarios construct
+// their own HTTP clients from that environment rather than through the
+// client node, since each one addresses the stack it needs (the service,
+// Grafana, Tempo) by name.
+func demoCommand(n *Nodes) *cli.Command {
+	base, grafana, tempo, repo, noColor := n.Base, n.Grafana, n.Tempo, n.Repo, n.NoColor
+	return demo.Commands(scenario.Source{
+		Nodes: []graph.Ref{base, grafana, tempo, repo, noColor},
+		Env: func(inv *cli.Invocation) env.Env {
+			return env.Env{Base: inv.Get(base), Grafana: inv.Get(grafana), Tempo: inv.Get(tempo), Repo: inv.Get(repo)}
+		},
+		Reporter: func(inv *cli.Invocation) *scenario.Reporter {
+			return scenario.NewReporter(inv.Stdout, style.ColorEnabled(inv.Stdout, inv.Get(noColor)))
+		},
 	})
 }
 
-// listCommand builds list, which prints the scenario listing.
-func listCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "list",
-		Short: "List the scenarios and what each one needs running",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			writeScenarios(cmd.OutOrStdout())
+// listCommand builds list, which prints the scenario listing. It declares
+// no nodes, so it builds nothing and reads no configuration.
+func listCommand() *cli.Command {
+	return &cli.Command{
+		Name:    "list",
+		Summary: "List the scenarios and what each one needs running",
+		Args:    cli.NoArgs,
+		Run: func(_ context.Context, inv *cli.Invocation) error {
+			writeScenarios(inv.Stdout)
 			return nil
 		},
 	}

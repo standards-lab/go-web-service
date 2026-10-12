@@ -68,11 +68,11 @@ mise run slab -- org list --filter 'code[like]=%e%' --size 2 --page 1 --sort cod
 # a cursor walk: each page prints "next"; pass it back with the same sort to continue
 mise run slab -- org list --size 3 --sort -path                      # page 1, total 7, more, next
 mise run slab -- org list --size 3 --sort -path --cursor <next>      # no page number
-mise run slab -- org list --page 2 --cursor <next>                   # cobra usage error: exclusive
+mise run slab -- org list --page 2 --cursor <next>                   # usage error (exit 2): exclusive
 ```
 
 ```sh
-# the --body/flags mutual exclusion, expect a cobra usage error:
+# the --body/flags mutual exclusion, expect a usage error (exit 2):
 mise run slab -- org create --code x --name y --body '{}'
 ```
 
@@ -106,7 +106,7 @@ mise run slab -- docs dirs move <acme-id> <reports-id> --body '{"parent_id":"roo
 
 ```sh
 # the deletes take the version they guard on, as org delete does:
-mise run slab -- docs files delete <acme-id> <file-id>                         # cobra usage error: --version is required
+mise run slab -- docs files delete <acme-id> <file-id>                         # usage error (exit 2): --version is required
 mise run slab -- docs files delete <acme-id> <file-id> --version 2             # 412: the move left it at version 3
 mise run slab -- docs files delete <acme-id> <file-id> --version 3             # 204
 mise run slab -- docs dirs delete <acme-id> <reports-id> --version 2           # 409: the directory is not empty
@@ -178,10 +178,11 @@ mise run slab -- demo problems
 mise run slab -- demo storage    # ends by resetting to the default state
 mise run slab -- demo storage    # runs again as it stands: the branch it deletes is named for the run
 mise run slab -- list
+mise run slab -- demo none       # usage error (exit 2): unknown command "none"
 ```
 
-A step whose response is not the one it expects stops the scenario and exits non-zero, naming
-the step by its number and intent, as in `storage: step 6 (Logo Delete): status = 500 ...`.
+A step whose response is not the one it expects stops the scenario and exits 1, naming the step
+by its number and intent, as in `slab demo storage: storage: step 6 (Logo Delete): status = 500 ...`.
 
 ## Clean up
 

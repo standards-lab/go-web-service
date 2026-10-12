@@ -3,293 +3,413 @@ package app_test
 import (
 	"bytes"
 	"context"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"os"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/standards-lab/go-web-sdk"
+	"github.com/standards-lab/go-cli-sdk"
+	"github.com/standards-lab/go-core/graph"
+	"github.com/standards-lab/go-core/lifecycle"
+	"github.com/standards-lab/go-core/process"
 
 	"github.com/standards-lab/go-web-service/tools/slab/internal/app"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/termtest"
-	"github.com/standards-lab/go-web-service/tools/slab/style"
+	"github.com/standards-lab/go-web-service/tools/slab/internal/apptest"
 )
 
-// execute runs the app with args in place of the process's own and returns
-// what it wrote to stdout and stderr and the exit code.
-func execute(t *testing.T, args ...string) (stdout, stderr string, code int) {
+// shutdownTimeout and noColor are variables a Build reads.
+var (
+	shutdownTimeout = lifecycle.NewEnv("SLAB").ShutdownTimeout
+	noColor         = "SLAB_NO_COLOR"
+)
+
+// unreadable makes every configuration a Build reads fail, so a run that
+// does not fail on it proves it read none.
+func unreadable(t *testing.T) {
 	t.Helper()
-	var out bytes.Buffer
-	errOut, code := executeTo(t, &out, args...)
-	return out.String(), errOut, code
+	t.Setenv(shutdownTimeout, "not-a-duration")
+	t.Setenv(noColor, "not-a-bool")
 }
 
-// executeTo is execute with stdout supplied by the caller, for a test that
-// needs it to be something other than a buffer. It returns what the app
-// wrote to stderr and the exit code. The app reads its arguments from the
-// process, as cmd/slab runs it, so args stand in for os.Args past the
-// program name for the run; no test here runs in parallel.
-func executeTo(t *testing.T, stdout io.Writer, args ...string) (stderr string, code int) {
+// newApp returns the App over fresh buffers, and the recorder of the nodes
+// its runs build.
+func newApp(t *testing.T) (a *app.App, stdout, stderr *bytes.Buffer, built *apptest.Recorder) {
 	t.Helper()
-	saved := os.Args
-	os.Args = append([]string{"slab"}, args...)
-	defer func() { os.Args = saved }()
-	var errOut bytes.Buffer
-	code = app.New(stdout, &errOut).Run(context.Background())
-	return errOut.String(), code
+	stdout, stderr = new(bytes.Buffer), new(bytes.Buffer)
+	a = app.New(cli.Streams{Stdin: strings.NewReader(""), Stdout: stdout, Stderr: stderr})
+	return a, stdout, stderr, apptest.Builds(a)
 }
 
-// exchange is one request as the fake service received it.
-type exchange struct {
-	method, uri string
+// settings are the values of the run setting nodes, as a probe reads them.
+type settings struct {
+	base, grafana, tempo, repo string
+	noColor                    bool
 }
 
-// newService starts a fake service that answers every request with status
-// and reply and records what it received. An error status is answered as a
-// problem document.
-func newService(t *testing.T, status int, reply string) (*[]exchange, *httptest.Server) {
-	t.Helper()
-	var received []exchange
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		received = append(received, exchange{method: r.Method, uri: r.URL.RequestURI()})
-		if status >= http.StatusBadRequest {
-			w.Header().Set("Content-Type", web.ProblemMediaType)
-		} else {
-			w.Header().Set("Content-Type", web.JSONMediaType)
-		}
-		w.WriteHeader(status)
-		_, _ = io.WriteString(w, reply)
-	}))
-	t.Cleanup(srv.Close)
-	return &received, srv
-}
-
-func TestRoot_PrintsHelpAndTheListing(t *testing.T) {
-	out, errOut, code := execute(t)
-	if code != 0 {
-		t.Fatalf("root exited %d: %s", code, errOut)
-	}
-	for _, want := range []string{"Available Commands:", "org", "docs", "admin", "demo", "list", "Scenarios:", "  sqlate    ", "  domain    ", "  problems  ", "  storage   "} {
-		if !strings.Contains(out, want) {
-			t.Errorf("root output lacks %q:\n%s", want, out)
-		}
-	}
-}
-
-func TestList_PrintsTheScenariosInPresentationOrder(t *testing.T) {
-	out, errOut, code := execute(t, "list")
-	if code != 0 {
-		t.Fatalf("list exited %d: %s", code, errOut)
-	}
-	sqlate, domain, problems := strings.Index(out, "  sqlate    "), strings.Index(out, "  domain    "), strings.Index(out, "  problems  ")
-	storage := strings.Index(out, "  storage   ")
-	if sqlate < 0 || domain < sqlate || problems < domain || storage < problems {
-		t.Errorf("list does not print sqlate, domain, problems, storage in that order:\n%s", out)
-	}
-}
-
-func TestDemo_MountsEachScenario(t *testing.T) {
-	out, errOut, code := execute(t, "demo")
-	if code != 0 {
-		t.Fatalf("demo exited %d: %s", code, errOut)
-	}
-	for _, want := range []string{"Available Commands:", "sqlate", "domain", "problems", "storage"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("demo help lacks %q:\n%s", want, out)
-		}
-	}
-	if _, errOut, code := execute(t, "demo", "none"); code == 0 || errOut == "" {
-		t.Errorf("demo none exited %d with stderr %q; want a failure that says why", code, errOut)
-	}
-}
-
-func TestOrg_MountsTheOrganizationCommands(t *testing.T) {
-	out, errOut, code := execute(t, "org")
-	if code != 0 {
-		t.Fatalf("org exited %d: %s", code, errOut)
-	}
-	for _, want := range []string{"Available Commands:", "create", "delete", "edit", "get", "get-by-path", "list", "transfer"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("org help lacks %q:\n%s", want, out)
-		}
-	}
-}
-
-func TestDocs_MountsTheDocumentCommands(t *testing.T) {
-	for args, wants := range map[string][]string{
-		"docs":       {"dirs", "files"},
-		"docs dirs":  {"create", "get", "list", "move", "delete"},
-		"docs files": {"list", "put", "show", "get", "move", "delete"},
-	} {
-		out, errOut, code := execute(t, strings.Fields(args)...)
-		if code != 0 {
-			t.Fatalf("%s exited %d: %s", args, code, errOut)
-		}
-		for _, want := range append([]string{"Available Commands:"}, wants...) {
-			if !strings.Contains(out, want) {
-				t.Errorf("%s help lacks %q:\n%s", args, want, out)
+// probe adds a group command at a's root holding three leaves that each
+// declare every run setting node: probe, which keeps the settings it read
+// and returns where, nil until it runs; needs, which requires --a; and
+// either, whose --a and --b are exclusive. The leaves sit below a parent so
+// a root flag can be given at every depth.
+func probe(a *app.App) **settings {
+	got := new(*settings)
+	n := a.Nodes()
+	nodes := []graph.Ref{n.Base, n.Grafana, n.Tempo, n.Repo, n.NoColor}
+	read := (&cli.Command{
+		Name:    "probe",
+		Summary: "Read the settings",
+		Args:    cli.NoArgs,
+		Run: func(_ context.Context, inv *cli.Invocation) error {
+			*got = &settings{
+				base:    inv.Get(n.Base),
+				grafana: inv.Get(n.Grafana),
+				tempo:   inv.Get(n.Tempo),
+				repo:    inv.Get(n.Repo),
+				noColor: inv.Get(n.NoColor),
 			}
-		}
-	}
+			return nil
+		},
+	}).Use(nodes...)
+	needs := (&cli.Command{Name: "needs", Run: func(context.Context, *cli.Invocation) error { return nil }}).Use(nodes...)
+	needs.Flags().String("a", "", "")
+	needs.Require("a")
+	either := (&cli.Command{Name: "either", Run: func(context.Context, *cli.Invocation) error { return nil }}).Use(nodes...)
+	either.Flags().String("a", "", "")
+	either.Flags().String("b", "", "")
+	either.Exclusive("a", "b")
+	a.Root().Add((&cli.Command{Name: "group", Summary: "Hold the probes"}).Add(read, needs, either))
+	return got
 }
 
-func TestAdmin_MountsTheDatabaseCommands(t *testing.T) {
-	out, errOut, code := execute(t, "admin")
-	if code != 0 {
-		t.Fatalf("admin exited %d: %s", code, errOut)
-	}
-	if !strings.Contains(out, "database") {
-		t.Errorf("admin help lacks database:\n%s", out)
-	}
-	out, errOut, code = execute(t, "admin", "database")
-	if code != 0 {
-		t.Fatalf("admin database exited %d: %s", code, errOut)
-	}
-	for _, want := range []string{"schema", "seed", "state", "diagnostics", "patterns", "statements", "states"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("admin database help lacks %q:\n%s", want, out)
-		}
-	}
-	out, errOut, code = execute(t, "admin", "database", "schema")
-	if code != 0 {
-		t.Fatalf("admin database schema exited %d: %s", code, errOut)
-	}
-	for _, want := range []string{"status", "verify", "up", "down", "steps", "force"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("admin database schema help lacks %q:\n%s", want, out)
-		}
-	}
-}
+func TestRun_RootHelp(t *testing.T) {
+	for _, args := range [][]string{nil, {"-h"}, {"--help"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			unreadable(t)
+			a, stdout, stderr, built := newApp(t)
 
-// The base URL is a persistent flag parsed during execution, after New has
-// built the tree. A request reaching the server named by --base proves the
-// client was constructed after parsing, from the parsed value, not at
-// construction from the default.
-func TestCommands_BindTheClientToTheBaseFlagAsParsed(t *testing.T) {
-	for name, tc := range map[string]struct {
-		args   []string
-		method string
-		uri    string
-	}{
-		"org": {
-			args:   []string{"org", "get", "1"},
-			method: http.MethodGet,
-			uri:    "/api/organizations/1",
-		},
-		"docs": {
-			args:   []string{"docs", "dirs", "get", "1", "root"},
-			method: http.MethodGet,
-			uri:    "/api/documents/1/directories/root",
-		},
-		"admin database": {
-			args:   []string{"admin", "database", "diagnostics"},
-			method: http.MethodGet,
-			uri:    "/admin/database/diagnostics",
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			received, srv := newService(t, http.StatusOK, `{"ok":true}`)
-			out, errOut, code := execute(t, append(tc.args, "--base", srv.URL)...)
-			if code != 0 {
-				t.Fatalf("exited %d: %s", code, errOut)
+			code := a.Run(context.Background(), args)
+
+			if code != process.ExitUsage {
+				t.Errorf("code = %d, want %d; stderr = %q", code, process.ExitUsage, stderr)
 			}
-			if len(*received) != 1 || (*received)[0] != (exchange{tc.method, tc.uri}) {
-				t.Errorf("the service received %+v, want one %s %s", *received, tc.method, tc.uri)
+			for _, want := range []string{
+				"Usage:\n  slab <command> [flags]",
+				"Commands:", "version", "org", "docs", "admin", "demo", "list",
+				"--base string", `(default "http://127.0.0.1:8080")`, "--grafana string", "--tempo string", "--repo string", "--no-color",
+				"Scenarios:", "  sqlate    ", "  domain    ", "  problems  ", "  storage   ",
+			} {
+				if !strings.Contains(stdout.String(), want) {
+					t.Errorf("root help lacks %q:\n%s", want, stdout)
+				}
 			}
-			if !strings.Contains(out, `"ok": true`) {
-				t.Errorf("stdout lacks the rendered body:\n%s", out)
+			if stderr.Len() != 0 {
+				t.Errorf("stderr = %q, want empty", stderr)
+			}
+			if log := built.Log(); len(log) != 0 {
+				t.Errorf("nodes built = %q, want none", log)
 			}
 		})
 	}
 }
 
-// --no-color is a persistent flag parsed during execution, after New has
-// built the tree and the output the commands render through. Color on a
-// terminal without the flag, and none with it, proves the output reads the
-// flag when a command renders, from the parsed value, not at construction
-// from the default. The terminal is the test's own: under go test the
-// process's stdout is never one, so a color decision taken there would be
-// off in both cases and tell the two apart from nothing.
-func TestCommands_ColorTheResultAsTheNoColorFlagSays(t *testing.T) {
-	t.Setenv("NO_COLOR", "")
-	on := style.New(true)
-	colored := on.Key(`"code"`) + ": " + on.Value(`"acme"`)
+// A parent run with no subcommand prints its help, as the root does.
+func TestRun_ParentWithNoSubcommand(t *testing.T) {
+	unreadable(t)
+	a, stdout, stderr, built := newApp(t)
+	probe(a)
+
+	code := a.Run(context.Background(), []string{"group"})
+
+	if code != process.ExitUsage {
+		t.Errorf("code = %d, want %d; stderr = %q", code, process.ExitUsage, stderr)
+	}
+	if want := "Hold the probes\n\nUsage:\n  slab group <command> [flags]"; !strings.HasPrefix(stdout.String(), want) {
+		t.Errorf("stdout = %q, want it to start with %q", stdout, want)
+	}
+	if log := built.Log(); len(log) != 0 {
+		t.Errorf("nodes built = %q, want none", log)
+	}
+}
+
+// Every usage error exits ExitUsage with go-cli-sdk's report on stderr,
+// before anything is built.
+func TestRun_UsageErrors(t *testing.T) {
 	for name, tc := range map[string]struct {
-		args    []string
-		colored bool
+		args []string
+		want string
 	}{
-		"org":                       {[]string{"org", "get", "1"}, true},
-		"org --no-color":            {[]string{"org", "get", "1", "--no-color"}, false},
-		"admin database":            {[]string{"admin", "database", "diagnostics"}, true},
-		"admin database --no-color": {[]string{"admin", "database", "diagnostics", "--no-color"}, false},
+		"an unknown command":     {[]string{"bogus"}, `slab: unknown command "bogus"`},
+		"an unknown subcommand":  {[]string{"group", "bogus"}, `slab group: unknown command "bogus"`},
+		"an extra argument":      {[]string{"version", "extra"}, "slab version: accepts no arguments, got 1\nUsage: slab version [flags]\n"},
+		"an unknown flag":        {[]string{"version", "--bogus"}, "slab version: flag provided but not defined: -bogus\nUsage: slab version [flags]\n"},
+		"a root flag's value":    {[]string{"group", "probe", "--base"}, "slab group probe: flag needs an argument: -base\n"},
+		"a missing flag":         {[]string{"group", "needs"}, "slab group needs: required flag --a not set\n"},
+		"exclusive flags":        {[]string{"group", "either", "--a", "x", "--b", "y"}, "slab group either: flags --a, --b cannot be used together\n"},
+		"a bad root flag syntax": {[]string{"--no-color=maybe", "version"}, "slab: invalid boolean value"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, srv := newService(t, http.StatusOK, `{"code":"acme"}`)
-			term := termtest.Open(t)
-			errOut, code := executeTo(t, term.Writer(), append(tc.args, "--base", srv.URL)...)
-			if code != 0 {
-				t.Fatalf("exited %d: %s", code, errOut)
+			unreadable(t)
+			a, stdout, stderr, built := newApp(t)
+			probe(a)
+
+			code := a.Run(context.Background(), tc.args)
+
+			if code != process.ExitUsage {
+				t.Errorf("code = %d, want %d; stderr = %q", code, process.ExitUsage, stderr)
 			}
-			out := term.Output()
-			if got := strings.Contains(out, colored); got != tc.colored {
-				t.Errorf("stdout colored = %v, want %v:\n%q", got, tc.colored, out)
+			if !strings.HasPrefix(stderr.String(), tc.want) {
+				t.Errorf("stderr = %q, want it to start with %q", stderr, tc.want)
 			}
-			if !strings.Contains(out, `"code"`) {
-				t.Errorf("stdout lacks the rendered body:\n%q", out)
+			if stdout.Len() != 0 {
+				t.Errorf("stdout = %q, want empty", stdout)
+			}
+			if log := built.Log(); len(log) != 0 {
+				t.Errorf("nodes built = %q, want none", log)
 			}
 		})
 	}
 }
 
-// The same run through a buffer, which is no terminal, is never colored
-// whatever the flag says: the decision is about the stream written to.
-func TestCommands_NeverColorAStreamThatIsNoTerminal(t *testing.T) {
-	t.Setenv("NO_COLOR", "")
-	_, srv := newService(t, http.StatusOK, `{"code":"acme"}`)
-	out, errOut, code := execute(t, "org", "get", "1", "--base", srv.URL)
-	if code != 0 {
-		t.Fatalf("exited %d: %s", code, errOut)
+func TestRun_Version(t *testing.T) {
+	unreadable(t)
+	a, stdout, stderr, built := newApp(t)
+
+	code := a.Run(context.Background(), []string{"version"})
+
+	if code != process.ExitOK {
+		t.Errorf("code = %d, want %d; stderr = %q", code, process.ExitOK, stderr)
 	}
-	if want := "{\n  \"code\": \"acme\"\n}\n"; out != want {
-		t.Errorf("stdout = %q, want the plain body %q", out, want)
+	// A test binary carries no main module version.
+	if stdout.String() != "(devel)\n" {
+		t.Errorf("stdout = %q, want %q", stdout, "(devel)\n")
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want empty", stderr)
+	}
+	if log := built.Log(); len(log) != 0 {
+		t.Errorf("nodes built = %q, want none", log)
 	}
 }
 
-func TestConfig_FallsBackToSLABBase(t *testing.T) {
-	received, srv := newService(t, http.StatusOK, `{}`)
-	t.Setenv("SLAB_BASE", srv.URL)
-	_, errOut, code := execute(t, "org", "get", "1")
-	if code != 0 {
-		t.Fatalf("exited %d: %s", code, errOut)
+// New builds nothing: the graph freezes on its first Build and panics on a
+// Replace after it, so Halt's Replace succeeding proves New never built.
+func TestNew_IsCold(t *testing.T) {
+	unreadable(t)
+
+	a, stdout, stderr, _ := newApp(t)
+
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Errorf("New() wrote %q, %q, want nothing", stdout, stderr)
 	}
-	if len(*received) != 1 {
-		t.Errorf("the service received %+v, want one request", *received)
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Replace after New() panicked: %v; want the graph unbuilt", r)
+		}
+	}()
+	apptest.Halt(a)
+}
+
+// probeBuilt is what the probe builds: the run setting nodes it declares,
+// in the order it declares them, and the lifecycle config the dispatcher
+// adds.
+var probeBuilt = []string{"base", "grafana", "tempo", "repo", "no color", "lifecycle config"}
+
+// A command builds the nodes it declares, and the lifecycle config the
+// dispatcher adds, and nothing else.
+func TestRun_CommandBuildsWhatItDeclares(t *testing.T) {
+	a, _, stderr, built := newApp(t)
+	got := probe(a)
+
+	code := a.Run(context.Background(), []string{"group", "probe"})
+
+	if code != process.ExitOK {
+		t.Errorf("code = %d, want %d; stderr = %q", code, process.ExitOK, stderr)
+	}
+	if *got == nil {
+		t.Fatal("probe did not run")
+	}
+	if !slices.Equal(built.Log(), probeBuilt) {
+		t.Errorf("nodes built = %q, want %q", built.Log(), probeBuilt)
 	}
 }
 
-func TestRun_RendersTheErrorAndExitsNonZero(t *testing.T) {
-	t.Run("a problem document, member by member", func(t *testing.T) {
-		_, srv := newService(t, http.StatusNotFound, `{"status":404,"title":"Not Found","detail":"no organization 1","instance":"/api/organizations/1"}`)
-		out, errOut, code := execute(t, "org", "get", "1", "--base", srv.URL)
-		if code != 1 {
-			t.Errorf("exited %d, want 1", code)
-		}
-		if out != "" {
-			t.Errorf("stdout = %q, want nothing", out)
-		}
-		if want := "404 Not Found\ndetail: no organization 1\ninstance: /api/organizations/1\n"; errOut != want {
-			t.Errorf("stderr = %q, want %q", errOut, want)
-		}
-	})
-	t.Run("a usage error, as its message", func(t *testing.T) {
-		_, errOut, code := execute(t, "org", "get")
-		if code != 1 {
-			t.Errorf("exited %d, want 1", code)
-		}
-		if !strings.Contains(errOut, "accepts 1 arg(s), received 0") {
-			t.Errorf("stderr = %q, want cobra's argument count message", errOut)
-		}
-	})
+// A command that declares one setting builds that setting alone, with the
+// lifecycle config, and reads no other: the other settings' variables are
+// unreadable or unused, and the run succeeds.
+func TestRun_ASettingIsReadOnlyByACommandThatDeclaresIt(t *testing.T) {
+	t.Setenv(noColor, "not-a-bool")
+	t.Setenv("SLAB_TEMPO", "http://env-tempo")
+	a, _, stderr, built := newApp(t)
+	tempo := a.Nodes().Tempo
+	var got string
+	a.Root().Add((&cli.Command{
+		Name: "tempo",
+		Run: func(_ context.Context, inv *cli.Invocation) error {
+			got = inv.Get(tempo)
+			return nil
+		},
+	}).Use(tempo))
+
+	code := a.Run(context.Background(), []string{"tempo"})
+
+	if code != process.ExitOK {
+		t.Fatalf("code = %d, want %d; stderr = %q", code, process.ExitOK, stderr)
+	}
+	if got != "http://env-tempo" {
+		t.Errorf("tempo = %q, want the environment's", got)
+	}
+	if want := []string{"tempo", "lifecycle config"}; !slices.Equal(built.Log(), want) {
+		t.Errorf("nodes built = %q, want %q", built.Log(), want)
+	}
+}
+
+// Each setting node reads its defaults, then the SLAB_* variables, then the
+// root flags given anywhere on the command line, each later one winning.
+func TestSettings_LayerDefaultsEnvAndFlags(t *testing.T) {
+	defaults := settings{
+		base:    "http://127.0.0.1:8080",
+		grafana: "http://127.0.0.1:3000",
+		tempo:   "http://127.0.0.1:3200",
+	}
+	fromEnv := settings{base: "http://env-base", grafana: "http://env-grafana", tempo: "http://env-tempo", repo: "/env-repo", noColor: true}
+	fromFlags := settings{base: "http://flag-base", grafana: "http://flag-grafana", tempo: "http://flag-tempo", repo: "/flag-repo", noColor: false}
+	flags := []string{"--base", "http://flag-base", "--grafana=http://flag-grafana", "--tempo", "http://flag-tempo", "--repo", "/flag-repo", "--no-color=false"}
+	for name, tc := range map[string]struct {
+		env  bool
+		args []string
+		want settings
+	}{
+		"the defaults":                   {false, []string{"group", "probe"}, defaults},
+		"the environment":                {true, []string{"group", "probe"}, fromEnv},
+		"flags before the parent":        {true, slices.Concat(flags, []string{"group", "probe"}), fromFlags},
+		"flags between parent and leaf":  {true, slices.Concat([]string{"group"}, flags, []string{"probe"}), fromFlags},
+		"flags after the leaf":           {true, slices.Concat([]string{"group", "probe"}, flags), fromFlags},
+		"flags over the defaults":        {false, slices.Concat([]string{"group", "probe"}, flags), fromFlags},
+		"a flag given its default value": {true, []string{"group", "probe", "--base", "http://127.0.0.1:8080"}, func() settings { c := fromEnv; c.base = defaults.base; return c }()},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if tc.env {
+				t.Setenv("SLAB_BASE", fromEnv.base)
+				t.Setenv("SLAB_GRAFANA", fromEnv.grafana)
+				t.Setenv("SLAB_TEMPO", fromEnv.tempo)
+				t.Setenv("SLAB_REPO", fromEnv.repo)
+				t.Setenv(noColor, "true")
+			} else {
+				for _, v := range []string{"SLAB_BASE", "SLAB_GRAFANA", "SLAB_TEMPO", "SLAB_REPO", noColor} {
+					t.Setenv(v, "")
+				}
+			}
+			a, _, stderr, _ := newApp(t)
+			got := probe(a)
+
+			code := a.Run(context.Background(), tc.args)
+
+			if code != process.ExitOK {
+				t.Fatalf("code = %d, want %d; stderr = %q", code, process.ExitOK, stderr)
+			}
+			if **got != tc.want {
+				t.Errorf("settings = %+v, want %+v", **got, tc.want)
+			}
+		})
+	}
+}
+
+// A run that dispatches twice starts the second from the flags' defaults,
+// so a flag the first run gave does not override the environment in the
+// second.
+func TestSettings_FlagsDoNotOutliveTheirRun(t *testing.T) {
+	t.Setenv("SLAB_BASE", "http://env-base")
+	a, _, stderr, _ := newApp(t)
+	got := probe(a)
+
+	if code := a.Run(context.Background(), []string{"group", "probe", "--base", "http://flag-base"}); code != process.ExitOK {
+		t.Fatalf("first run code = %d; stderr = %q", code, stderr)
+	}
+	if code := a.Run(context.Background(), []string{"group", "probe"}); code != process.ExitOK {
+		t.Fatalf("second run code = %d; stderr = %q", code, stderr)
+	}
+	if (*got).base != "http://env-base" {
+		t.Errorf("second run base = %q, want the environment's", (*got).base)
+	}
+}
+
+func TestSettings_UnreadableEnvFailsTheCommand(t *testing.T) {
+	t.Setenv(noColor, "not-a-bool")
+	a, _, stderr, _ := newApp(t)
+	got := probe(a)
+
+	code := a.Run(context.Background(), []string{"group", "probe"})
+
+	if code != process.ExitFailure {
+		t.Errorf("code = %d, want %d", code, process.ExitFailure)
+	}
+	if *got != nil {
+		t.Error("probe ran, want it stopped by the Build")
+	}
+	if want := "slab group probe: no color: SLAB_NO_COLOR: "; !strings.HasPrefix(stderr.String(), want) {
+		t.Errorf("stderr = %q, want it to start with %q", stderr, want)
+	}
+}
+
+func TestRun_InvalidShutdownTimeoutFailsTheCommand(t *testing.T) {
+	t.Setenv(shutdownTimeout, "not-a-duration")
+	a, _, stderr, _ := newApp(t)
+	got := probe(a)
+
+	code := a.Run(context.Background(), []string{"group", "probe"})
+
+	if code != process.ExitFailure {
+		t.Errorf("code = %d, want %d", code, process.ExitFailure)
+	}
+	if *got != nil {
+		t.Error("probe ran, want it stopped by the Build")
+	}
+	if want := "slab group probe: lifecycle config: SLAB_SHUTDOWN_TIMEOUT"; !strings.HasPrefix(stderr.String(), want) {
+		t.Errorf("stderr = %q, want it to start with %q", stderr, want)
+	}
+}
+
+// A halted run of a command that declares nodes fails with ErrHalted
+// before the command runs. An unreadable shutdown timeout proves the
+// substitute replaced the production constructor.
+func TestRun_HaltStopsTheCommand(t *testing.T) {
+	t.Setenv(shutdownTimeout, "not-a-duration")
+	a, stdout, stderr, built := newApp(t)
+	got := probe(a)
+	apptest.Halt(a)
+
+	code := a.Run(context.Background(), []string{"group", "probe"})
+
+	if code != process.ExitFailure {
+		t.Errorf("code = %d, want %d", code, process.ExitFailure)
+	}
+	if *got != nil {
+		t.Error("probe ran, want it stopped by the Build")
+	}
+	if want := "slab group probe: lifecycle config: " + apptest.ErrHalted.Error(); !strings.HasPrefix(stderr.String(), want) {
+		t.Errorf("stderr = %q, want it to start with %q", stderr, want)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", stdout)
+	}
+	if !slices.Equal(built.Log(), probeBuilt) {
+		t.Errorf("nodes built = %q, want %q", built.Log(), probeBuilt)
+	}
+}
+
+// Halt touches only a Build, so a run that builds nothing is unaffected.
+func TestRun_HaltLeavesVersion(t *testing.T) {
+	a, stdout, stderr, built := newApp(t)
+	apptest.Halt(a)
+
+	code := a.Run(context.Background(), []string{"version"})
+
+	if code != process.ExitOK {
+		t.Errorf("code = %d, want %d; stderr = %q", code, process.ExitOK, stderr)
+	}
+	if stdout.String() != "(devel)\n" {
+		t.Errorf("stdout = %q, want %q", stdout, "(devel)\n")
+	}
+	if log := built.Log(); len(log) != 0 {
+		t.Errorf("nodes built = %q, want none", log)
+	}
 }

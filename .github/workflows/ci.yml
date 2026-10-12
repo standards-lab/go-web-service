@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
 
-      - uses: jdx/mise-action@v5.1.1
+      - uses: jdx/mise-action@v5.1.2
 
       - name: mise run check
         run: mise run check
@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
 
-      - uses: jdx/mise-action@v5.1.1
+      - uses: jdx/mise-action@v5.1.2
 
       - name: mise run integration
         run: mise run integration

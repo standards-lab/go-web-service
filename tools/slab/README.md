@@ -8,8 +8,9 @@ replacement for ad-hoc curl; the scenarios are the architect's own instrument fo
 colleagues and leadership on the workspace's progress, and a self-serve path in for anyone
 exploring it themselves.
 
-It is its own Go module, rooted here, so cobra and its command machinery never enter
-`cmd/server`'s dependency graph. Anyone with `go-web-service` cloned already has it.
+It is its own Go module, rooted here, so its command machinery never enters `cmd/server`'s
+dependency graph: go-cli-sdk, and the `golang.org/x/term` and `golang.org/x/sys` modules the
+`style` package detects a terminal with. Anyone with `go-web-service` cloned already has it.
 
 [`usage.md`](usage.md) walks through every command by hand against the real running stack.
 
@@ -26,6 +27,7 @@ mise run slab -- demo storage                    # logos, documents, the refusal
 mise run slab -- org list                        # the organization domain's endpoints, one subcommand per route
 mise run slab -- docs dirs list <org-id> root    # the document domain's endpoints, grouped by dirs and files
 mise run slab -- admin database schema status    # the admin mount's endpoints, under their own domain word
+mise run slab -- version                         # slab's version
 ```
 
 Everything but `demo sqlate` needs the compose stack and the service (`demo storage` reads no
@@ -40,8 +42,10 @@ mise run serve   # in another shell
 
 `org`, `docs`, and `admin` call the running service's endpoints directly, one subcommand per
 route, printing the response as pretty JSON — or, for an empty body such as `org delete`'s 204,
-the status line alone, so a command is never silent. This is distinct in kind from a `demo`
-scenario's narrated tour: a command sends one real request and returns its result.
+the status line alone, so a command is never silent. A problem response prints nothing on
+stdout and one report on stderr: `slab <command path>: ` and the status line, then the detail,
+the instance, the type, and each extension member, one per line. A command sends one real
+request and returns its result, unlike a `demo` scenario's narrated tour.
 
 - **org** — the organization domain's ten endpoints: `list` (`--page` or `--cursor`, `--size`,
   `--sort`, and a repeatable `--filter field=value` or `field[op]=value`), `get <id>`,
@@ -90,8 +94,14 @@ scenario's narrated tour: a command sends one real request and returns its resul
 - **admin storage** — the object store's admin endpoints: `diagnostics` (whether a live probe
   succeeds, the container, and the key length bound) and `container` (creates the configured
   container, succeeding when it exists). Neither takes input.
+- **demo** — `demo <scenario>` runs one of the scenarios below on slab's own runner, narrating
+  each step to stdout. `demo` alone prints its help, which lists them.
+- **list** — prints every scenario, its summary, and what it needs running, as the root's help
+  does under `Scenarios:`. It reads no configuration.
+- **version** — prints slab's version: the module version the binary was built at, or `(devel)`
+  under `go run`. It reads no configuration.
 
-Both share the persistent flags below with `demo`.
+Every command accepts the root flags listed under [Configuration](#configuration).
 
 ## Scenarios
 
@@ -122,22 +132,44 @@ Both share the persistent flags below with `demo`.
   unique to the run, so the scenario runs twice in a row. Needs postgres, azurite, and the
   service, not Grafana.
 
-## Flags
+## Configuration
 
-`--base`, `--grafana`, and `--tempo` name the service's, Grafana's, and Tempo's base URLs (env
-`SLAB_BASE`, `SLAB_GRAFANA`, `SLAB_TEMPO`; they default to the compose stack's local ports).
-`--repo` names the repository root, when `slab` is not run from inside it. `--no-color` prints
-without ANSI color even on a terminal.
+Each setting has a default, an environment variable that overrides it, and, but for the shutdown
+budget, a root flag that overrides the variable. A root flag is accepted at any depth — before the
+command word, between a parent and its subcommand, or after the leaf — and overrides its variable
+whenever it is given, even at its default value.
+
+| Flag | Variable | Default | What it sets |
+|---|---|---|---|
+| `--base` | `SLAB_BASE` | `http://127.0.0.1:8080` | the service's base URL |
+| `--grafana` | `SLAB_GRAFANA` | `http://127.0.0.1:3000` | Grafana's base URL |
+| `--tempo` | `SLAB_TEMPO` | `http://127.0.0.1:3200` | Tempo's HTTP API base URL |
+| `--repo` | `SLAB_REPO` | found from the working directory | the repository root, when `slab` is not run from inside it |
+| `--no-color` | `SLAB_NO_COLOR` | `false` | print without ANSI color even on a terminal |
+| — | `SLAB_SHUTDOWN_TIMEOUT` | `10s` | the budget for shutting down what a command built |
+
+Output is colored only on a terminal, and never when `NO_COLOR` is set to anything non-empty.
+Each setting is read only when a command that needs it runs, and help, a usage error, `list`, and
+`version` read none. An unreadable variable, such as `SLAB_NO_COLOR=maybe`, therefore fails only a
+command that reads it, with exit code 1 and the variable named.
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | the command succeeded |
+| 1 | the command failed: a request that could not be sent, a problem response or another unexpected status, a scenario step or need that failed, or unreadable configuration |
+| 2 | a usage error — an unknown command or scenario, an unknown flag, a missing or extra argument, a missing required flag, exclusive flags given together, or input a command refuses before it sends — reported on stderr with the command's usage; or help, printed on `-h`, `--help`, or a parent such as `slab demo` run alone |
 
 ## Conventions
 
 A new scenario, command, or domain follows these rules. Each package's `doc.go` states the rules
 that are its own.
 
-- **Its own module.** slab's `go.mod` requires the workspace libraries it uses and cobra, never
-  go-web-service's root module. The service has no release version, so a dependency on it would pin a
-  pseudo-version that goes stale in a fresh clone or CI; local cross-module work goes through the
-  gitignored `go.work`.
+- **Its own module.** slab's `go.mod` requires the workspace libraries it uses, go-cli-sdk among
+  them, never go-web-service's root module. The service has no release version, so a dependency
+  on it would pin a pseudo-version that goes stale in a fresh clone or CI; local cross-module
+  work goes through the gitignored `go.work`.
 - **The service's layout.** slab mirrors the service's layout. `internal/app` is the composition
   root, one file per layer, and the only package that constructs a dependency or names a mount.
   `cmd/slab` holds process entry and nothing else. `domain/<name>` is the client-side counterpart
@@ -150,8 +182,12 @@ that are its own.
   not specific to the service. `env` imports no other slab package, so every package can read it.
 - **Direct commands.** Each direct command maps to one route. A command's field flags name the
   wire field they build (`--code`, `--parent-id`), and `--body` and `--version` mean the same on
-  every command. A domain's `Commands` takes a client constructor and the one `Output`, and never
-  names `httpx.NewClient` or a stream.
+  every command. A family's `Commands` takes the client node and the `output.Source`, declares
+  them with `Use`, returns `[]*cli.Command` for the composition root's one
+  `Add(pkg.Commands(...)...)`, and never names `httpx.NewClient` or a stream. Each leaf is a plain
+  function of those two, with no type wrapping them; it refuses bad input in `Validate`, before
+  anything is built, finishes through `Source.Respond`, and returns any other failure for the
+  dispatcher to report.
 - **Naming.** A root subcommand is bare, never capability-prefixed: `demo domain`, not
   `demo domain-crud`. `admin database` nests the admin mount's one domain under the `admin`
   command, so a second admin domain can arrive without renaming the first.

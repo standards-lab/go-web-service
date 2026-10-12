@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/standards-lab/go-cli-sdk"
 	"github.com/standards-lab/go-cli-sdk/scenario"
@@ -19,6 +20,12 @@ import (
 // minted. integration/organization_test.go states the same id for the same
 // purpose.
 const absentID = "00000000-0000-7000-8000-000000000000"
+
+// maxCommandBody is the byte limit domain/organization/handler.go's
+// maxCommandBody puts on a command's request body; a body past it is
+// answered with 413. It is a fixture value for the problems scenario, not
+// a restated contract, so it lives here rather than in a domain package.
+const maxCommandBody = 1 << 16
 
 // The inputs the conditions send. invalidCode breaks the code rule twice
 // over, with a capital and a space; malformedBody is a create body cut off
@@ -238,4 +245,16 @@ func (s *problems) answered(r *scenario.Reporter, st style.Style, inv *cli.Invoc
 		return err
 	}
 	return showTrace(r, st, inv.Get(s.n.GrafanaUp), res)
+}
+
+// oversizedBody returns a command body over maxCommandBody, and the short
+// stand-in a narration shows in its place: the payload is a create body
+// whose code is maxCommandBody+1 bytes of filler, well-formed JSON that the
+// service's bounded reader rejects before the decoder sees its end, and the
+// printable form names the filler's length instead of carrying it.
+func oversizedBody() (payload []byte, printable string) {
+	n := maxCommandBody + 1
+	payload = []byte(`{"code":"` + strings.Repeat("a", n) + `"}`)
+	printable = fmt.Sprintf(`{"code":"<%d bytes>"}`, n)
+	return payload, printable
 }

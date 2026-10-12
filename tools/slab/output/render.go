@@ -34,6 +34,12 @@ func SQL(st style.Style, text string) Render {
 // keyed under st and padded so the values line up two spaces past the
 // longest name.
 func Table(st style.Style, rows [][2]string) Render {
+	return aligned(st, rows, "  ")
+}
+
+// aligned returns the Render of name/value pairs, one per line: each name
+// keyed under st and padded to the longest, then sep, then the value.
+func aligned(st style.Style, rows [][2]string, sep string) Render {
 	return func(w io.Writer) error {
 		width := 0
 		for _, row := range rows {
@@ -41,7 +47,7 @@ func Table(st style.Style, rows [][2]string) Render {
 		}
 		for _, row := range rows {
 			pad := strings.Repeat(" ", width-len(row[0]))
-			if _, err := fmt.Fprintf(w, "%s%s  %s\n", st.Key(row[0]), pad, row[1]); err != nil {
+			if _, err := fmt.Fprintf(w, "%s%s%s%s\n", st.Key(row[0]), pad, sep, row[1]); err != nil {
 				return err
 			}
 		}
@@ -142,24 +148,11 @@ func Response(st style.Style, res *httpx.Response) Render {
 // percent-encoded JSON, which is longer than the three lines and no easier
 // to follow.
 func Trace(st style.Style, grafanaBase, serviceName, traceID string) Render {
-	return func(w io.Writer) error {
-		rows := [][2]string{
-			{"Grafana", strings.TrimRight(grafanaBase, "/") + "/explore"},
-			{"Service Name", serviceName},
-			{"Trace ID", traceID},
-		}
-		width := 0
-		for _, row := range rows {
-			width = max(width, len(row[0]))
-		}
-		for _, row := range rows {
-			pad := strings.Repeat(" ", width-len(row[0]))
-			if _, err := fmt.Fprintf(w, "%s%s: %s\n", st.Key(row[0]), pad, row[1]); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
+	return aligned(st, [][2]string{
+		{"Grafana", strings.TrimRight(grafanaBase, "/") + "/explore"},
+		{"Service Name", serviceName},
+		{"Trace ID", traceID},
+	}, ": ")
 }
 
 // writeHeader writes one header line, its name keyed under st.

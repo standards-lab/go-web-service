@@ -12,6 +12,13 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
+// serviceName is the service.name resource attribute the service exports,
+// which Tempo and Loki index the trace under. The same string is stated in
+// two other places: internal/app/telemetry.go's serviceName constant, which
+// is unexported and so not importable, and
+// compose/otel-collector/otel-collector.yaml.
+const serviceName = "go-web-service"
+
 // Nodes are the graph nodes the scenarios are built over, handed in by the
 // composition root: each scenario declares the ones it reads, need nodes
 // first and then the settings, and its steps read their values from the

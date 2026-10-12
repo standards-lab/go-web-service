@@ -81,7 +81,7 @@ func (d deps) dirsCreateCommand() *cobra.Command {
 		Short: "Create a directory under a parent directory, or under root",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			body, err := input.Body(cmd, raw, func() (any, error) {
+			body, err := input.CobraBody(cmd, raw, func() (any, error) {
 				if !cmd.Flags().Changed("parent-id") || !cmd.Flags().Changed("name") {
 					return nil, errors.New("--parent-id and --name are required unless --body is given")
 				}
@@ -139,7 +139,7 @@ func (d deps) dirsListCommand() *cobra.Command {
 		Short: "List a directory's child directories, one page at a time",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			query, err := read.Query(cmd)
+			query, err := read.QueryCobra(cmd)
 			if err != nil {
 				return err
 			}
@@ -154,14 +154,14 @@ func (d deps) dirsListCommand() *cobra.Command {
 			return nil
 		},
 	}
-	read.Bind(cmd)
+	read.BindCobra(cmd)
 	return cmd
 }
 
 // dirsMoveCommand is POST Documents/{org}/directories/{id}/move under
 // If-Match. The body is --body verbatim, or MoveDirectory built from
 // --parent-id and --name, both required since the service defaults neither;
-// the version is resolved by input.GuardedBody.
+// the version is resolved by input.CobraGuardedBody.
 func (d deps) dirsMoveCommand() *cobra.Command {
 	var (
 		raw, parent, name string
@@ -172,7 +172,7 @@ func (d deps) dirsMoveCommand() *cobra.Command {
 		Short: "Move or rename a directory",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			body, ifMatch, err := input.GuardedBody(cmd, raw, version, func() (any, error) {
+			body, ifMatch, err := input.CobraGuardedBody(cmd, raw, version, func() (any, error) {
 				if !cmd.Flags().Changed("parent-id") || !cmd.Flags().Changed("name") {
 					return nil, errors.New("--parent-id and --name are required unless --body is given")
 				}
@@ -311,7 +311,7 @@ func (d deps) filesListCommand() *cobra.Command {
 		Short: "List the files in a directory, one page at a time",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			query, err := read.Query(cmd)
+			query, err := read.QueryCobra(cmd)
 			if err != nil {
 				return err
 			}
@@ -326,7 +326,7 @@ func (d deps) filesListCommand() *cobra.Command {
 			return nil
 		},
 	}
-	read.Bind(cmd)
+	read.BindCobra(cmd)
 	return cmd
 }
 
@@ -433,7 +433,7 @@ func (d deps) filesGetCommand() *cobra.Command {
 
 // filesMoveCommand is POST Documents/{org}/files/{id}/move under If-Match.
 // The body is --body verbatim, or MoveFile built from --directory-id and
-// --name, both required; the version is resolved by input.GuardedBody.
+// --name, both required; the version is resolved by input.CobraGuardedBody.
 func (d deps) filesMoveCommand() *cobra.Command {
 	var (
 		raw, directory, name string
@@ -444,7 +444,7 @@ func (d deps) filesMoveCommand() *cobra.Command {
 		Short: "Move or rename a file",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			body, ifMatch, err := input.GuardedBody(cmd, raw, version, func() (any, error) {
+			body, ifMatch, err := input.CobraGuardedBody(cmd, raw, version, func() (any, error) {
 				if !cmd.Flags().Changed("directory-id") || !cmd.Flags().Changed("name") {
 					return nil, errors.New("--directory-id and --name are required unless --body is given")
 				}

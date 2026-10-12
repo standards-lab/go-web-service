@@ -100,7 +100,7 @@ func (d deps) downCommand() *cobra.Command {
 		Short: "Revert a set's most recent migrations, one when --steps is unset",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			body, err := input.Body(cmd, raw, func() (any, error) {
+			body, err := input.CobraBody(cmd, raw, func() (any, error) {
 				if !cmd.Flags().Changed("set") {
 					return nil, errSetRequired
 				}
@@ -151,7 +151,7 @@ func (d deps) stepsCommand() *cobra.Command {
 		Short: "Apply --steps of a set's pending migrations, or revert that many when negative",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			body, err := input.Body(cmd, raw, func() (any, error) {
+			body, err := input.CobraBody(cmd, raw, func() (any, error) {
 				if !cmd.Flags().Changed("set") {
 					return nil, errSetRequired
 				}
@@ -196,7 +196,7 @@ func (d deps) forceCommand() *cobra.Command {
 		Short: "Set a set's migration history to --version without running any file",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			body, err := input.Body(cmd, raw, func() (any, error) {
+			body, err := input.CobraBody(cmd, raw, func() (any, error) {
 				if !cmd.Flags().Changed("set") {
 					return nil, errSetRequired
 				}
@@ -244,7 +244,7 @@ func (d deps) seedCommand() *cobra.Command {
 			var body []byte
 			if cmd.Flags().Changed("body") || cmd.Flags().Changed("state") {
 				var err error
-				body, err = input.Body(cmd, raw, func() (any, error) {
+				body, err = input.CobraBody(cmd, raw, func() (any, error) {
 					return State{State: state}, nil
 				})
 				if err != nil {
@@ -283,7 +283,7 @@ func (d deps) stateCommand() *cobra.Command {
 		Short: "Reset the database to a named state: revert every migration set, apply the sets, and seed; requires --confirm",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			body, err := input.Body(cmd, raw, func() (any, error) {
+			body, err := input.CobraBody(cmd, raw, func() (any, error) {
 				if !cmd.Flags().Changed("state") {
 					return nil, errors.New("--state is required unless --body is given")
 				}

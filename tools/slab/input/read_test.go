@@ -1,25 +1,34 @@
 package input_test
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 
+	"github.com/standards-lab/go-cli-sdk"
+
 	"github.com/standards-lab/go-web-service/tools/slab/input"
 )
 
-// readQuery binds the read flags on a fresh command, parses args, and
-// returns the query pairs they produce.
-func readQuery(t *testing.T, args ...string) ([][2]string, error) {
+// readQuery binds the read flags on a fresh command, dispatches it over
+// args, and returns the query pairs they produce.
+func readQuery(t *testing.T, args ...string) (query [][2]string, err error) {
 	t.Helper()
 	var read input.ReadFlags
-	cmd := &cobra.Command{Use: "list"}
+	cmd := &cli.Command{Name: "list", Run: func(_ context.Context, inv *cli.Invocation) error {
+		query, err = read.Query(inv)
+		return nil
+	}}
 	read.Bind(cmd)
-	if err := cmd.ParseFlags(args); err != nil {
-		t.Fatal(err)
+	var stderr bytes.Buffer
+	if code := cli.Run(context.Background(), cmd, args, cli.Streams{Stdout: &stderr, Stderr: &stderr}); code != 0 {
+		t.Fatalf("dispatch of %q exited %d: %s", args, code, stderr.String())
 	}
-	return read.Query(cmd)
+	return query, err
 }
 
 // Only the flags given are sent, in flag order, each filter as written.
@@ -38,5 +47,36 @@ func TestReadFlags_SendsOnlyTheFlagsGiven(t *testing.T) {
 func TestReadFlags_RefusesAFilterWithoutAName(t *testing.T) {
 	if _, err := readQuery(t, "--filter", "=x"); err == nil {
 		t.Error("a nameless filter was accepted")
+	}
+}
+
+// --page and --cursor are an exclusive group, refused before the command
+// runs.
+func TestReadFlags_RefusesPageWithCursor(t *testing.T) {
+	var read input.ReadFlags
+	cmd := &cli.Command{Name: "list", Run: func(context.Context, *cli.Invocation) error {
+		t.Error("the command ran")
+		return nil
+	}}
+	read.Bind(cmd)
+	var stderr bytes.Buffer
+	code := cli.Run(context.Background(), cmd, []string{"--page", "2", "--cursor", "c"}, cli.Streams{Stdout: &stderr, Stderr: &stderr})
+	if code != 2 || !strings.Contains(stderr.String(), "flags --page, --cursor cannot be used together") {
+		t.Errorf("code = %d, stderr = %q, want the exclusive group refused", code, stderr.String())
+	}
+}
+
+// The cobra binding reads the same grammar from a cobra command's flags.
+func TestReadFlags_CobraBinding(t *testing.T) {
+	var read input.ReadFlags
+	cmd := &cobra.Command{Use: "list"}
+	read.BindCobra(cmd)
+	if err := cmd.ParseFlags([]string{"--filter", "a=b", "--filter", "c=d", "--size", "5"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := read.QueryCobra(cmd)
+	want := [][2]string{{"size", "5"}, {"a", "b"}, {"c", "d"}}
+	if err != nil || fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("query = %v, %v; want %v", got, err, want)
 	}
 }

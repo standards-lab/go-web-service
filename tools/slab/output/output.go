@@ -6,9 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
-	"slices"
 
 	"github.com/standards-lab/go-web-sdk"
 
@@ -22,11 +20,12 @@ import (
 // command family renders through it, so no command names a stream or a
 // style itself.
 //
-// The streams are known when the tree is built; whether to color is not,
-// since --no-color is a persistent flag cobra parses during execution. So
-// Output holds the decision as a function and asks it each time it renders,
-// which is always from a command's RunE, after parsing. Nothing about an
-// Output changes after New, so one is safe to share.
+// Whether to color is not known when the Output is constructed for a
+// family still on cobra, since --no-color is a persistent flag cobra parses
+// during execution. So Output holds the decision as a function and asks it
+// each time it renders, which is always from a command's run, after
+// parsing. Nothing about an Output changes after New, so one is safe to
+// share.
 type Output struct {
 	stdout, stderr io.Writer
 	color          func() bool
@@ -107,64 +106,29 @@ func (o *Output) Object(status int, header http.Header, n int, saved string) {
 }
 
 // Expect returns nil when res carries status, and otherwise the error that
-// reports the response: the decoded web.Problem itself when the body is an
-// RFC 9457 document — web.Problem implements error directly, so a command
-// returns it with no wrapper needed — or, when the body is not a problem
-// document, httpx.Response.Expect's error naming the status and quoting the
-// body. A command checks its one expected status with it and returns what
-// it gets.
+// reports the response: a [Report] of the decoded web.Problem when the body
+// is an RFC 9457 document, or, when the body is not a problem document,
+// httpx.Response.Expect's error naming the status and quoting the body. A
+// command checks its one expected status with it and returns what it gets.
 func Expect(res *httpx.Response, status int) error {
 	if res.Status == status {
 		return nil
 	}
 	if p, err := res.Problem(res.Status); err == nil {
-		return p
+		return Report{Problem: p}
 	}
 	return res.Expect(status)
 }
 
-// Error writes a failure to stderr. When err is or wraps a web.Problem, the
-// document's members are written one per line: the status and title first,
-// then the detail, the instance, the type (unless it is about:blank, which
-// says nothing), and each extension member by name, in key order. Any
-// other error is written as its message. A transport error that never
-// reached a response, an unexpected non-problem response, and a decoded
-// problem document all arrive here through the same parameter.
+// Error writes a failure to stderr, for a command still on cobra, whose
+// root renders the error a command returns. When err is or wraps a
+// web.Problem, the document is written as its [Report]; any other error is
+// written as its message. A transport error that never reached a
+// response, an unexpected non-problem response, and a decoded problem
+// document all arrive here through the same parameter.
 func (o *Output) Error(err error) {
-	w := o.stderr
-	var p web.Problem
-	if !errors.As(err, &p) {
-		_, _ = fmt.Fprintln(w, err.Error())
-		return
+	if p, ok := errors.AsType[web.Problem](err); ok {
+		err = Report{Problem: p}
 	}
-	title := p.Title
-	if title == "" {
-		title = http.StatusText(p.Status)
-	}
-	_, _ = fmt.Fprintf(w, "%d %s\n", p.Status, title)
-	if p.Detail != "" {
-		_, _ = fmt.Fprintf(w, "detail: %s\n", p.Detail)
-	}
-	if p.Instance != "" {
-		_, _ = fmt.Fprintf(w, "instance: %s\n", p.Instance)
-	}
-	if p.Type != "" && p.Type != web.ProblemTypeBlank {
-		_, _ = fmt.Fprintf(w, "type: %s\n", p.Type)
-	}
-	for _, k := range slices.Sorted(maps.Keys(p.Extras)) {
-		_, _ = fmt.Fprintf(w, "%s: %s\n", k, member(p.Extras[k]))
-	}
-}
-
-// member renders an extension member's value: a string as is, anything
-// else as compact JSON, which is how the document carried it.
-func member(v any) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	b, err := json.Marshal(v)
-	if err != nil {
-		return fmt.Sprint(v)
-	}
-	return string(b)
+	_, _ = fmt.Fprintln(o.stderr, err.Error())
 }

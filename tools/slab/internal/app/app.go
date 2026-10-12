@@ -8,6 +8,8 @@ import (
 	"github.com/standards-lab/go-cli-sdk"
 	"github.com/standards-lab/go-core/graph"
 	"github.com/standards-lab/go-core/lifecycle"
+
+	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 )
 
 // App is the program: its dependency graph and the [Nodes] that describe
@@ -44,6 +46,7 @@ func New(streams cli.Streams) *App {
 	a.root.PreRun = flags.preRun
 	defineInfrastructure(a.graph, &a.nodes, flags)
 	a.root.Add(versionCommand())
+	a.root.Add(domainCommands(&a.nodes)...)
 	a.legacy = mountLegacy(a.root, streams)
 	return a
 }
@@ -71,6 +74,7 @@ func (a *App) Run(ctx context.Context, args []string) int {
 type Nodes struct {
 	LifecycleConfig *graph.Node[lifecycle.Config] // "lifecycle config"
 	Config          *graph.Node[Config]           // "config"
+	Client          *graph.Node[*httpx.Client]    // "client"
 }
 
 // Graph returns the graph a's commands are built from, as [New] described

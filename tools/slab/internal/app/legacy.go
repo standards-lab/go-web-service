@@ -17,7 +17,7 @@ import (
 )
 
 // legacy is the temporary bridge to the command families still on cobra:
-// org, docs, admin, demo, and list. Each moves onto the go-cli-sdk tree in
+// docs, admin, demo, and list. Each moves onto the go-cli-sdk tree in
 // a later slice of the commands task, and this file goes with the last of
 // them. Until then a run whose subcommand is one of them is dispatched to
 // a cobra tree built as before the move, with its own flags, words,

@@ -3,6 +3,7 @@ package app
 import (
 	"io"
 
+	"github.com/standards-lab/go-cli-sdk"
 	"github.com/standards-lab/go-core/graph"
 	"github.com/standards-lab/go-core/lifecycle"
 
@@ -13,13 +14,43 @@ import (
 
 // defineInfrastructure defines the infrastructure nodes on g into n: the
 // configurations, read from SLAB_* variables, and, for config, the root
-// flags given on the command line. It constructs nothing: each value is
-// read in its node's constructor, which runs only when a Build reaches the
-// node, so configuration is read only for a command that declares a node,
-// never in [New] and never for a run that builds nothing.
+// flags given on the command line; and the HTTP client to the service,
+// bound to config's base URL. It constructs nothing: each value is read in
+// its node's constructor, which runs only when a Build reaches the node,
+// so configuration is read only for a command that declares a node, never
+// in [New] and never for a run that builds nothing.
 func defineInfrastructure(g *graph.Graph, n *Nodes, flags *rootFlags) {
 	n.LifecycleConfig = g.Define("lifecycle config", newLifecycleConfig)
 	n.Config = g.Define("config", newConfig(flags))
+	n.Client = g.Define("client", newClient(n.Config))
+}
+
+// newClient returns the client node's constructor: the HTTP client to the
+// service, bound to the base URL config resolves. It is the one place a
+// command on the tree gets an httpx.Client from; the demo scenarios
+// construct their own, as each addresses the stack it needs by name.
+func newClient(config *graph.Node[Config]) func(*graph.Scope) (*httpx.Client, error) {
+	return func(s *graph.Scope) (*httpx.Client, error) {
+		return httpx.NewClient(s.Use(config).Base), nil
+	}
+}
+
+// outputSource returns the output.Source a command family on the tree
+// renders through: the config node, which the family declares with Use,
+// and the Output over the invocation's streams, colored when stdout is a
+// terminal and neither NO_COLOR nor the config's NoColor, the SLAB_NO_COLOR
+// variable or --no-color, says otherwise.
+func outputSource(n *Nodes) output.Source {
+	config := n.Config
+	return output.Source{
+		Node: config,
+		New: func(inv *cli.Invocation) *output.Output {
+			noColor := inv.Get(config).NoColor
+			return output.New(inv.Stdout, inv.Stderr, func() bool {
+				return style.ColorEnabled(inv.Stdout, noColor)
+			})
+		},
+	}
 }
 
 // newLifecycleConfig reads the lifecycle configuration, the shutdown
@@ -32,7 +63,7 @@ func newLifecycleConfig(*graph.Scope) (lifecycle.Config, error) {
 	return cfg, err
 }
 
-// Infrastructure holds what the commands are composed on: the HTTP client to
+// Infrastructure holds what the cobra families are composed on: the HTTP client to
 // the service. The client binds to the base URL, and that is a persistent
 // flag cobra parses during execution, after the tree is built, so the struct
 // holds the resolved config and constructs the client on demand through

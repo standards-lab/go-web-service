@@ -9,9 +9,13 @@
 //     variables with the root flags (--base, --grafana, --tempo, --repo,
 //     --no-color) overriding them, and those flags, accepted at any depth;
 //   - infrastructure.go: defineInfrastructure, the lifecycle and run
-//     configuration nodes, and the HTTP client the cobra families compose;
-//   - domain.go, admin.go, and demo.go: the domain and admin clients and
-//     their commands, and the demo mount and the scenario listing;
+//     configuration nodes and the client node, the HTTP client to the
+//     service bound to the config's base URL; the output source the
+//     families on the tree render through; and the HTTP client the cobra
+//     families compose;
+//   - domain.go, admin.go, and demo.go: the domain commands on the tree
+//     (org), the domain and admin clients and commands still on cobra, and
+//     the demo mount and the scenario listing;
 //   - version.go: the version command, which declares no nodes;
 //   - legacy.go and commands.go: the temporary bridge to the command
 //     families still on cobra, and their list of mounts.
@@ -25,8 +29,8 @@
 // records which root flags a dispatch set, so the config node applies a
 // flag over its variable only when the flag was given.
 //
-// The command families org, docs, admin, demo, and list are moving onto the
-// tree one by one. Until each moves, [App.Run] hands a run that selects it
+// The org family is on the tree. The command families docs, admin, demo,
+// and list are moving onto it one by one. Until each moves, [App.Run] hands a run that selects it
 // to a cobra tree built per run as before the move, with its own flags,
 // words, requests, and exit codes; the root's help lists them beside the
 // commands on the tree.

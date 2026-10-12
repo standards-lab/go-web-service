@@ -1,6 +1,6 @@
 # goal · slab
 
-- **State:** building
+- **State:** brief ready
 - **Task:** scenarios
 - **Branch:** scenarios
 
@@ -76,7 +76,7 @@ Door          two-way: slab is an unreleased dev tool in this repository, no tag
 
 ## Progress
 
-slices 6/6 committed · standards ✓ · spec ✓ · editor —
+slices 6/6 committed · standards ✓ · spec ✓ · editor ✓
 
 ## Decisions
 
@@ -120,6 +120,10 @@ slices 6/6 committed · standards ✓ · spec ✓ · editor —
 - scenarios (redirect): SQL blocks also dim `--`/`--|` comment lines and color sqlate's `{{…}}` markers, since the comments and markers are most of what sqlate teaches.
 - scenarios (redirect): SQL, JSON, and table blocks get a blank line before and after, as the old runner printed, revising the flush spacing BUILD chose.
 - scenarios (redirect): captions stay plain notes; a caption inside its block would sit at the block's indent.
+- scenarios (redirect): an unclosed `{{` is plain code, so it doesn't hide a trailing `--` comment after it.
+- scenarios (redirect): a `--` inside a quoted string counts as a comment, since the repository's statements bind values rather than quote them.
+- scenarios (redirect): the trace pointer keeps the request's spacing, a blank line before it and none after.
+- scenarios (redirect): at the App seam only the storage "Seeded" table's trailing blank line is distinguishable, since go-cli-sdk's reporter collapses consecutive blank lines; the other blocks' spacing is asserted on the output rather than pinned to `show`.
 
 ## Pending edits
 

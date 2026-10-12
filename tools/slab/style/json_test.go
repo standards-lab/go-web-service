@@ -56,3 +56,15 @@ func TestJSON_LeavesTextThatIsNoJSONUnchanged(t *testing.T) {
 		t.Errorf("JSON(%q) = %q, want it unchanged", "not json", got)
 	}
 }
+
+func TestJSON_LeavesTextThatBreaksPartwayUnchanged(t *testing.T) {
+	on := style.New(true)
+	for name, doc := range map[string]string{
+		"cut after the first key": "{\n  \"name\"",
+		"bad value after a key":   "{\n  \"name\": nope\n}",
+	} {
+		if got := on.JSON(doc); got != doc {
+			t.Errorf("%s: JSON(%q) = %q, want it unchanged", name, doc, got)
+		}
+	}
+}

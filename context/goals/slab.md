@@ -1,8 +1,8 @@
 # goal · slab
 
-- **State:** idle
-- **Task:** none
-- **Branch:** none
+- **State:** building
+- **Task:** commands
+- **Branch:** commands
 
 ## Tasks
 
@@ -64,6 +64,10 @@ Door          Two-way: no release (go-web-service is untagged); the exit-code
               restores it.
 ```
 
+## Progress
+
+slices 0/6 committed · standards — · spec — · editor —
+
 ## Decisions
 
 - slab: two tasks, `commands` then `scenarios`. About 12k lines is more than one session, and demo and list stay on slab's own runner in between.
@@ -72,6 +76,7 @@ Door          Two-way: no release (go-web-service is untagged); the exit-code
 - commands: tools/slab stays its own Go module, keeping go-cli-sdk, x/term, and x/sys out of cmd/server's module. Folding it into the root module would be a task of its own.
 - scenarios: Needs (service, Grafana) become nodes the scenario declares. Each checks it can reach its target at start and names the mise task. Rejected: a Needs field in go-cli-sdk, which would need a go-cli-sdk release first.
 - scenarios: only the blocks a step prints through Show are colored, and headings and notes stay plain. Rejected: a styled Reporter in go-cli-sdk.
+- commands: PLAN re-ran currency on 2026-10-12; go-core v0.8.0, go-web-sdk v0.15.2, mise-action v5.1.2 trail, all in slice 0; go-cli-sdk v0.2.0 is still latest, so the approved brief stands.
 - scenarios: the backlog goal slab-json-partial-color folds in. style.JSON returns input that breaks after its first token unchanged, which fixes the code rather than the comment.
 
 ## Pending edits

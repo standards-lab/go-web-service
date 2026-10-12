@@ -1,6 +1,6 @@
 # goal · slab
 
-- **State:** brief ready
+- **State:** building
 - **Task:** scenarios
 - **Branch:** scenarios
 
@@ -41,6 +41,9 @@ Behaviors     1. `slab scenario <name>` runs sqlate, domain, problems, and stora
                  exits 2 (unknown flag).
               10. style.JSON returns input that breaks after its first token unchanged,
                   with no partial color.
+              12. SQL blocks bold keywords, dim `--` and `--|` comment lines, and color
+                  sqlate's `{{…}}` markers; SQL, JSON, and table blocks are set off by a
+                  blank line before and after.
               11. slab's README and usage, go-web-service's README, and the slab mise
                   task description name `slab scenario <name>`. Outside the CHANGELOG's
                   history no `slab demo` or `slab list` remains; the CHANGELOG's
@@ -63,6 +66,8 @@ Slices        1. style.JSON returns input that breaks partway unchanged.
               5. Documentation: slab's README and usage, go-web-service's README, the
                  mise task description, the CHANGELOG. Demo: grep finds no `slab demo`
                  or `slab list` outside the CHANGELOG's history.
+              6. (redirect) SQL comment and marker coloring; blank lines around SQL,
+                 JSON, and table blocks. Demo: `slab scenario sqlate` on a terminal.
 Out of scope  Any go-cli-sdk change; folding slab into the root module; per-scenario
               flags; probing postgres or azurite directly; changing any scenario's
               steps, intents, or requests; colored headings or notes.
@@ -71,7 +76,7 @@ Door          two-way: slab is an unreleased dev tool in this repository, no tag
 
 ## Progress
 
-slices 5/5 committed · standards ✓ · spec ✓ · editor ✓
+slices 5/6 committed · standards — · spec — · editor — (redirect: slice 6)
 
 ## Decisions
 
@@ -112,6 +117,9 @@ slices 5/5 committed · standards ✓ · spec ✓ · editor ✓
 - scenarios: the scenarios are built once in New and keep their step state in a struct across runs. go-cli-sdk v0.2.0's Scenario takes a fixed Steps slice with no per-run hook, and each run's first step overwrites what later steps read.
 - scenarios: repo.Root and repo.FS take the override string. The env package is deleted, since the setting nodes read SLAB_* through go-core's config.EnvName. httpx's Live and GrafanaLive gave way to Probe, ProbeGrafana, and StatusError in probe.go.
 - scenarios: the summaries drop "(needs ...)" and "(no compose stack needed)", which the "uses" line replaces. storage's run-time branch prefix stays `storage-demo-`: it is a request body, and changing it is out of scope.
+- scenarios (redirect): SQL blocks also dim `--`/`--|` comment lines and color sqlate's `{{…}}` markers, since the comments and markers are most of what sqlate teaches.
+- scenarios (redirect): SQL, JSON, and table blocks get a blank line before and after, as the old runner printed, revising the flush spacing BUILD chose.
+- scenarios (redirect): captions stay plain notes; a caption inside its block would sit at the block's indent.
 
 ## Pending edits
 

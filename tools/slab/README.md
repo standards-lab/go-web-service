@@ -8,9 +8,9 @@ replacement for ad-hoc curl; the scenarios are the architect's own instrument fo
 colleagues and leadership on the workspace's progress, and a self-serve path in for anyone
 exploring it themselves.
 
-It is its own Go module, rooted here, so its command machinery — go-cli-sdk, and the
-`golang.org/x/term` and `golang.org/x/sys` it detects a terminal with — never enters
-`cmd/server`'s dependency graph. Anyone with `go-web-service` cloned already has it.
+It is its own Go module, rooted here, so its command machinery never enters `cmd/server`'s
+dependency graph: go-cli-sdk, and the `golang.org/x/term` and `golang.org/x/sys` modules the
+`style` package detects a terminal with. Anyone with `go-web-service` cloned already has it.
 
 [`usage.md`](usage.md) walks through every command by hand against the real running stack.
 
@@ -42,8 +42,10 @@ mise run serve   # in another shell
 
 `org`, `docs`, and `admin` call the running service's endpoints directly, one subcommand per
 route, printing the response as pretty JSON — or, for an empty body such as `org delete`'s 204,
-the status line alone, so a command is never silent. This is distinct in kind from a `demo`
-scenario's narrated tour: a command sends one real request and returns its result.
+the status line alone, so a command is never silent. A problem response prints nothing on
+stdout and one report on stderr: `slab <command path>: ` and the status line, then the detail,
+the instance, the type, and each extension member, one per line. A command sends one real
+request and returns its result, unlike a `demo` scenario's narrated tour.
 
 - **org** — the organization domain's ten endpoints: `list` (`--page` or `--cursor`, `--size`,
   `--sort`, and a repeatable `--filter field=value` or `field[op]=value`), `get <id>`,
@@ -92,7 +94,6 @@ scenario's narrated tour: a command sends one real request and returns its resul
 - **admin storage** — the object store's admin endpoints: `diagnostics` (whether a live probe
   succeeds, the container, and the key length bound) and `container` (creates the configured
   container, succeeding when it exists). Neither takes input.
-
 - **demo** — `demo <scenario>` runs one of the scenarios below on slab's own runner, narrating
   each step to stdout. `demo` alone prints its help, which lists them.
 - **list** — prints every scenario, its summary, and what it needs running, as the root's help
@@ -100,7 +101,7 @@ scenario's narrated tour: a command sends one real request and returns its resul
 - **version** — prints slab's version: the module version the binary was built at, or `(devel)`
   under `go run`. It reads no configuration.
 
-Every command accepts the root flags below.
+Every command accepts the root flags listed under [Configuration](#configuration).
 
 ## Scenarios
 
@@ -148,16 +149,16 @@ whenever it is given, even at its default value.
 | — | `SLAB_SHUTDOWN_TIMEOUT` | `10s` | the budget for shutting down what a command built |
 
 Output is colored only on a terminal, and never when `NO_COLOR` is set to anything non-empty.
-Configuration is read only when a command that needs it runs: help, a usage error, `list`, and
-`version` read none, so an unreadable variable, such as `SLAB_NO_COLOR=maybe`, fails only a command
-that reads it, with exit code 1 and the variable named.
+Each setting is read only when a command that needs it runs, and help, a usage error, `list`, and
+`version` read none. An unreadable variable, such as `SLAB_NO_COLOR=maybe`, therefore fails only a
+command that reads it, with exit code 1 and the variable named.
 
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
 | 0 | the command succeeded |
-| 1 | the command failed: a request that could not be sent, a response with the wrong status, a scenario step or need that failed, or unreadable configuration. A problem response is reported once on stderr, every member of the document on its own line. |
+| 1 | the command failed: a request that could not be sent, a problem response or another unexpected status, a scenario step or need that failed, or unreadable configuration |
 | 2 | a usage error — an unknown command or scenario, an unknown flag, a missing or extra argument, a missing required flag, exclusive flags given together, or input a command refuses before it sends — reported on stderr with the command's usage; or help, printed on `-h`, `--help`, or a parent such as `slab demo` run alone |
 
 ## Conventions
@@ -166,9 +167,9 @@ A new scenario, command, or domain follows these rules. Each package's `doc.go` 
 that are its own.
 
 - **Its own module.** slab's `go.mod` requires the workspace libraries it uses, go-cli-sdk among
-  them, never go-web-service's root module. The service has no release version, so a dependency on it would pin a
-  pseudo-version that goes stale in a fresh clone or CI; local cross-module work goes through the
-  gitignored `go.work`.
+  them, never go-web-service's root module. The service has no release version, so a dependency
+  on it would pin a pseudo-version that goes stale in a fresh clone or CI; local cross-module
+  work goes through the gitignored `go.work`.
 - **The service's layout.** slab mirrors the service's layout. `internal/app` is the composition
   root, one file per layer, and the only package that constructs a dependency or names a mount.
   `cmd/slab` holds process entry and nothing else. `domain/<name>` is the client-side counterpart

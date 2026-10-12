@@ -66,7 +66,7 @@ Door          Two-way: no release (go-web-service is untagged); the exit-code
 
 ## Progress
 
-slices 1/6 committed · standards — · spec — · editor —
+slices 2/6 committed · standards — · spec — · editor —
 
 ## Decisions
 
@@ -74,6 +74,8 @@ slices 1/6 committed · standards — · spec — · editor —
 - commands: a problem response's error text carries every member (status line, detail, instance, type, extras) after "slab <path>: ", not go-web-sdk's one-line Problem.Error().
 - commands: the root flags --base, --grafana, --tempo, --repo, and --no-color stay, overriding SLAB_* env.
 - commands: tools/slab stays its own Go module, keeping go-cli-sdk, x/term, and x/sys out of cmd/server's module. Folding it into the root module would be a task of its own.
+- commands: every root flag has a SLAB_* variable; SLAB_REPO and SLAB_NO_COLOR are new, and NO_COLOR still works through style.
+- commands: the App and apptest come from the template; families not yet moved route to a temporary cobra bridge (legacy.go), which is removed in slice 5.
 - scenarios: Needs (service, Grafana) become nodes the scenario declares. Each checks it can reach its target at start and names the mise task. Rejected: a Needs field in go-cli-sdk, which would need a go-cli-sdk release first.
 - scenarios: only the blocks a step prints through Show are colored, and headings and notes stay plain. Rejected: a styled Reporter in go-cli-sdk.
 - commands: PLAN re-ran currency on 2026-10-12; go-core v0.8.0, go-web-sdk v0.15.2, mise-action v5.1.2 trail, all in slice 0; go-cli-sdk v0.2.0 is still latest, so the approved brief stands.

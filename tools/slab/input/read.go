@@ -30,7 +30,7 @@ func (r *ReadFlags) Bind(cmd *cli.Command) {
 	fs.StringVar(&r.cursor, "cursor", "", "continue after the page whose next token this is, in place of --page")
 	fs.IntVar(&r.size, "size", 0, fmt.Sprintf("the page size, up to the configured maximum; the service's default (%d) when unset", DefaultPageSize))
 	fs.StringVar(&r.sort, "sort", "", "comma-separated field names, each with a leading - for descending")
-	cli.StringsVar(fs, &r.filters, "filter", nil, "a filter, field=value or field[op]=value; repeatable")
+	cli.StringsVar(fs, &r.filters, "filter", nil, "a filter, field=value or field[op]=value")
 	cmd.Exclusive("page", "cursor")
 }
 

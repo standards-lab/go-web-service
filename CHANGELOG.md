@@ -137,8 +137,10 @@ accumulate under [Unreleased] until the first cut.
   and Grafana are need nodes, probed before the first step: a run with either down fails at
   start, exit 1, naming the mise task that brings it up (`mise run serve`, `mise run db:up`,
   or `mise run otel:up`). A failed step reads `slab scenario <name>: step <i> (<intent>): …`. Only
-  the blocks are colored, never a heading, a note, or a caption. `style.JSON` returns JSON that
-  breaks partway unchanged and uncolored.
+  the blocks are colored, never a heading, a note, or a caption. An SQL block bolds keywords,
+  dims `--` and `--|` comment lines, and colors sqlate's `{{…}}` markers. SQL, JSON, and table
+  blocks are set off by a blank line before and after. `style.JSON` returns JSON that breaks
+  partway unchanged and uncolored.
 - Pins: go-core v0.8.0 and go-web-sdk v0.15.2, in both modules; their own changes are in their
   CHANGELOGs.
 - Every time the API's JSON carries (an organization's, a directory's, and a file's

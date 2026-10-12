@@ -167,11 +167,12 @@ whenever it is given, even at its default value.
 | `--no-color` | `SLAB_NO_COLOR` | `false` | print without ANSI color even on a terminal |
 | — | `SLAB_SHUTDOWN_TIMEOUT` | `10s` | the budget for shutting down what a command built |
 
-Output is colored only on a terminal, and never when `NO_COLOR` is set to anything non-empty.
-Only the blocks are colored — a request, a response, SQL, JSON, a table, a trace pointer — and a
-scenario's headings, notes, and captions print plain. JSON that breaks partway prints as it came,
-uncolored. Each setting is read only when a command that needs it runs, and help, the scenario
-listing, a usage error, and `version` read none. An unreadable variable, such as
+Output is colored only on a terminal, and never when `NO_COLOR` is set to anything non-empty. Only
+the blocks are colored — a request, a response, SQL, JSON, a table, a trace pointer — and a
+scenario's headings, notes, and captions print plain. An SQL block dims comments, colors sqlate's
+`{{…}}` markers, and bolds keywords in the code between. JSON that breaks partway prints as it
+came, uncolored. Each setting is read only when a command that needs it runs, and help, the
+scenario listing, a usage error, and `version` read none. An unreadable variable, such as
 `SLAB_NO_COLOR=maybe`, therefore fails only a command that reads it, with exit code 1 and the
 variable named.
 

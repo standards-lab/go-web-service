@@ -358,3 +358,32 @@ func TestScenario_StopsAtStartWhenGrafanaIsDown(t *testing.T) {
 		})
 	}
 }
+
+// With nothing running, a scenario that declares both service and grafana
+// up reports service, naming mise run serve, and not grafana up: grafana up
+// starts after service, so the first fix the run names is the service.
+func TestScenario_StopsAtStartOnTheServiceWhenNothingIsRunning(t *testing.T) {
+	for _, name := range []string{"domain", "problems"} {
+		t.Run(name, func(t *testing.T) {
+			r := runScenario(t, name, closedURL(t), closedURL(t))
+
+			if r.code != process.ExitFailure {
+				t.Errorf("code = %d, want %d; stderr = %q", r.code, process.ExitFailure, r.stderr)
+			}
+			if want := "slab scenario " + name + ": startup: service: nothing answers at "; !strings.HasPrefix(r.stderr, want) {
+				t.Errorf("stderr = %q, want it to start with %q", r.stderr, want)
+			}
+			if !strings.Contains(r.stderr, "mise run serve") {
+				t.Errorf("stderr = %q, want it to name mise run serve", r.stderr)
+			}
+			for _, unwanted := range []string{"grafana up", "mise run otel:up"} {
+				if strings.Contains(r.stderr, unwanted) {
+					t.Errorf("stderr = %q, want it not to name %q", r.stderr, unwanted)
+				}
+			}
+			if r.stdout != "" {
+				t.Errorf("stdout = %q, want no step narrated", r.stdout)
+			}
+		})
+	}
+}

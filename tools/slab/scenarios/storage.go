@@ -686,7 +686,7 @@ func (s *storage) anotherOrganization(ctx context.Context, inv *cli.Invocation, 
 
 func (s *storage) createBranch(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
 	st := styleOf(s.n, inv)
-	name := "storage-scenario-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	name := "storage-demo-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	r.Note("A small branch for the recursive delete to remove: a directory under the root named for this run, %s, so a second run never collides with the first, a subdirectory in it, and a file in that. The directory's read closes the step with its status, active, and the version the delete guards on.", name)
 	route := s.documents(s.acme.ID) + "/directories"
 	top, err := s.createDirectory(ctx, r, st, route, document.CreateDirectory{ParentID: document.RootAlias, Name: name})

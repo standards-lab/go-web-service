@@ -18,12 +18,24 @@ import (
 // dispatcher starts it after the Build and a scenario that declares it
 // runs no step until it answers; a failed probe is reported
 // "startup: <node>: ..." naming the mise task that fixes it.
+//
+// grafana up is ordered After service. go-core's lifecycle starts a
+// System's nodes in layers by longest dependency path and stops at the
+// first layer with a failure, and grafana up, reading only the grafana
+// setting, would otherwise sit in a lower layer than service, which reads
+// base and client: with both down, Grafana's failure would be reported and
+// service's never probed. The After edge puts grafana up a layer above
+// service whenever both are in the System, so with nothing running the
+// failure names service and mise run serve. After builds nothing, so a
+// scenario that declares only grafana up would not gain service.
 func defineScenarioNodes(g *graph.Graph, n *Nodes) {
 	base, client, grafana := n.Base, n.Client, n.Grafana
 	n.Service = g.Define("service", func(s *graph.Scope) (scenarios.Service, error) {
 		return scenarios.Service{URL: s.Use(base), Client: s.Use(client)}, nil
 	})
+	service := n.Service
 	n.GrafanaUp = g.Define("grafana up", func(s *graph.Scope) (scenarios.Grafana, error) {
+		s.After(service)
 		return scenarios.Grafana{URL: s.Use(grafana)}, nil
 	})
 }

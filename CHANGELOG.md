@@ -55,7 +55,7 @@ accumulate under [Unreleased] until the first cut.
   tree under fixed `5eed…` ids, so a rerun finds each file and a reset, which leaves the objects
   in the container, writes it again under the same key.
 - `slab version`, which prints the module version slab was built at, or `(devel)`.
-- `slab demo storage`, a narrated scenario of the storage end to end, and slab's `org logo`,
+- `slab scenario storage`, a narrated scenario of the storage end to end, and slab's `org logo`,
   `docs`, and `admin storage` commands.
 - The integration tier's storage cases (`TestDocument`, `TestDocumentRefusedUpload`,
   `TestStorageOutage`, `TestDocumentSweep`, `TestSweepAtStartup`, `TestSweepUnderReset`,
@@ -66,8 +66,8 @@ accumulate under [Unreleased] until the first cut.
   `github.com/standards-lab/go-web-sdk/middleware/rate-limit`: a client over the configured limit
   (300 requests per minute by default, `APP_RATE_LIMIT_REQUESTS`/`APP_RATE_LIMIT_WINDOW`) gets a
   429 problem document with `Retry-After`; the liveness and readiness probes are exempt.
-- `tools/slab`, a narrated-scenario CLI in its own module (`mise run slab -- list`/
-  `demo <scenario>`; see [`tools/slab/README.md`](tools/slab/README.md)): `sqlate` runs the
+- `tools/slab`, a narrated-scenario CLI in its own module (`mise run slab -- scenario
+  <name>`; see [`tools/slab/README.md`](tools/slab/README.md)): `sqlate` runs the
   library's compile pipeline in process over the repository's own sources; `domain` drives the
   organization domain's full CRUD surface against the running service, reseeded from the known
   reference tree each run, with the create request's trace located in Grafana; `problems` tours
@@ -127,9 +127,9 @@ accumulate under [Unreleased] until the first cut.
   on go-cli-sdk-template's. Help, a parent run with no or an unknown subcommand, and every usage
   error exit 2; help exited 0 and a usage error 1 before. Input a command refuses before it
   sends, such as a malformed `--body`, is a usage error. A command builds only the settings and
-  client it declares, so help, `list`, and `version` read no configuration. Every root flag has
-  a `SLAB_*` variable, which the flag overrides wherever it is given on the command line;
-  `SLAB_REPO` and `SLAB_NO_COLOR` are new. A problem response prints nothing on stdout and one
+  client it declares, so help, the scenario listing, and `version` read no configuration. Every
+  root flag has a `SLAB_*` variable, which the flag overrides wherever it is given on the command
+  line; `SLAB_REPO` and `SLAB_NO_COLOR` are new. A problem response prints nothing on stdout and one
   report on stderr: `slab <command path>: `, then every member of the document on its own line.
 - slab's scenarios run on go-cli-sdk's scenario runner, from the `tools/slab/scenarios`
   package, as `slab scenario <name>`; the root's help and `slab scenario`'s help both end with

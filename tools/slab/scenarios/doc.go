@@ -20,7 +20,9 @@
 // the grafana up node too, whose value is a [Grafana]. Each value is a
 // lifecycle Starter that probes what it names, so a run whose stack is down
 // fails before its first step, its report naming the mise task that brings
-// the stack up.
+// the stack up. A [Service] also carries the client the composition root
+// binds to the service, which the scenarios call it through; they
+// construct no client of their own.
 //
 // The package exports:
 //

@@ -171,8 +171,9 @@ Output is colored only on a terminal, and never when `NO_COLOR` is set to anythi
 Only the blocks are colored — a request, a response, SQL, JSON, a table, a trace pointer — and a
 scenario's headings, notes, and captions print plain. JSON that breaks partway prints as it came,
 uncolored. Each setting is read only when a command that needs it runs, and help, the scenario
-listing, a usage error, and `version` read none. An unreadable variable, such as `SLAB_NO_COLOR=maybe`, therefore fails only a
-command that reads it, with exit code 1 and the variable named.
+listing, a usage error, and `version` read none. An unreadable variable, such as
+`SLAB_NO_COLOR=maybe`, therefore fails only a command that reads it, with exit code 1 and the
+variable named.
 
 ## Exit codes
 
@@ -205,7 +206,8 @@ that are its own.
   added to `All` in presentation order. It declares the nodes it reads, need nodes first and
   then the settings, and the composition root's `internal/app/scenario.go` hands it those nodes
   and mounts it under `scenario`; a need is a node whose value probes what it names when the run
-  starts and names the mise task that fixes it.
+  starts and names the mise task that fixes it. A scenario constructs no client: it calls the
+  service through the one the service node's value carries, the client node's.
 - **Direct commands.** Each direct command maps to one route. A command's field flags name the
   wire field they build (`--code`, `--parent-id`), and `--body` and `--version` mean the same on
   every command. A family's `Commands` takes the client node and the `output.Source`, declares

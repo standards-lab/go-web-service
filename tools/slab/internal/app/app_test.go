@@ -136,18 +136,17 @@ func TestRun_UsageErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		"an unknown command":      {[]string{"bogus"}, `slab: unknown command "bogus"`},
-		"an unknown subcommand":   {[]string{"group", "bogus"}, `slab group: unknown command "bogus"`},
-		"an extra argument":       {[]string{"version", "extra"}, "slab version: accepts no arguments, got 1\nUsage: slab version [flags]\n"},
-		"an unknown flag":         {[]string{"version", "--bogus"}, "slab version: flag provided but not defined: -bogus\nUsage: slab version [flags]\n"},
-		"a root flag's value":     {[]string{"group", "probe", "--base"}, "slab group probe: flag needs an argument: -base\n"},
-		"a missing flag":          {[]string{"group", "needs"}, "slab group needs: required flag --a not set\n"},
-		"exclusive flags":         {[]string{"group", "either", "--a", "x", "--b", "y"}, "slab group either: flags --a, --b cannot be used together\n"},
-		"a bad root flag syntax":  {[]string{"--no-color=maybe", "version"}, "slab: invalid boolean value"},
-		"the removed list":        {[]string{"list"}, `slab: unknown command "list"`},
-		"the removed demo":        {[]string{"demo"}, `slab: unknown command "demo"`},
-		"a removed demo scenario": {[]string{"demo", "sqlate"}, `slab: unknown command "demo"`},
-		"the removed --tempo":     {[]string{"--tempo", "x", "org", "list"}, "slab: flag provided but not defined: -tempo"},
+		"an unknown command":     {[]string{"bogus"}, `slab: unknown command "bogus"`},
+		"an unknown subcommand":  {[]string{"group", "bogus"}, `slab group: unknown command "bogus"`},
+		"an extra argument":      {[]string{"version", "extra"}, "slab version: accepts no arguments, got 1\nUsage: slab version [flags]\n"},
+		"an unknown flag":        {[]string{"version", "--bogus"}, "slab version: flag provided but not defined: -bogus\nUsage: slab version [flags]\n"},
+		"a root flag's value":    {[]string{"group", "probe", "--base"}, "slab group probe: flag needs an argument: -base\n"},
+		"a missing flag":         {[]string{"group", "needs"}, "slab group needs: required flag --a not set\n"},
+		"exclusive flags":        {[]string{"group", "either", "--a", "x", "--b", "y"}, "slab group either: flags --a, --b cannot be used together\n"},
+		"a bad root flag syntax": {[]string{"--no-color=maybe", "version"}, "slab: invalid boolean value"},
+		"the removed list":       {[]string{"list"}, `slab: unknown command "list"`},
+		"the removed demo":       {[]string{"demo"}, `slab: unknown command "demo"`},
+		"the removed --tempo":    {[]string{"--tempo", "x", "org", "list"}, "slab: flag provided but not defined: -tempo"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			unreadable(t)

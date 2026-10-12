@@ -41,13 +41,13 @@ Behaviors     1. `slab scenario <name>` runs sqlate, domain, problems, and stora
                  exits 2 (unknown flag).
               10. style.JSON returns input that breaks after its first token unchanged,
                   with no partial color.
-              12. SQL blocks bold keywords, dim `--` and `--|` comment lines, and color
-                  sqlate's `{{…}}` markers; SQL, JSON, and table blocks are set off by a
-                  blank line before and after.
               11. slab's README and usage, go-web-service's README, and the slab mise
                   task description name `slab scenario <name>`. Outside the CHANGELOG's
                   history no `slab demo` or `slab list` remains; the CHANGELOG's
                   Unreleased section records the move and the removed tempo setting.
+              12. SQL blocks bold keywords, dim `--` and `--|` comment lines, and color
+                  sqlate's `{{…}}` markers; SQL, JSON, and table blocks are set off by a
+                  blank line before and after.
 Test seams    The App, through apptest: dispatching argument lists, with the service and
               Grafana as httptest servers reached through SLAB_BASE and SLAB_GRAFANA.
               style.JSON's own unit tests for behavior 10.

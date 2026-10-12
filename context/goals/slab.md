@@ -66,7 +66,7 @@ Door          Two-way: no release (go-web-service is untagged); the exit-code
 
 ## Progress
 
-slices 6/6 committed · standards — · spec — · editor —
+slices 6/6 committed · standards ✓ · spec — · editor —
 
 ## Decisions
 
@@ -78,6 +78,8 @@ slices 6/6 committed · standards — · spec — · editor —
 - commands: the App and apptest come from the template; families not yet moved route to a temporary cobra bridge (legacy.go), which is removed in slice 5.
 - commands: input refusals (body, version, query, --filter, logo media type) are checked in Validate, so they exit 2 as usage errors and build nothing; a read failure at Run exits 1.
 - commands: the problem report is output.Report, which output.Expect returns for every problem response.
+- commands: configuration is one node per setting (base, grafana, tempo, repo, no color), each read in its constructor from SLAB_* with the root flag overriding when set; no aggregate Config.
+- commands: the App-seam family tests live in internal/app, so no root-level package imports internal/*.
 - scenarios: Needs (service, Grafana) become nodes the scenario declares. Each checks it can reach its target at start and names the mise task. Rejected: a Needs field in go-cli-sdk, which would need a go-cli-sdk release first.
 - scenarios: only the blocks a step prints through Show are colored, and headings and notes stay plain. Rejected: a styled Reporter in go-cli-sdk.
 - commands: PLAN re-ran currency on 2026-10-12; go-core v0.8.0, go-web-sdk v0.15.2, mise-action v5.1.2 trail, all in slice 0; go-cli-sdk v0.2.0 is still latest, so the approved brief stands.

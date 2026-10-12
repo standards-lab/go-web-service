@@ -18,6 +18,9 @@
 //     database and storage families;
 //   - demo.go: the demo command, over slab's own scenario runner, and list,
 //     the scenario listing;
+//   - scenario.go: mountScenarios, go-cli-sdk's scenario parent over the
+//     scenarios package, one leaf per scenario, each declaring the nodes it
+//     reads;
 //   - version.go: the version command, which declares no nodes.
 //
 // [Nodes] holds one handle per node: each define function fills its own

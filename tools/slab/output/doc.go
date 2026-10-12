@@ -10,6 +10,11 @@
 // member of the document, so the one report the dispatcher prints carries
 // all of it.
 //
+// The package also renders the blocks a scenario on go-cli-sdk's runner
+// shows under its prose: each is a [Render] the step hands to the
+// reporter's Show, styled by the run's color decision as a direct
+// command's result is.
+//
 // The package exports:
 //
 //   - [Output] and [New], the one value every output concern is configured
@@ -20,4 +25,7 @@
 //     a command returns
 //   - [Report], the error of a problem response, the document rendered
 //     member by member
+//   - [Render], one block of a scenario's narration as go-cli-sdk's
+//     scenario.Reporter.Show takes it, and [SQL] and [Table], the blocks
+//     a step shows its statements and name/value pairs through
 package output

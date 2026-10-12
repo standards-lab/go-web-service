@@ -47,6 +47,7 @@ func New(streams cli.Streams) *App {
 	mountDomain(a.root, &a.nodes)
 	mountAdmin(a.root, &a.nodes)
 	a.root.Add(demoCommand(&a.nodes), listCommand())
+	mountScenarios(a.root, &a.nodes)
 	return a
 }
 

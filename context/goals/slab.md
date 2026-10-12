@@ -71,7 +71,7 @@ Door          two-way: slab is an unreleased dev tool in this repository, no tag
 
 ## Progress
 
-slices 0/5 committed · standards — · spec — · editor —
+slices 1/5 committed · standards — · spec — · editor —
 
 ## Decisions
 

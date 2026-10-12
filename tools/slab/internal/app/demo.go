@@ -16,7 +16,7 @@ import (
 // after cobra parses. The scenarios construct their own HTTP clients from
 // that environment rather than through the infrastructure, since each one
 // addresses the stack it needs (the service, Grafana, Tempo) by name.
-func mountDemo(cfg *Config) *cobra.Command {
+func mountDemo(cfg *legacyConfig) *cobra.Command {
 	return demo.Commands(cfg.runEnv, func(w io.Writer) *scenario.Reporter {
 		return scenario.NewReporter(w, style.ColorEnabled(w, cfg.NoColor))
 	})

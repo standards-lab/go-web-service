@@ -13,7 +13,7 @@ import (
 
 // Commands builds the storage command, on go-cli-sdk, with one subcommand
 // per endpoint, and returns it alone in the slice the composition root
-// mounts with admin.Add(Commands(...)...). The storage command declares with Use out's configuration
+// mounts with admin.Add(Commands(...)...). The storage command declares with Use out's color
 // node and client, the HTTP client bound to the service's base URL, as the
 // database command does; neither endpoint takes input, so a leaf accepts
 // no arguments, and its Run sends its one request, checks for 200 with

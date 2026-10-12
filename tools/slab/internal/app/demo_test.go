@@ -96,7 +96,8 @@ func TestDemoAndList_UsageErrors(t *testing.T) {
 
 // The sqlate scenario needs nothing running, so it runs here end to end on
 // slab's own runner, over the repository the test runs inside: it builds
-// the config node it declares, and the lifecycle config, and narrates.
+// the setting nodes the demo command declares, and the lifecycle config,
+// and narrates.
 func TestDemo_RunsAScenario(t *testing.T) {
 	a, stdout, stderr, built := newApp(t)
 
@@ -113,7 +114,7 @@ func TestDemo_RunsAScenario(t *testing.T) {
 	if strings.Contains(stdout.String(), "\x1b[") {
 		t.Errorf("--no-color narration carries ANSI escapes:\n%s", stdout)
 	}
-	if want := []string{"config", "lifecycle config"}; !slices.Equal(built.Log(), want) {
+	if want := []string{"base", "grafana", "tempo", "repo", "no color", "lifecycle config"}; !slices.Equal(built.Log(), want) {
 		t.Errorf("nodes built = %q, want %q", built.Log(), want)
 	}
 }
@@ -121,7 +122,7 @@ func TestDemo_RunsAScenario(t *testing.T) {
 // A scenario that fails exits ExitFailure with its error reported once on
 // stderr. --repo pointed at a directory that is not the repository fails
 // the first step, which proves the root flags reach the scenario's
-// environment through the config node.
+// environment through the repo node.
 func TestDemo_AFailedScenarioExitsOne(t *testing.T) {
 	a, _, stderr, _ := newApp(t)
 

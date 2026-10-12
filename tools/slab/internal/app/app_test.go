@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/standards-lab/go-cli-sdk"
+	"github.com/standards-lab/go-core/graph"
 	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-core/process"
 
@@ -18,7 +19,7 @@ import (
 // shutdownTimeout and noColor are variables a Build reads.
 var (
 	shutdownTimeout = lifecycle.NewEnv("SLAB").ShutdownTimeout
-	noColor         = app.NewConfigEnv("SLAB").NoColor
+	noColor         = "SLAB_NO_COLOR"
 )
 
 // unreadable makes every configuration a Build reads fail, so a run that
@@ -38,28 +39,40 @@ func newApp(t *testing.T) (a *app.App, stdout, stderr *bytes.Buffer, built *appt
 	return a, stdout, stderr, apptest.Builds(a)
 }
 
+// settings are the values of the run setting nodes, as a probe reads them.
+type settings struct {
+	base, grafana, tempo, repo string
+	noColor                    bool
+}
+
 // probe adds a group command at a's root holding three leaves that each
-// declare the config node: probe, which keeps the Config it read and
-// returns where, nil until it runs; needs, which requires --a; and either,
-// whose --a and --b are exclusive. The leaves sit below a parent so a root
-// flag can be given at every depth.
-func probe(a *app.App) **app.Config {
-	got := new(*app.Config)
-	config := a.Nodes().Config
+// declare every run setting node: probe, which keeps the settings it read
+// and returns where, nil until it runs; needs, which requires --a; and
+// either, whose --a and --b are exclusive. The leaves sit below a parent so
+// a root flag can be given at every depth.
+func probe(a *app.App) **settings {
+	got := new(*settings)
+	n := a.Nodes()
+	nodes := []graph.Ref{n.Base, n.Grafana, n.Tempo, n.Repo, n.NoColor}
 	read := (&cli.Command{
 		Name:    "probe",
-		Summary: "Read the config",
+		Summary: "Read the settings",
 		Args:    cli.NoArgs,
 		Run: func(_ context.Context, inv *cli.Invocation) error {
-			c := inv.Get(config)
-			*got = &c
+			*got = &settings{
+				base:    inv.Get(n.Base),
+				grafana: inv.Get(n.Grafana),
+				tempo:   inv.Get(n.Tempo),
+				repo:    inv.Get(n.Repo),
+				noColor: inv.Get(n.NoColor),
+			}
 			return nil
 		},
-	}).Use(config)
-	needs := (&cli.Command{Name: "needs", Run: func(context.Context, *cli.Invocation) error { return nil }}).Use(config)
+	}).Use(nodes...)
+	needs := (&cli.Command{Name: "needs", Run: func(context.Context, *cli.Invocation) error { return nil }}).Use(nodes...)
 	needs.Flags().String("a", "", "")
 	needs.Require("a")
-	either := (&cli.Command{Name: "either", Run: func(context.Context, *cli.Invocation) error { return nil }}).Use(config)
+	either := (&cli.Command{Name: "either", Run: func(context.Context, *cli.Invocation) error { return nil }}).Use(nodes...)
 	either.Flags().String("a", "", "")
 	either.Flags().String("b", "", "")
 	either.Exclusive("a", "b")
@@ -195,6 +208,11 @@ func TestNew_IsCold(t *testing.T) {
 	apptest.Halt(a)
 }
 
+// probeBuilt is what the probe builds: the run setting nodes it declares,
+// in the order it declares them, and the lifecycle config the dispatcher
+// adds.
+var probeBuilt = []string{"base", "grafana", "tempo", "repo", "no color", "lifecycle config"}
+
 // A command builds the nodes it declares, and the lifecycle config the
 // dispatcher adds, and nothing else.
 func TestRun_CommandBuildsWhatItDeclares(t *testing.T) {
@@ -209,28 +227,56 @@ func TestRun_CommandBuildsWhatItDeclares(t *testing.T) {
 	if *got == nil {
 		t.Fatal("probe did not run")
 	}
-	if want := []string{"config", "lifecycle config"}; !slices.Equal(built.Log(), want) {
+	if !slices.Equal(built.Log(), probeBuilt) {
+		t.Errorf("nodes built = %q, want %q", built.Log(), probeBuilt)
+	}
+}
+
+// A command that declares one setting builds that setting alone, with the
+// lifecycle config, and reads no other: the other settings' variables are
+// unreadable or unused, and the run succeeds.
+func TestRun_ASettingIsReadOnlyByACommandThatDeclaresIt(t *testing.T) {
+	t.Setenv(noColor, "not-a-bool")
+	t.Setenv("SLAB_TEMPO", "http://env-tempo")
+	a, _, stderr, built := newApp(t)
+	tempo := a.Nodes().Tempo
+	var got string
+	a.Root().Add((&cli.Command{
+		Name: "tempo",
+		Run: func(_ context.Context, inv *cli.Invocation) error {
+			got = inv.Get(tempo)
+			return nil
+		},
+	}).Use(tempo))
+
+	code := a.Run(context.Background(), []string{"tempo"})
+
+	if code != process.ExitOK {
+		t.Fatalf("code = %d, want %d; stderr = %q", code, process.ExitOK, stderr)
+	}
+	if got != "http://env-tempo" {
+		t.Errorf("tempo = %q, want the environment's", got)
+	}
+	if want := []string{"tempo", "lifecycle config"}; !slices.Equal(built.Log(), want) {
 		t.Errorf("nodes built = %q, want %q", built.Log(), want)
 	}
 }
 
-// The config node reads its defaults, then the SLAB_* variables, then the
+// Each setting node reads its defaults, then the SLAB_* variables, then the
 // root flags given anywhere on the command line, each later one winning.
-func TestConfig_LayersDefaultsEnvAndFlags(t *testing.T) {
-	names := app.NewConfigEnv("SLAB")
-	defaults := app.Config{
-		Base:    "http://127.0.0.1:8080",
-		Grafana: "http://127.0.0.1:3000",
-		Tempo:   "http://127.0.0.1:3200",
-		Env:     names,
+func TestSettings_LayerDefaultsEnvAndFlags(t *testing.T) {
+	defaults := settings{
+		base:    "http://127.0.0.1:8080",
+		grafana: "http://127.0.0.1:3000",
+		tempo:   "http://127.0.0.1:3200",
 	}
-	fromEnv := app.Config{Base: "http://env-base", Grafana: "http://env-grafana", Tempo: "http://env-tempo", Repo: "/env-repo", NoColor: true, Env: names}
-	fromFlags := app.Config{Base: "http://flag-base", Grafana: "http://flag-grafana", Tempo: "http://flag-tempo", Repo: "/flag-repo", NoColor: false, Env: names}
+	fromEnv := settings{base: "http://env-base", grafana: "http://env-grafana", tempo: "http://env-tempo", repo: "/env-repo", noColor: true}
+	fromFlags := settings{base: "http://flag-base", grafana: "http://flag-grafana", tempo: "http://flag-tempo", repo: "/flag-repo", noColor: false}
 	flags := []string{"--base", "http://flag-base", "--grafana=http://flag-grafana", "--tempo", "http://flag-tempo", "--repo", "/flag-repo", "--no-color=false"}
 	for name, tc := range map[string]struct {
 		env  bool
 		args []string
-		want app.Config
+		want settings
 	}{
 		"the defaults":                   {false, []string{"group", "probe"}, defaults},
 		"the environment":                {true, []string{"group", "probe"}, fromEnv},
@@ -238,17 +284,17 @@ func TestConfig_LayersDefaultsEnvAndFlags(t *testing.T) {
 		"flags between parent and leaf":  {true, slices.Concat([]string{"group"}, flags, []string{"probe"}), fromFlags},
 		"flags after the leaf":           {true, slices.Concat([]string{"group", "probe"}, flags), fromFlags},
 		"flags over the defaults":        {false, slices.Concat([]string{"group", "probe"}, flags), fromFlags},
-		"a flag given its default value": {true, []string{"group", "probe", "--base", "http://127.0.0.1:8080"}, func() app.Config { c := fromEnv; c.Base = defaults.Base; return c }()},
+		"a flag given its default value": {true, []string{"group", "probe", "--base", "http://127.0.0.1:8080"}, func() settings { c := fromEnv; c.base = defaults.base; return c }()},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if tc.env {
-				t.Setenv(names.Base, fromEnv.Base)
-				t.Setenv(names.Grafana, fromEnv.Grafana)
-				t.Setenv(names.Tempo, fromEnv.Tempo)
-				t.Setenv(names.Repo, fromEnv.Repo)
-				t.Setenv(names.NoColor, "true")
+				t.Setenv("SLAB_BASE", fromEnv.base)
+				t.Setenv("SLAB_GRAFANA", fromEnv.grafana)
+				t.Setenv("SLAB_TEMPO", fromEnv.tempo)
+				t.Setenv("SLAB_REPO", fromEnv.repo)
+				t.Setenv(noColor, "true")
 			} else {
-				for _, v := range []string{names.Base, names.Grafana, names.Tempo, names.Repo, names.NoColor} {
+				for _, v := range []string{"SLAB_BASE", "SLAB_GRAFANA", "SLAB_TEMPO", "SLAB_REPO", noColor} {
 					t.Setenv(v, "")
 				}
 			}
@@ -261,7 +307,7 @@ func TestConfig_LayersDefaultsEnvAndFlags(t *testing.T) {
 				t.Fatalf("code = %d, want %d; stderr = %q", code, process.ExitOK, stderr)
 			}
 			if **got != tc.want {
-				t.Errorf("config = %+v, want %+v", **got, tc.want)
+				t.Errorf("settings = %+v, want %+v", **got, tc.want)
 			}
 		})
 	}
@@ -270,9 +316,8 @@ func TestConfig_LayersDefaultsEnvAndFlags(t *testing.T) {
 // A run that dispatches twice starts the second from the flags' defaults,
 // so a flag the first run gave does not override the environment in the
 // second.
-func TestConfig_FlagsDoNotOutliveTheirRun(t *testing.T) {
-	names := app.NewConfigEnv("SLAB")
-	t.Setenv(names.Base, "http://env-base")
+func TestSettings_FlagsDoNotOutliveTheirRun(t *testing.T) {
+	t.Setenv("SLAB_BASE", "http://env-base")
 	a, _, stderr, _ := newApp(t)
 	got := probe(a)
 
@@ -282,12 +327,12 @@ func TestConfig_FlagsDoNotOutliveTheirRun(t *testing.T) {
 	if code := a.Run(context.Background(), []string{"group", "probe"}); code != process.ExitOK {
 		t.Fatalf("second run code = %d; stderr = %q", code, stderr)
 	}
-	if (*got).Base != "http://env-base" {
-		t.Errorf("second run base = %q, want the environment's", (*got).Base)
+	if (*got).base != "http://env-base" {
+		t.Errorf("second run base = %q, want the environment's", (*got).base)
 	}
 }
 
-func TestConfig_UnreadableEnvFailsTheCommand(t *testing.T) {
+func TestSettings_UnreadableEnvFailsTheCommand(t *testing.T) {
 	t.Setenv(noColor, "not-a-bool")
 	a, _, stderr, _ := newApp(t)
 	got := probe(a)
@@ -300,7 +345,7 @@ func TestConfig_UnreadableEnvFailsTheCommand(t *testing.T) {
 	if *got != nil {
 		t.Error("probe ran, want it stopped by the Build")
 	}
-	if want := "slab group probe: config: SLAB_NO_COLOR: "; !strings.HasPrefix(stderr.String(), want) {
+	if want := "slab group probe: no color: SLAB_NO_COLOR: "; !strings.HasPrefix(stderr.String(), want) {
 		t.Errorf("stderr = %q, want it to start with %q", stderr, want)
 	}
 }
@@ -346,8 +391,8 @@ func TestRun_HaltStopsTheCommand(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Errorf("stdout = %q, want empty", stdout)
 	}
-	if want := []string{"config", "lifecycle config"}; !slices.Equal(built.Log(), want) {
-		t.Errorf("nodes built = %q, want %q", built.Log(), want)
+	if !slices.Equal(built.Log(), probeBuilt) {
+		t.Errorf("nodes built = %q, want %q", built.Log(), probeBuilt)
 	}
 }
 

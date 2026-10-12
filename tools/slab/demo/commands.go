@@ -14,7 +14,7 @@ func Scenarios() []scenario.Scenario {
 
 // Commands builds the demo command on go-cli-sdk, with one subcommand per
 // scenario, named for the scenario, in presentation order. The demo command
-// declares with Use the one node its scenarios read, src's; the scenarios
+// declares with Use the nodes its scenarios read, src's; the scenarios
 // construct their own HTTP clients from the environment src resolves,
 // since each addresses the stack it needs by name. Run with no scenario or
 // an unknown one, it is a usage error the dispatcher reports.
@@ -26,5 +26,5 @@ func Commands(src scenario.Source) *cli.Command {
 	for _, s := range Scenarios() {
 		demo.Add(scenario.Command(s, src))
 	}
-	return demo.Use(src.Node)
+	return demo.Use(src.Nodes...)
 }

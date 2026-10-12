@@ -68,7 +68,11 @@ func (a *App) Run(ctx context.Context, args []string) int {
 // dispatcher labels its errors.
 type Nodes struct {
 	LifecycleConfig *graph.Node[lifecycle.Config] // "lifecycle config"
-	Config          *graph.Node[Config]           // "config"
+	Base            *graph.Node[string]           // "base", the service's base URL
+	Grafana         *graph.Node[string]           // "grafana", Grafana's base URL
+	Tempo           *graph.Node[string]           // "tempo", Tempo's HTTP API base URL
+	Repo            *graph.Node[string]           // "repo", the repository root override; empty when not given
+	NoColor         *graph.Node[bool]             // "no color", print without ANSI color even on a terminal
 	Client          *graph.Node[*httpx.Client]    // "client"
 }
 

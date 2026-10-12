@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/standards-lab/go-cli-sdk"
+	"github.com/standards-lab/go-core/graph"
 
 	"github.com/standards-lab/go-web-service/tools/slab/demo"
 	"github.com/standards-lab/go-web-service/tools/slab/env"
@@ -12,24 +13,24 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
-// demoCommand builds the demo command on the tree over the config node from
-// n, the one node its scenarios read: each runs on slab's own scenario
-// runner with the environment the config resolves, and narrates through a
-// reporter over the invocation's stdout, colored when stdout is a terminal
-// and neither NO_COLOR nor the config's NoColor says otherwise. The
-// scenarios construct their own HTTP clients from that environment rather
-// than through the client node, since each one addresses the stack it
-// needs (the service, Grafana, Tempo) by name.
+// demoCommand builds the demo command on the tree over the nodes from n its
+// scenarios read: the base, grafana, tempo, and repo nodes, which make up
+// the environment each scenario runs with on slab's own scenario runner,
+// and the no color node, for the reporter it narrates through over the
+// invocation's stdout, colored when stdout is a terminal and neither
+// NO_COLOR nor the no color node says otherwise. The scenarios construct
+// their own HTTP clients from that environment rather than through the
+// client node, since each one addresses the stack it needs (the service,
+// Grafana, Tempo) by name.
 func demoCommand(n *Nodes) *cli.Command {
-	cfg := n.Config
+	base, grafana, tempo, repo, noColor := n.Base, n.Grafana, n.Tempo, n.Repo, n.NoColor
 	return demo.Commands(scenario.Source{
-		Node: cfg,
+		Nodes: []graph.Ref{base, grafana, tempo, repo, noColor},
 		Env: func(inv *cli.Invocation) env.Env {
-			c := inv.Get(cfg)
-			return env.Env{Base: c.Base, Grafana: c.Grafana, Tempo: c.Tempo, Repo: c.Repo}
+			return env.Env{Base: inv.Get(base), Grafana: inv.Get(grafana), Tempo: inv.Get(tempo), Repo: inv.Get(repo)}
 		},
 		Reporter: func(inv *cli.Invocation) *scenario.Reporter {
-			return scenario.NewReporter(inv.Stdout, style.ColorEnabled(inv.Stdout, inv.Get(cfg).NoColor))
+			return scenario.NewReporter(inv.Stdout, style.ColorEnabled(inv.Stdout, inv.Get(noColor)))
 		},
 	})
 }

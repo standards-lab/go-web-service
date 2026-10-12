@@ -17,7 +17,7 @@ import (
 // subcommand over the migration operations, and one subcommand per
 // remaining endpoint, and returns it alone in the slice the composition
 // root mounts with admin.Add(Commands(...)...). The database command declares with Use the two nodes
-// every leaf below it needs, out's configuration node and client, the HTTP
+// every leaf below it needs, out's color node and client, the HTTP
 // client bound to the service's base URL; the dispatcher builds them only
 // when a leaf runs, and a leaf reads the client through its Invocation then.
 //

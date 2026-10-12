@@ -31,13 +31,13 @@ func TestScenarios_ListsEachOnceInPresentationOrder(t *testing.T) {
 // Source names is never constructed.
 func TestCommands_MountsOneSubcommandPerScenario(t *testing.T) {
 	g := graph.New()
-	node := g.Define("config", func(*graph.Scope) (struct{}, error) { return struct{}{}, nil })
+	node := g.Define("setting", func(*graph.Scope) (struct{}, error) { return struct{}{}, nil })
 	lc := g.Define("lifecycle config", func(*graph.Scope) (lifecycle.Config, error) {
 		var c lifecycle.Config
 		return c, c.Finalize("")
 	})
 	root := (&cli.Command{Name: "slab"}).Add(demo.Commands(scenario.Source{
-		Node:     node,
+		Nodes:    []graph.Ref{node},
 		Env:      func(*cli.Invocation) env.Env { return env.Env{} },
 		Reporter: func(inv *cli.Invocation) *scenario.Reporter { return scenario.NewReporter(inv.Stdout, false) },
 	}))

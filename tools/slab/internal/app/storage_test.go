@@ -1,4 +1,4 @@
-package storage_test
+package app_test
 
 import (
 	"bytes"
@@ -18,15 +18,11 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/internal/apptest"
 )
 
-// built is what every storage command builds: the two nodes it declares
-// and the lifecycle configuration the dispatcher adds.
-var built = []string{"config", "client", "lifecycle config"}
-
-// run starts a fake service that answers every request with status and
-// reply, runs a fresh App over "admin storage" and args against it, and
-// returns the requests it received, what the run wrote, its exit code, and
-// the nodes it built.
-func run(t *testing.T, status int, reply string, args ...string) (got []string, stdout, stderr string, code int, log []string) {
+// runStorage starts a fake service that answers every request with status
+// and reply, runs a fresh App over "admin storage" and args against it,
+// and returns the requests it received, what the run wrote, its exit code,
+// and the nodes it built.
+func runStorage(t *testing.T, status int, reply string, args ...string) (got []string, stdout, stderr string, code int, log []string) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -49,13 +45,13 @@ func run(t *testing.T, status int, reply string, args ...string) (got []string, 
 
 // Each subcommand sends its endpoint's request with no body, prints the
 // reply, and builds only the nodes it declares.
-func TestCommands_SendOneBodilessRequestPerEndpoint(t *testing.T) {
+func TestStorage_SendOneBodilessRequestPerEndpoint(t *testing.T) {
 	for args, want := range map[string]string{
 		"diagnostics": "GET /admin/storage/diagnostics",
 		"container":   "POST /admin/storage/container",
 	} {
 		t.Run(args, func(t *testing.T) {
-			got, stdout, stderr, code, log := run(t, http.StatusOK, `{"ready":true}`, strings.Fields(args)...)
+			got, stdout, stderr, code, log := runStorage(t, http.StatusOK, `{"ready":true}`, strings.Fields(args)...)
 			if code != process.ExitOK {
 				t.Fatalf("code = %d; stderr = %q", code, stderr)
 			}
@@ -65,8 +61,8 @@ func TestCommands_SendOneBodilessRequestPerEndpoint(t *testing.T) {
 			if want := "{\n  \"ready\": true\n}\n"; stdout != want {
 				t.Errorf("stdout = %q, want %q", stdout, want)
 			}
-			if !slices.Equal(log, built) {
-				t.Errorf("nodes built = %q, want %q", log, built)
+			if !slices.Equal(log, familyBuilt) {
+				t.Errorf("nodes built = %q, want %q", log, familyBuilt)
 			}
 		})
 	}
@@ -74,8 +70,8 @@ func TestCommands_SendOneBodilessRequestPerEndpoint(t *testing.T) {
 
 // A parent run with no subcommand prints its help, listing both leaves,
 // and builds nothing.
-func TestCommands_MountOneSubcommandPerEndpoint(t *testing.T) {
-	got, stdout, _, code, log := run(t, http.StatusOK, `{}`)
+func TestStorage_MountOneSubcommandPerEndpoint(t *testing.T) {
+	got, stdout, _, code, log := runStorage(t, http.StatusOK, `{}`)
 	if code != process.ExitUsage {
 		t.Errorf("code = %d, want the help's %d", code, process.ExitUsage)
 	}
@@ -90,10 +86,10 @@ func TestCommands_MountOneSubcommandPerEndpoint(t *testing.T) {
 }
 
 // An argument is a usage error: nothing is built and nothing is sent.
-func TestCommands_RefuseArguments(t *testing.T) {
+func TestStorage_RefuseArguments(t *testing.T) {
 	for _, leaf := range []string{"diagnostics", "container"} {
 		t.Run(leaf, func(t *testing.T) {
-			got, stdout, stderr, code, log := run(t, http.StatusOK, `{}`, leaf, "x")
+			got, stdout, stderr, code, log := runStorage(t, http.StatusOK, `{}`, leaf, "x")
 			if code != process.ExitUsage {
 				t.Errorf("code = %d, want %d", code, process.ExitUsage)
 			}
@@ -108,8 +104,8 @@ func TestCommands_RefuseArguments(t *testing.T) {
 }
 
 // A problem response is reported once on stderr, with nothing on stdout.
-func TestCommands_ReportTheProblemAnErrorStatusCarries(t *testing.T) {
-	_, stdout, stderr, code, _ := run(t, http.StatusServiceUnavailable, `{"status":503,"title":"Service Unavailable","detail":"the store is unreachable"}`, "diagnostics")
+func TestStorage_ReportTheProblemAnErrorStatusCarries(t *testing.T) {
+	_, stdout, stderr, code, _ := runStorage(t, http.StatusServiceUnavailable, `{"status":503,"title":"Service Unavailable","detail":"the store is unreachable"}`, "diagnostics")
 	if code != process.ExitFailure {
 		t.Errorf("code = %d, want %d", code, process.ExitFailure)
 	}

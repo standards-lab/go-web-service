@@ -22,7 +22,8 @@ import (
 // as SLAB_BASE and SLAB_SHUTDOWN_TIMEOUT.
 const envPrefix = "SLAB"
 
-// The defaults a [Config] finalizes to: the compose stack's local ports.
+// The defaults the URL settings read when neither their variable nor their
+// root flag is given: the compose stack's local ports.
 const (
 	defaultBase    = "http://127.0.0.1:8080"
 	defaultGrafana = "http://127.0.0.1:3000"
@@ -30,16 +31,21 @@ const (
 )
 
 // defineInfrastructure defines the infrastructure nodes on g into n: the
-// configurations, read from SLAB_* variables, and, for config, the root
-// flags given on the command line; and the HTTP client to the service,
-// bound to config's base URL. It constructs nothing: each value is read in
-// its node's constructor, which runs only when a Build reaches the node,
-// so configuration is read only for a command that declares a node, never
-// in [New] and never for a run that builds nothing.
+// lifecycle configuration; one node per run setting, each named for its
+// root flag and read from its default, its SLAB_* variable, and that flag
+// given on the command line; and the HTTP client to the service, bound to
+// the base node's URL. It constructs nothing: each value is read in its
+// node's constructor, which runs only when a Build reaches the node, so a
+// setting is read only for a command that declares it, or a node that
+// depends on it, never in [New] and never for a run that builds nothing.
 func defineInfrastructure(g *graph.Graph, n *Nodes, flags *rootFlags) {
 	n.LifecycleConfig = g.Define("lifecycle config", newLifecycleConfig)
-	n.Config = g.Define("config", newConfig(flags))
-	n.Client = g.Define("client", newClient(n.Config))
+	n.Base = g.Define("base", newSetting(flags, "base", defaultBase, parseString))
+	n.Grafana = g.Define("grafana", newSetting(flags, "grafana", defaultGrafana, parseString))
+	n.Tempo = g.Define("tempo", newSetting(flags, "tempo", defaultTempo, parseString))
+	n.Repo = g.Define("repo", newSetting(flags, "repo", "", parseString))
+	n.NoColor = g.Define("no color", newSetting(flags, "no-color", false, strconv.ParseBool))
+	n.Client = g.Define("client", newClient(n.Base))
 }
 
 // newLifecycleConfig reads the lifecycle configuration, the shutdown
@@ -52,105 +58,54 @@ func newLifecycleConfig(*graph.Scope) (lifecycle.Config, error) {
 	return cfg, err
 }
 
-// Config is slab's run configuration: the URLs it targets, the repository
-// root override, and whether to print without color. It is the value of
-// the config node, read when a command that declares the node runs: its
-// defaults, then the SLAB_* variables, then the root flags given on the
-// command line. Env records the variable names Finalize read.
-type Config struct {
-	Base    string // the service's base URL
-	Grafana string // Grafana's base URL
-	Tempo   string // Tempo's HTTP API base URL
-	Repo    string // the repository root override; empty when not given
-	NoColor bool   // print without ANSI color even on a terminal
-	Env     ConfigEnv
-}
-
-// ConfigEnv names the environment variables [Config.Finalize] reads, one
-// per field. An empty name disables that override.
-type ConfigEnv struct {
-	Base, Grafana, Tempo, Repo, NoColor string
-}
-
-// NewConfigEnv composes each variable name from prefix with
-// [config.EnvName], such as SLAB_BASE for "SLAB"; an empty prefix returns
-// the zero ConfigEnv.
-func NewConfigEnv(prefix string) ConfigEnv {
-	return ConfigEnv{
-		Base:    config.EnvName(prefix, "base"),
-		Grafana: config.EnvName(prefix, "grafana"),
-		Tempo:   config.EnvName(prefix, "tempo"),
-		Repo:    config.EnvName(prefix, "repo"),
-		NoColor: config.EnvName(prefix, "no", "color"),
-	}
-}
-
-// Finalize applies the defaults to the URLs left empty, then reads the
-// envPrefix-named overrides: a set, non-empty variable replaces its field.
-// An unparsable no-color override is an error naming the variable.
-func (c *Config) Finalize(envPrefix string) error {
-	c.Env = NewConfigEnv(envPrefix)
-	for _, s := range []struct {
-		field    *string
-		fallback string
-		name     string
-	}{
-		{&c.Base, defaultBase, c.Env.Base},
-		{&c.Grafana, defaultGrafana, c.Env.Grafana},
-		{&c.Tempo, defaultTempo, c.Env.Tempo},
-		{&c.Repo, "", c.Env.Repo},
-	} {
-		if *s.field == "" {
-			*s.field = s.fallback
+// newSetting returns the constructor of the run setting the root flag name
+// overrides: it starts from def, replaces it with the variable composed
+// from envPrefix and name, such as SLAB_BASE for "base" or SLAB_NO_COLOR
+// for "no-color", when that is set and non-empty, parsing it with parse,
+// and replaces that with the flag's value when the dispatch set the flag.
+// An unparsable variable is an error naming it. It reads only when a Build
+// reaches the node.
+func newSetting[T any](flags *rootFlags, name string, def T, parse func(string) (T, error)) func(*graph.Scope) (T, error) {
+	return func(*graph.Scope) (T, error) {
+		v := def
+		variable := config.EnvName(envPrefix, name)
+		if s := os.Getenv(variable); s != "" {
+			parsed, err := parse(s)
+			if err != nil {
+				var zero T
+				return zero, fmt.Errorf("%s: %w", variable, err)
+			}
+			v = parsed
 		}
-		if v := lookupEnv(s.name); v != "" {
-			*s.field = v
+		if given, ok := flags.value(name); ok {
+			v = given.(T)
 		}
+		return v, nil
 	}
-	if v := lookupEnv(c.Env.NoColor); v != "" {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			return fmt.Errorf("%s: %w", c.Env.NoColor, err)
-		}
-		c.NoColor = b
-	}
-	return nil
 }
 
-// lookupEnv returns the variable's value, or "" for an empty name, which
-// composes no override.
-func lookupEnv(name string) string {
-	if name == "" {
-		return ""
-	}
-	return os.Getenv(name)
-}
+// parseString is a string setting's parse: any value is the setting.
+func parseString(s string) (string, error) { return s, nil }
 
 // rootFlags are the root's flags, accepted at any depth: each overrides
-// its [Config] field, over the environment, when it is given on the command
-// line. Their defaults are the Config's own, so help shows them, and a flag
-// left at its default overrides nothing, so an environment variable still
-// applies.
+// its setting's variable when it is given on the command line. Their
+// defaults are the settings' own, so help shows them, and a flag left at
+// its default overrides nothing, so an environment variable still applies.
 type rootFlags struct {
-	fs      *flag.FlagSet
-	base    string
-	grafana string
-	tempo   string
-	repo    string
-	noColor bool
-	given   map[string]bool // the flags the current dispatch set, from preRun
+	fs    *flag.FlagSet
+	given map[string]bool // the flags the current dispatch set, from preRun
 }
 
-// bindRootFlags defines the root flags on fs, the root command's flag set.
+// bindRootFlags defines the root flags on fs, the root command's flag set,
+// each naming the variable it overrides.
 func bindRootFlags(fs *flag.FlagSet) *rootFlags {
-	names := NewConfigEnv(envPrefix)
-	f := &rootFlags{fs: fs}
-	fs.StringVar(&f.base, "base", defaultBase, "the service's base URL (env "+names.Base+")")
-	fs.StringVar(&f.grafana, "grafana", defaultGrafana, "Grafana's base URL (env "+names.Grafana+")")
-	fs.StringVar(&f.tempo, "tempo", defaultTempo, "Tempo's HTTP API base URL (env "+names.Tempo+")")
-	fs.StringVar(&f.repo, "repo", "", "the repository root, when slab is not run from inside it (env "+names.Repo+")")
-	fs.BoolVar(&f.noColor, "no-color", false, "print without ANSI color even on a terminal (env "+names.NoColor+")")
-	return f
+	env := func(name string) string { return " (env " + config.EnvName(envPrefix, name) + ")" }
+	fs.String("base", defaultBase, "the service's base URL"+env("base"))
+	fs.String("grafana", defaultGrafana, "Grafana's base URL"+env("grafana"))
+	fs.String("tempo", defaultTempo, "Tempo's HTTP API base URL"+env("tempo"))
+	fs.String("repo", "", "the repository root, when slab is not run from inside it"+env("repo"))
+	fs.Bool("no-color", false, "print without ANSI color even on a terminal"+env("no-color"))
+	return &rootFlags{fs: fs}
 }
 
 // preRun is the root's PreRun: it records which root flags the dispatch
@@ -165,57 +120,36 @@ func (f *rootFlags) preRun(_ context.Context, inv *cli.Invocation) error {
 	return nil
 }
 
-// apply overrides c's fields with the root flags the dispatch set.
-func (f *rootFlags) apply(c *Config) {
-	for name, set := range map[string]func(){
-		"base":     func() { c.Base = f.base },
-		"grafana":  func() { c.Grafana = f.grafana },
-		"tempo":    func() { c.Tempo = f.tempo },
-		"repo":     func() { c.Repo = f.repo },
-		"no-color": func() { c.NoColor = f.noColor },
-	} {
-		if f.given[name] {
-			set()
-		}
+// value returns the root flag name's value, and whether the dispatch set
+// it.
+func (f *rootFlags) value(name string) (any, bool) {
+	if !f.given[name] {
+		return nil, false
 	}
-}
-
-// newConfig returns the config node's constructor: it finalizes a Config
-// from the defaults and the SLAB_* variables, then applies the root flags
-// given on the command line, so a flag overrides its variable. It reads
-// only when a Build reaches the node.
-func newConfig(flags *rootFlags) func(*graph.Scope) (Config, error) {
-	return func(*graph.Scope) (Config, error) {
-		var c Config
-		if err := c.Finalize(envPrefix); err != nil {
-			return Config{}, err
-		}
-		flags.apply(&c)
-		return c, nil
-	}
+	return f.fs.Lookup(name).Value.(flag.Getter).Get(), true
 }
 
 // newClient returns the client node's constructor: the HTTP client to the
-// service, bound to the base URL cfg resolves. It is the one place a
+// service, bound to the URL the base node resolves. It is the one place a
 // command on the tree gets an httpx.Client from; the demo scenarios
 // construct their own, as each addresses the stack it needs by name.
-func newClient(cfg *graph.Node[Config]) func(*graph.Scope) (*httpx.Client, error) {
+func newClient(base *graph.Node[string]) func(*graph.Scope) (*httpx.Client, error) {
 	return func(s *graph.Scope) (*httpx.Client, error) {
-		return httpx.NewClient(s.Use(cfg).Base), nil
+		return httpx.NewClient(s.Use(base)), nil
 	}
 }
 
 // outputSource returns the output.Source a command family on the tree
-// renders through: the config node, which the family declares with Use,
+// renders through: the no color node, which the family declares with Use,
 // and the Output over the invocation's stdout, colored when stdout is a
-// terminal and neither NO_COLOR nor the config's NoColor, the SLAB_NO_COLOR
+// terminal and neither NO_COLOR nor the no color node, the SLAB_NO_COLOR
 // variable or --no-color, says otherwise.
 func outputSource(n *Nodes) output.Source {
-	cfg := n.Config
+	node := n.NoColor
 	return output.Source{
-		Node: cfg,
+		Node: node,
 		New: func(inv *cli.Invocation) *output.Output {
-			noColor := inv.Get(cfg).NoColor
+			noColor := inv.Get(node)
 			return output.New(inv.Stdout, func() bool {
 				return style.ColorEnabled(inv.Stdout, noColor)
 			})

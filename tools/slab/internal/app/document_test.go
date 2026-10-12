@@ -1,8 +1,6 @@
-package document_test
+package app_test
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -13,13 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/standards-lab/go-cli-sdk"
 	"github.com/standards-lab/go-core/process"
 	"github.com/standards-lab/go-web-sdk"
 
 	"github.com/standards-lab/go-web-service/tools/slab/domain/document"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/app"
-	"github.com/standards-lab/go-web-service/tools/slab/internal/apptest"
 )
 
 // The organization and the ids the commands address.
@@ -29,144 +24,23 @@ const (
 	file = "00000000-0000-7000-8000-000000000003"
 )
 
-// exchange is one request as the fake service received it.
-type exchange struct {
-	method, uri, ifMatch, contentType, body string
-}
-
-// service is a fake that answers every request with one canned reply and
-// records what it received.
-type service struct {
-	status   int
-	reply    string
-	location string
-	received []exchange
-}
-
-func newService(t *testing.T, status int, reply string) (*service, *httptest.Server) {
+// runDocs runs a fresh App over "docs" and args, with --base naming
+// srv, and returns what it did.
+func runDocs(t *testing.T, srv *httptest.Server, args ...string) result {
 	t.Helper()
-	s := &service{status: status, reply: reply}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		s.received = append(s.received, exchange{
-			method:      r.Method,
-			uri:         r.URL.RequestURI(),
-			ifMatch:     r.Header.Get("If-Match"),
-			contentType: r.Header.Get("Content-Type"),
-			body:        string(body),
-		})
-		if s.location != "" {
-			w.Header().Set("Location", s.location)
-		}
-		// The service answers an error status with a problem document.
-		if s.status >= http.StatusBadRequest {
-			w.Header().Set("Content-Type", web.ProblemMediaType)
-		} else {
-			w.Header().Set("Content-Type", web.JSONMediaType)
-		}
-		w.WriteHeader(s.status)
-		_, _ = io.WriteString(w, s.reply)
-	}))
-	t.Cleanup(srv.Close)
-	return s, srv
-}
-
-// only is the one request the service received, failing when it received
-// any other number.
-func (s *service) only(t *testing.T) exchange {
-	t.Helper()
-	if len(s.received) != 1 {
-		t.Fatalf("the service received %d requests, want 1: %+v", len(s.received), s.received)
-	}
-	return s.received[0]
-}
-
-// result is what one run of the App did.
-type result struct {
-	stdout, stderr string
-	code           int
-	built          []string // the nodes the run built, in order
-}
-
-// built is what every docs command builds: the two nodes it declares and
-// the lifecycle configuration the dispatcher adds.
-var built = []string{"config", "client", "lifecycle config"}
-
-// run runs a fresh App over "docs" and args, with --base naming srv, and
-// returns what it did.
-func run(t *testing.T, srv *httptest.Server, args ...string) result {
-	t.Helper()
-	var stdout, stderr bytes.Buffer
-	a := app.New(cli.Streams{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr})
-	rec := apptest.Builds(a)
-	code := a.Run(context.Background(), slices.Concat([]string{"docs"}, args, []string{"--base", srv.URL}))
-	return result{stdout: stdout.String(), stderr: stderr.String(), code: code, built: rec.Log()}
-}
-
-// ok fails the test unless r succeeded, having built what a docs command
-// declares.
-func (r result) ok(t *testing.T) {
-	t.Helper()
-	if r.code != process.ExitOK {
-		t.Fatalf("code = %d, want %d; stderr = %q", r.code, process.ExitOK, r.stderr)
-	}
-	if !slices.Equal(r.built, built) {
-		t.Errorf("nodes built = %q, want %q", r.built, built)
-	}
-}
-
-// usage fails the test unless r is a usage error reported with want and
-// the command's usage, having built nothing and written nothing to stdout.
-func (r result) usage(t *testing.T, want string) {
-	t.Helper()
-	if r.code != process.ExitUsage {
-		t.Errorf("code = %d, want %d; stderr = %q", r.code, process.ExitUsage, r.stderr)
-	}
-	if !strings.Contains(r.stderr, want) || !strings.Contains(r.stderr, "\nUsage: slab docs ") {
-		t.Errorf("stderr = %q, want %q with the command's usage", r.stderr, want)
-	}
-	if r.stdout != "" {
-		t.Errorf("stdout = %q, want empty", r.stdout)
-	}
-	if len(r.built) != 0 {
-		t.Errorf("nodes built = %q, want none", r.built)
-	}
-}
-
-// failure fails the test unless r failed with exactly stderr, writing
-// nothing to stdout.
-func (r result) failure(t *testing.T, stderr string) {
-	t.Helper()
-	if r.code != process.ExitFailure {
-		t.Errorf("code = %d, want %d", r.code, process.ExitFailure)
-	}
-	if r.stderr != stderr {
-		t.Errorf("stderr = %q, want %q", r.stderr, stderr)
-	}
-	if r.stdout != "" {
-		t.Errorf("stdout = %q, want empty", r.stdout)
-	}
-}
-
-// failed fails the test unless r failed with a report on stderr that
-// starts with the command's path and contains want.
-func (r result) failed(t *testing.T, path, want string) {
-	t.Helper()
-	if r.code != process.ExitFailure || !strings.HasPrefix(r.stderr, "slab docs "+path+": ") || !strings.Contains(r.stderr, want) {
-		t.Errorf("code = %d, stderr = %q; want %d and %q", r.code, r.stderr, process.ExitFailure, want)
-	}
+	return runFamily(t, nil, []string{"docs"}, srv, args...)
 }
 
 // Run without a leaf, docs and each group print their help, listing the
 // subcommands, as a usage error that builds nothing.
-func TestCommands_MountsOneSubcommandPerEndpoint(t *testing.T) {
+func TestDocs_MountsOneSubcommandPerEndpoint(t *testing.T) {
 	_, srv := newService(t, http.StatusOK, `{}`)
 	for args, wants := range map[string][]string{
 		"":      {"dirs", "files"},
 		"dirs":  {"create", "get", "list", "move", "delete"},
 		"files": {"list", "put", "show", "get", "move", "delete"},
 	} {
-		r := run(t, srv, strings.Fields(args)...)
+		r := runDocs(t, srv, strings.Fields(args)...)
 		if r.code != process.ExitUsage {
 			t.Errorf("docs %s: code = %d, want the help's %d", args, r.code, process.ExitUsage)
 		}
@@ -184,7 +58,7 @@ func TestCommands_MountsOneSubcommandPerEndpoint(t *testing.T) {
 // Every command sends its one request: the method, the URI with each
 // segment escaped, and the body and headers the flags build. An upload's
 // raw body is covered by the put tests below.
-func TestCommands_SendTheRequestTheirRouteNames(t *testing.T) {
+func TestDocs_SendTheRequestTheirRouteNames(t *testing.T) {
 	base := "/api/documents/" + org
 	for name, tc := range map[string]struct {
 		args                              []string
@@ -273,7 +147,7 @@ func TestCommands_SendTheRequestTheirRouteNames(t *testing.T) {
 			if tc.status == http.StatusAccepted {
 				s.location = base + "/directories/" + dir
 			}
-			run(t, srv, tc.args...).ok(t)
+			runDocs(t, srv, tc.args...).ok(t)
 			got := s.only(t)
 			if got.method != tc.method || got.uri != tc.uri {
 				t.Errorf("request = %s %s, want %s %s", got.method, got.uri, tc.method, tc.uri)
@@ -285,9 +159,9 @@ func TestCommands_SendTheRequestTheirRouteNames(t *testing.T) {
 	}
 }
 
-func TestCommands_RenderTheReply(t *testing.T) {
+func TestDocs_RenderTheReply(t *testing.T) {
 	s, srv := newService(t, http.StatusCreated, `{"id":"n1","version":1}`)
-	r := run(t, srv, "dirs", "create", org, "--parent-id", "root", "--name", "reports")
+	r := runDocs(t, srv, "dirs", "create", org, "--parent-id", "root", "--name", "reports")
 	r.ok(t)
 	s.only(t)
 	if want := "{\n  \"id\": \"n1\",\n  \"version\": 1\n}\n"; r.stdout != want {
@@ -297,14 +171,14 @@ func TestCommands_RenderTheReply(t *testing.T) {
 		t.Errorf("stderr = %q, want empty", r.stderr)
 	}
 	_, srv = newService(t, http.StatusNoContent, "")
-	r = run(t, srv, "files", "delete", org, file, "--version", "1")
+	r = runDocs(t, srv, "files", "delete", org, file, "--version", "1")
 	r.ok(t)
 	if r.stdout != "204 No Content\n" {
 		t.Errorf("delete = %q; want the status line", r.stdout)
 	}
 }
 
-func TestCommands_ExpectTheirOneStatus(t *testing.T) {
+func TestDocs_ExpectTheirOneStatus(t *testing.T) {
 	upload := filepath.Join(t.TempDir(), "a.txt")
 	if err := os.WriteFile(upload, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -319,7 +193,7 @@ func TestCommands_ExpectTheirOneStatus(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, srv := newService(t, http.StatusAccepted, `{}`)
-			r := run(t, srv, tc.args...)
+			r := runDocs(t, srv, tc.args...)
 			r.failed(t, strings.Join(tc.args[:2], " "), tc.want)
 			if r.stdout != "" {
 				t.Errorf("stdout = %q, want empty", r.stdout)
@@ -330,14 +204,14 @@ func TestCommands_ExpectTheirOneStatus(t *testing.T) {
 
 // A problem response is reported once, every member of the document on
 // its own line after the command's path, with nothing on stdout.
-func TestCommands_ReportTheProblemAnErrorStatusCarries(t *testing.T) {
+func TestDocs_ReportTheProblemAnErrorStatusCarries(t *testing.T) {
 	_, srv := newService(t, http.StatusNotFound, `{"type":"about:blank","title":"Not Found","status":404,"detail":"no such directory"}`)
-	run(t, srv, "dirs", "get", org, dir).failure(t, "slab docs dirs get: 404 Not Found\ndetail: no such directory\n")
+	runDocs(t, srv, "dirs", "get", org, dir).failure(t, "slab docs dirs get: 404 Not Found\ndetail: no such directory\n")
 }
 
 // Every input refusal is a usage error, before anything is built or the
 // request fires.
-func TestCommands_RefuseMissingInputBeforeAnyRequest(t *testing.T) {
+func TestDocs_RefuseMissingInputBeforeAnyRequest(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args []string
 		want string
@@ -361,7 +235,7 @@ func TestCommands_RefuseMissingInputBeforeAnyRequest(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, srv := newService(t, http.StatusOK, `{}`)
-			run(t, srv, tc.args...).usage(t, tc.want)
+			runDocs(t, srv, tc.args...).usage(t, tc.want)
 			if len(s.received) != 0 {
 				t.Errorf("the request fired anyway: %+v", s.received)
 			}
@@ -373,13 +247,13 @@ func TestCommands_RefuseMissingInputBeforeAnyRequest(t *testing.T) {
 // request fires.
 func TestFilesPut_FailsOnAnUnreadableFile(t *testing.T) {
 	s, srv := newService(t, http.StatusCreated, `{}`)
-	run(t, srv, "files", "put", org, "root", filepath.Join(t.TempDir(), "missing")).failed(t, "files put", "no such file")
+	runDocs(t, srv, "files", "put", org, "root", filepath.Join(t.TempDir(), "missing")).failed(t, "files put", "no such file")
 	if len(s.received) != 0 {
 		t.Error("the request fired anyway")
 	}
 }
 
-func TestCommands_RefuseBodyAlongsideAFieldFlag(t *testing.T) {
+func TestDocs_RefuseBodyAlongsideAFieldFlag(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args  []string
 		flags string
@@ -393,7 +267,7 @@ func TestCommands_RefuseBodyAlongsideAFieldFlag(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, srv := newService(t, http.StatusOK, `{}`)
-			run(t, srv, tc.args...).usage(t, "flags "+tc.flags+" cannot be used together")
+			runDocs(t, srv, tc.args...).usage(t, "flags "+tc.flags+" cannot be used together")
 			if len(s.received) != 0 {
 				t.Error("the request fired anyway")
 			}
@@ -420,7 +294,7 @@ func TestPositionalArguments_AreRequiredForEveryPathSegment(t *testing.T) {
 	} {
 		t.Run(strings.Join(tc.args[:2], " "), func(t *testing.T) {
 			s, srv := newService(t, http.StatusOK, `{}`)
-			run(t, srv, tc.args...).usage(t, "slab docs "+strings.Join(tc.args[:2], " ")+": "+tc.want)
+			runDocs(t, srv, tc.args...).usage(t, "slab docs "+strings.Join(tc.args[:2], " ")+": "+tc.want)
 			if len(s.received) != 0 {
 				t.Error("the request fired anyway")
 			}
@@ -428,9 +302,10 @@ func TestPositionalArguments_AreRequiredForEveryPathSegment(t *testing.T) {
 	}
 }
 
-// Every docs command builds the two nodes it declares, config and client,
-// and the lifecycle configuration, and nothing else.
-func TestCommands_BuildOnlyTheConfigAndTheClient(t *testing.T) {
+// Every docs command builds the nodes it declares, no color and
+// client, the base node the client is bound to, and the lifecycle
+// configuration, and nothing else.
+func TestDocs_BuildOnlyTheColorTheClientAndItsBase(t *testing.T) {
 	upload := filepath.Join(t.TempDir(), "a.txt")
 	if err := os.WriteFile(upload, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -450,12 +325,12 @@ func TestCommands_BuildOnlyTheConfigAndTheClient(t *testing.T) {
 	} {
 		t.Run(strings.Join(args[:2], " "), func(t *testing.T) {
 			_, srv := newService(t, http.StatusTeapot, `{"status":418}`)
-			r := run(t, srv, args...)
+			r := runDocs(t, srv, args...)
 			if r.code != process.ExitFailure {
 				t.Errorf("code = %d, want the problem's %d; stderr = %q", r.code, process.ExitFailure, r.stderr)
 			}
-			if !slices.Equal(r.built, built) {
-				t.Errorf("nodes built = %q, want %q", r.built, built)
+			if !slices.Equal(r.built, familyBuilt) {
+				t.Errorf("nodes built = %q, want %q", r.built, familyBuilt)
 			}
 		})
 	}
@@ -488,7 +363,7 @@ func TestFilesPut_SendsTheFileUnderItsNameAndMediaType(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, srv := newService(t, http.StatusCreated, `{"id":"f","version":1}`)
-			run(t, srv, append([]string{"files", "put", org, "root"}, tc.args...)...).ok(t)
+			runDocs(t, srv, append([]string{"files", "put", org, "root"}, tc.args...)...).ok(t)
 			got := s.only(t)
 			if got.method != http.MethodPost || got.uri != tc.uri || got.contentType != tc.contentType || got.body != "bytes" {
 				t.Errorf("sent %s %s as %q: %q; want POST %s as %q", got.method, got.uri, got.contentType, got.body, tc.uri, tc.contentType)
@@ -514,7 +389,7 @@ func TestFilesGet_WritesTheBytesToOut(t *testing.T) {
 	defer srv.Close()
 	path := filepath.Join(t.TempDir(), "a.txt")
 
-	r := run(t, srv, "files", "get", org, file, "--out", path)
+	r := runDocs(t, srv, "files", "get", org, file, "--out", path)
 	r.ok(t)
 	out := r.stdout
 	b, _ := os.ReadFile(path)
@@ -528,7 +403,7 @@ func TestFilesGet_WritesTheBytesToOut(t *testing.T) {
 	}
 
 	unsaved := filepath.Join(t.TempDir(), "b.txt")
-	r = run(t, srv, "files", "get", org, file, "--if-none-match", `"e1"`, "--out", unsaved)
+	r = runDocs(t, srv, "files", "get", org, file, "--if-none-match", `"e1"`, "--out", unsaved)
 	r.ok(t)
 	if !strings.HasPrefix(r.stdout, "304 Not Modified") {
 		t.Errorf("revalidation = %q", r.stdout)
@@ -545,7 +420,7 @@ func TestDirsDelete_RecursiveReportsTheAcceptedBranch(t *testing.T) {
 	loc := "/api/documents/" + org + "/directories/" + dir
 	s, srv := newService(t, http.StatusAccepted, "")
 	s.location = loc
-	r := run(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive")
+	r := runDocs(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive")
 	r.ok(t)
 	want := "202 Accepted\n" +
 		"Location: " + loc + "\n" +
@@ -555,9 +430,9 @@ func TestDirsDelete_RecursiveReportsTheAcceptedBranch(t *testing.T) {
 	}
 
 	_, srv = newService(t, http.StatusNoContent, "")
-	run(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive").failed(t, "dirs delete", "want 202")
+	runDocs(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive").failed(t, "dirs delete", "want 202")
 	_, srv = newService(t, http.StatusAccepted, "")
-	run(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive").failed(t, "dirs delete", "no Location")
+	runDocs(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive").failed(t, "dirs delete", "no Location")
 }
 
 // sweeping is a fake service whose recursive delete answers 202, and whose
@@ -592,7 +467,7 @@ func sweeping(t *testing.T, reads int) (*httptest.Server, *[]string) {
 func TestDirsDelete_WaitPollsTheLocationUntilTheSweepIsDone(t *testing.T) {
 	loc := "/api/documents/" + org + "/directories/" + dir
 	srv, seen := sweeping(t, 1)
-	r := run(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive", "--wait", "10s")
+	r := runDocs(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive", "--wait", "10s")
 	r.ok(t)
 	out := r.stdout
 	want := []string{"DELETE " + loc + "?recursive=true", "GET " + loc, "GET " + loc}
@@ -604,14 +479,14 @@ func TestDirsDelete_WaitPollsTheLocationUntilTheSweepIsDone(t *testing.T) {
 	}
 
 	srv, _ = sweeping(t, 1000)
-	run(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive", "--wait", "100ms").failed(t, "dirs delete", "still answers 200 after 100ms")
+	runDocs(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive", "--wait", "100ms").failed(t, "dirs delete", "still answers 200 after 100ms")
 }
 
 // dirs get prints the read as the service wrote it, its status among the
 // members, and the entity restates the member.
 func TestDirsGet_ShowsTheStatus(t *testing.T) {
 	_, srv := newService(t, http.StatusOK, `{"id":"`+dir+`","parent_id":null,"name":"reports","path":"/reports","status":"deleting","version":5}`)
-	r := run(t, srv, "dirs", "get", org, dir)
+	r := runDocs(t, srv, "dirs", "get", org, dir)
 	r.ok(t)
 	if out := r.stdout; !strings.Contains(out, `"status": "deleting"`) {
 		t.Errorf("stdout lacks the status:\n%s", out)
@@ -649,7 +524,7 @@ func TestDeletes_ReportThePreconditionAndConflictProblems(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, srv := newService(t, tc.status, tc.reply)
-			run(t, srv, tc.args...).failure(t, tc.want)
+			runDocs(t, srv, tc.args...).failure(t, tc.want)
 		})
 	}
 }

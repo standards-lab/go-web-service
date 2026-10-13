@@ -1,6 +1,6 @@
 # Grafana, over the three backends, with anonymous admin access so the local
 # stack needs no login. This FROM line is Grafana's one pin.
-FROM grafana/grafana:13.2.3
+FROM grafana/grafana:13.2.4
 
 ENV GF_AUTH_ANONYMOUS_ENABLED=true \
     GF_AUTH_ANONYMOUS_ORG_ROLE=Admin

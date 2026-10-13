@@ -13,10 +13,10 @@ import (
 	"github.com/standards-lab/blobfs"
 	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/blobfs/data/datatest"
+	"github.com/standards-lab/go-core/reactor"
 	"github.com/standards-lab/sqlate/sqltest"
 
 	"github.com/standards-lab/go-web-service/data"
-	"github.com/standards-lab/go-web-service/sdk"
 )
 
 // waitFor bounds every wait for a pass that should run, so a broken
@@ -242,8 +242,8 @@ func TestSweepWorker_ARefusalKeepsTheReactor(t *testing.T) {
 	ran := make(chan struct{}, 2)
 	g := &gate{released: func(int) { ran <- struct{}{} }}
 	logger, _ := logged()
-	wake := sdk.Wake(time.Hour)
-	r := sdk.New(wake, st.SweepWorker(db, g, logger))
+	wake := reactor.Wake(time.Hour)
+	r := reactor.New(wake, st.SweepWorker(db, g, logger))
 	if err := r.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -270,11 +270,11 @@ func TestSweepWorker_ARefusalKeepsTheReactor(t *testing.T) {
 
 // Once the drain begins, the pass in flight finishes and no further pass
 // runs, though it reported More: the worker returns nil, and the drain
-// ends clean rather than when a grace cancels it.
+// ends clean rather than when its CancelAfter period cancels it.
 func TestSweepWorker_TheDrainStopsBetweenPasses(t *testing.T) {
 	st, db, rec, _ := protocols(t, script(morePass(stale1, stale2))...)
-	wake := sdk.Wake(time.Hour)
-	var r *sdk.Reactor[time.Time]
+	wake := reactor.Wake(time.Hour)
+	var r *reactor.Reactor[time.Time]
 	drained := make(chan error, 1)
 	// The first pass begins the drain and waits for its signal before it
 	// runs, so the drain begins while the pass is in flight.
@@ -288,13 +288,13 @@ func TestSweepWorker_TheDrainStopsBetweenPasses(t *testing.T) {
 			drained <- r.Shutdown(ctx)
 		}()
 		select {
-		case <-sdk.Draining(ctx):
+		case <-reactor.Draining(ctx):
 		case <-time.After(waitFor):
 			t.Error("the drain signal never reached the pass")
 		}
 	}}
 	logger, out := logged()
-	r = sdk.New(wake, st.SweepWorker(db, g, logger, sweepOpts...))
+	r = reactor.New(wake, st.SweepWorker(db, g, logger, sweepOpts...))
 	if err := r.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +320,7 @@ func TestSweepWorker_TheDrainStopsBetweenPasses(t *testing.T) {
 // pass runs, and once it is released the wake's passes run.
 func TestSweepWorker_APassWaitsOutASchemaChange(t *testing.T) {
 	st, db, rec, _ := protocols(t, idlePass()...)
-	g := new(sdk.Gate)
+	g := new(reactor.Gate)
 	change, err := g.Exclusive(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -374,7 +374,7 @@ func TestSweepWorker_APassRunsInsideItsHold(t *testing.T) {
 // and the worker returns the cancellation.
 func TestSweepWorker_TheDrainEndsAWaitingPass(t *testing.T) {
 	st, db, rec, _ := protocols(t)
-	g := new(sdk.Gate)
+	g := new(reactor.Gate)
 	change, err := g.Exclusive(context.Background())
 	if err != nil {
 		t.Fatal(err)

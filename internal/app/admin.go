@@ -5,6 +5,7 @@ import (
 
 	blobfspg "github.com/standards-lab/blobfs/postgres"
 	"github.com/standards-lab/go-core/graph"
+	"github.com/standards-lab/go-core/reactor"
 	"github.com/standards-lab/go-database/admin"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate/migrate"
@@ -12,7 +13,6 @@ import (
 	dbadmin "github.com/standards-lab/go-web-service/admin/database"
 	storageadmin "github.com/standards-lab/go-web-service/admin/storage"
 	"github.com/standards-lab/go-web-service/data"
-	"github.com/standards-lab/go-web-service/sdk"
 )
 
 // defineAdmin defines the administrative nodes on g into n: the
@@ -29,8 +29,8 @@ import (
 // node's object store itself, read with Use: the same store as a second
 // node would start and be checked twice.
 func defineAdmin(g *graph.Graph, n *Nodes) {
-	n.Gate = g.Define("gate", func(*graph.Scope) (*sdk.Gate, error) {
-		return new(sdk.Gate), nil
+	n.Gate = g.Define("gate", func(*graph.Scope) (*reactor.Gate, error) {
+		return new(reactor.Gate), nil
 	})
 	n.Schema = g.Define("schema", newSchema(n))
 }

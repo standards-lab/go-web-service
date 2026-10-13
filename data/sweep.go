@@ -6,9 +6,8 @@ import (
 	"time"
 
 	bfdata "github.com/standards-lab/blobfs/data"
+	"github.com/standards-lab/go-core/reactor"
 	"github.com/standards-lab/sqlate"
-
-	"github.com/standards-lab/go-web-service/sdk"
 )
 
 // sweepPass is one bounded pass of blobfs's sweep with the service's
@@ -29,7 +28,7 @@ type SweepGate interface {
 // SweepWorker returns the sweep as a reactor's Func: on each wake it runs
 // blobfs's sweep over db and the object store with opts, in passes while a
 // pass reports More, each pass holding gate shared and logged to logger.
-// Once the reactor's drain begins (sdk.Draining) it runs no further pass,
+// Once the reactor's drain begins (reactor.Draining) it runs no further pass,
 // so a backlog never holds a drain; the next start's wake finds the rest.
 //
 // A pass's error never fails the worker: every step of the sweep is
@@ -37,14 +36,14 @@ type SweepGate interface {
 // error at warn with the pass's counts and the next wake retries. An
 // outage shows on the database's and the store's readiness checks instead.
 // The one error it returns is its context's, once the drain cancels a pass
-// in flight or a wait on the gate past the reactor's Grace.
-func (s *Storage) SweepWorker(db *sqlate.DB, gate SweepGate, logger *slog.Logger, opts ...bfdata.SweepOption) sdk.Func[time.Time] {
+// in flight or a wait on the gate past the reactor's CancelAfter period.
+func (s *Storage) SweepWorker(db *sqlate.DB, gate SweepGate, logger *slog.Logger, opts ...bfdata.SweepOption) reactor.Func[time.Time] {
 	pass := gated(gate, func(ctx context.Context) (bfdata.SweepResult, error) {
 		return s.FS.Sweep(ctx, db, s.Objects, opts...)
 	})
 	report := logPass(logger)
 	return func(ctx context.Context, _ time.Time) error {
-		return bfdata.SweepUntilDone(ctx, sdk.Draining(ctx), pass, report)
+		return bfdata.SweepUntilDone(ctx, reactor.Draining(ctx), pass, report)
 	}
 }
 

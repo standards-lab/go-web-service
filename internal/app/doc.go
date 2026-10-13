@@ -32,8 +32,10 @@
 //
 // What a node takes part in is inferred from its value's methods: a
 // lifecycle.Starter or Stopper is started or stopped, a Subsystem is both,
-// a ReadinessChecker joins the readiness probe, and a Monitored has its
-// runtime error watched. Nodes start in layer order and drain in reverse.
+// a Starter that is also a ReadinessChecker (a lifecycle.ReadyStarter)
+// joins the readiness probe, though a Ready alone does not, and a Monitored
+// has its runtime error watched. Nodes start in layer order and drain in
+// reverse.
 // No layer file registers anything with the Coordinator. The order is
 // computed from what each node uses, plus three After edges, which order
 // two nodes without passing a value: the database and the object store

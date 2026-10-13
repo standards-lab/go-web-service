@@ -10,7 +10,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	libconfig "github.com/standards-lab/go-core/config"
 	"github.com/standards-lab/go-core/graph"
 	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-web-sdk"
@@ -125,11 +127,11 @@ func TestGraph_ServerAloneInTopLayer(t *testing.T) {
 	})
 }
 
-// The readiness checks the lifecycle infers from the node values are the
-// database, the object store, the schema, and the sweeper, in that order;
-// /readyz reports them after "lifecycle". No other value has a Ready: not
-// the sweep's wake, whose source's readiness the sweeper reports, and not
-// the readiness node itself.
+// The readiness checks the lifecycle infers from the node values, each one
+// that both starts and reports Ready, are the database, the object store,
+// the schema, and the sweeper, in that order; /readyz reports them after
+// "lifecycle". No other value is both: not the sweep's wake, whose source's
+// readiness the sweeper reports, and not the readiness node itself.
 func TestGraph_ReadinessChecks(t *testing.T) {
 	cfg := configtest.Config(t)
 	a := app.New(cfg, io.Discard)
@@ -229,9 +231,58 @@ func TestGraph_SchemaBetweenConnectionsAndSweeper(t *testing.T) {
 	}
 }
 
+// The sweeper cancels a pass still running half the shutdown timeout into
+// its drain, go-core's CancelWithin rule, and its drain reports the period:
+// under the 10s default, "handlers cancelled after 5s". A shorter timeout
+// keeps the test fast. The pass in flight is one waiting on the gate, which
+// the test holds exclusively, as a schema-changing admin verb would, so no
+// live engine is needed.
+func TestGraph_SweeperCancelsWithinTheShutdownTimeout(t *testing.T) {
+	cfg := configtest.Config(t)
+	cfg.ShutdownTimeout = libconfig.Duration(200 * time.Millisecond)
+	a := app.New(cfg, io.Discard)
+	n := a.Nodes()
+	sys, err := a.Graph().Build(n.Sweeper)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	release, err := sys.Get(n.Gate).Exclusive(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	sweeper := sys.Get(n.Sweeper)
+	if err := sweeper.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// The wake's construction nudge is pending when the source starts
+	// receiving, so the pass begins at once and waits on the gate; the
+	// pause lets it reach the wait before the drain stops the source. No
+	// seam outside go-core shows the wait itself; a pause that fell short
+	// would leave no pass in flight, and the drain's nil fails the test
+	// rather than passing it.
+	deadline := time.Now().Add(5 * time.Second)
+	for !sweeper.Ready() {
+		if time.Now().After(deadline) {
+			t.Fatal("the sweeper never became ready")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(20 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err = sweeper.Shutdown(ctx)
+	if err == nil || !strings.Contains(err.Error(), "handlers cancelled after 100ms") {
+		t.Errorf("Shutdown = %v, want the pass cancelled after 100ms, half the shutdown timeout", err)
+	}
+}
+
 // Each lifecycle participant is the value of one node only: the same value
-// in two nodes would start twice, stop twice, and, as a ReadinessChecker,
-// be reported twice. The admin storage routes read the storage node's
+// in two nodes would start twice, stop twice, and, as a ReadyStarter, be
+// reported twice. The admin storage routes read the storage node's
 // store rather than holding it as a node of their own.
 func TestGraph_EachParticipantInOneNode(t *testing.T) {
 	a := app.New(configtest.Config(t), io.Discard)

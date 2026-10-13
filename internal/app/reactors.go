@@ -5,8 +5,7 @@ import (
 
 	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/go-core/graph"
-
-	"github.com/standards-lab/go-web-service/sdk"
+	"github.com/standards-lab/go-core/reactor"
 )
 
 // defineReactors defines the reactors on g into n: the entry points that
@@ -24,11 +23,10 @@ func defineReactors(g *graph.Graph, n *Nodes) {
 // Wake is the wake node's value, where the sweep's two halves meet: the
 // document layer nudges it after each branch it marks, so it is that
 // layer's document.Sweeper, and the sweeper receives from its source. It
-// deliberately has no Ready method: the lifecycle infers a readiness check
-// from any node value's Ready, and the source's own readiness is the
-// sweeper's to report, so the probe gains no "wake" check.
+// has no Ready method: the source's own readiness is the sweeper's to
+// report, so the probe gains no "wake" check.
 type Wake struct {
-	source *sdk.Waker
+	source *reactor.Waker
 }
 
 // Nudge asks the sweeper for a pass as soon as it is free.
@@ -42,7 +40,7 @@ func (w *Wake) Nudge() { w.source.Nudge() }
 // than an interval later.
 func newWake(n *Nodes) func(*graph.Scope) (*Wake, error) {
 	return func(s *graph.Scope) (*Wake, error) {
-		w := &Wake{source: sdk.Wake(s.Use(n.Config).Sweep.Interval.Duration())}
+		w := &Wake{source: reactor.Wake(s.Use(n.Config).Sweep.Interval.Duration())}
 		w.Nudge()
 		return w, nil
 	}
@@ -54,22 +52,19 @@ func newWake(n *Nodes) func(*graph.Scope) (*Wake, error) {
 // drains it, reports it, and ends the run on its failure with no
 // registration here. It orders itself after the schema, so it starts once
 // every table it touches is verified, and stops before the schema's layer
-// beneath it.
-//
-// Its Grace is half the shutdown timeout: the drain stops the server first
-// under the one timeout, so the server keeps its share, and a reactor that
-// had to cancel its handlers says so before the coordinator's deadline
-// drops the report.
-func newSweeper(n *Nodes) func(*graph.Scope) (*sdk.Reactor[time.Time], error) {
-	return func(s *graph.Scope) (*sdk.Reactor[time.Time], error) {
+// beneath it. Its reactor.CancelWithin option cancels a pass still running
+// at half the shutdown timeout, so the sweeper reports the cancellation
+// before the coordinator's deadline drops it.
+func newSweeper(n *Nodes) func(*graph.Scope) (*reactor.Reactor[time.Time], error) {
+	return func(s *graph.Scope) (*reactor.Reactor[time.Time], error) {
 		s.After(n.Schema)
 		cfg := s.Use(n.Config)
-		grace := sdk.Grace(cfg.ShutdownTimeout.Duration() / 2)
 
 		sweep := s.Use(n.Files).SweepWorker(s.Use(n.SQL).DB, s.Use(n.Gate), s.Use(n.Logger),
 			bfdata.Batch(*cfg.Sweep.Batch),
 			bfdata.StaleOlderThan(cfg.Sweep.StaleAge.Duration()),
 		)
-		return sdk.New(s.Use(n.Wake).source, sweep, grace), nil
+		return reactor.New(s.Use(n.Wake).source, sweep,
+			reactor.CancelWithin(cfg.ShutdownTimeout.Duration())), nil
 	}
 }

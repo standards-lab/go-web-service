@@ -259,7 +259,10 @@ func TestGraph_SweeperCancelsWithinTheShutdownTimeout(t *testing.T) {
 	}
 	// The wake's construction nudge is pending when the source starts
 	// receiving, so the pass begins at once and waits on the gate; the
-	// pause lets it reach the wait before the drain stops the source.
+	// pause lets it reach the wait before the drain stops the source. No
+	// seam outside go-core shows the wait itself; a pause that fell short
+	// would leave no pass in flight, and the drain's nil fails the test
+	// rather than passing it.
 	deadline := time.Now().Add(5 * time.Second)
 	for !sweeper.Ready() {
 		if time.Now().After(deadline) {

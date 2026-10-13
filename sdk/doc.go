@@ -1,6 +1,5 @@
 // Package sdk stages the service's library promotion candidates: request
-// and lifecycle conventions proven here in running code before they move
-// outward. The package is flat by design, a staging area meant to empty
+// conventions proven here in running code before they move outward. The package is flat by design, a staging area meant to empty
 // out, and each file is named for the library its contents are bound for.
 //
 // The package's API:

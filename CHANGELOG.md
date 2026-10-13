@@ -141,13 +141,12 @@ accumulate under [Unreleased] until the first cut.
   dims `--` and `--|` comment lines, and colors sqlate's `{{…}}` markers. SQL, JSON, and table
   blocks are set off by a blank line before and after. `style.JSON` returns JSON that breaks
   partway unchanged and uncolored.
-- Pins: go-core v0.8.0 and go-web-sdk v0.15.2, in both modules; their own changes are in their
+- Pins: go-core v0.9.0 and go-web-sdk v0.15.2, in both modules; their own changes are in their
   CHANGELOGs.
-- The sweep runs on go-core's `reactor` package, pinned at go-core v0.9.0 in both modules: the
-  sweeper, its wake, and the sweep worker use `reactor.Reactor`, `reactor.Wake`, and
-  `reactor.Draining`, and the quiesce gate is `reactor.Gate`. The sweeper's cancel-after period
-  is `reactor.CancelWithin` of the shutdown timeout, half of it, as before. Grafana moves to
-  13.2.4.
+- The sweep runs on go-core's `reactor` package: the sweeper, its wake, and the sweep worker use
+  `reactor.Reactor`, `reactor.Wake`, and `reactor.Draining`, and the quiesce gate is
+  `reactor.Gate`. The sweeper's cancel-after period is `reactor.CancelWithin` of the shutdown
+  timeout, half of it, as before. Grafana moves to 13.2.4.
 - Every time the API's JSON carries (an organization's, a directory's, and a file's
   `created_at` and `updated_at`) is in UTC, ending in `Z`, whatever zone the process runs in. It
   carried the host's offset before. The UTC guarantee comes from the libraries' releases, which

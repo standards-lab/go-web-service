@@ -55,7 +55,7 @@ accumulate under [Unreleased] until the first cut.
   tree under fixed `5eed…` ids, so a rerun finds each file and a reset, which leaves the objects
   in the container, writes it again under the same key.
 - `slab version`, which prints the module version slab was built at, or `(devel)`.
-- `slab demo storage`, a narrated scenario of the storage end to end, and slab's `org logo`,
+- `slab scenario storage`, a narrated scenario of the storage end to end, and slab's `org logo`,
   `docs`, and `admin storage` commands.
 - The integration tier's storage cases (`TestDocument`, `TestDocumentRefusedUpload`,
   `TestStorageOutage`, `TestDocumentSweep`, `TestSweepAtStartup`, `TestSweepUnderReset`,
@@ -66,8 +66,8 @@ accumulate under [Unreleased] until the first cut.
   `github.com/standards-lab/go-web-sdk/middleware/rate-limit`: a client over the configured limit
   (300 requests per minute by default, `APP_RATE_LIMIT_REQUESTS`/`APP_RATE_LIMIT_WINDOW`) gets a
   429 problem document with `Retry-After`; the liveness and readiness probes are exempt.
-- `tools/slab`, a narrated-scenario CLI in its own module (`mise run slab -- list`/
-  `demo <scenario>`; see [`tools/slab/README.md`](tools/slab/README.md)): `sqlate` runs the
+- `tools/slab`, a narrated-scenario CLI in its own module (`mise run slab -- scenario
+  <name>`; see [`tools/slab/README.md`](tools/slab/README.md)): `sqlate` runs the
   library's compile pipeline in process over the repository's own sources; `domain` drives the
   organization domain's full CRUD surface against the running service, reseeded from the known
   reference tree each run, with the create request's trace located in Grafana; `problems` tours
@@ -127,10 +127,20 @@ accumulate under [Unreleased] until the first cut.
   on go-cli-sdk-template's. Help, a parent run with no or an unknown subcommand, and every usage
   error exit 2; help exited 0 and a usage error 1 before. Input a command refuses before it
   sends, such as a malformed `--body`, is a usage error. A command builds only the settings and
-  client it declares, so help, `list`, and `version` read no configuration. Every root flag has
-  a `SLAB_*` variable, which the flag overrides wherever it is given on the command line;
-  `SLAB_REPO` and `SLAB_NO_COLOR` are new. A problem response prints nothing on stdout and one
+  client it declares, so help, the scenario listing, and `version` read no configuration. Every
+  root flag has a `SLAB_*` variable, which the flag overrides wherever it is given on the command
+  line; `SLAB_REPO` and `SLAB_NO_COLOR` are new. A problem response prints nothing on stdout and one
   report on stderr: `slab <command path>: `, then every member of the document on its own line.
+- slab's scenarios run on go-cli-sdk's scenario runner, from the `tools/slab/scenarios`
+  package, as `slab scenario <name>`; the root's help and `slab scenario`'s help both end with
+  the listing, which gives each scenario's name, summary, and the nodes it uses. The service
+  and Grafana are need nodes, probed before the first step: a run with either down fails at
+  start, exit 1, naming the mise task that brings it up (`mise run serve`, `mise run db:up`,
+  or `mise run otel:up`). A failed step reads `slab scenario <name>: step <i> (<intent>): …`. Only
+  the blocks are colored, never a heading, a note, or a caption. An SQL block bolds keywords,
+  dims `--` and `--|` comment lines, and colors sqlate's `{{…}}` markers. SQL, JSON, and table
+  blocks are set off by a blank line before and after. `style.JSON` returns JSON that breaks
+  partway unchanged and uncolored.
 - Pins: go-core v0.8.0 and go-web-sdk v0.15.2, in both modules; their own changes are in their
   CHANGELOGs.
 - Every time the API's JSON carries (an organization's, a directory's, and a file's
@@ -278,5 +288,7 @@ accumulate under [Unreleased] until the first cut.
 - The `internal/infrastructure`, `internal/domain`, and `internal/reactors` packages.
 - `sdk.IfMatch`, promoted to go-web-sdk v0.6.0 with the strict body decode, and `sdk.PathID`,
   promoted to go-web-sdk v0.13.0 as `PathUUID`.
+- `slab demo` and `slab list`, superseded by `slab scenario`, along with slab's own scenario
+  runner and its `env` package; and the `--tempo`/`SLAB_TEMPO` setting, which nothing read.
 
 [Unreleased]: https://github.com/standards-lab/go-web-service/commits/main

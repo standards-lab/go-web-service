@@ -6,18 +6,22 @@
 //   - app.go: [App], [New], and [Nodes], which call the layer files'
 //     define and mount functions in layer order, lowest first;
 //   - infrastructure.go: defineInfrastructure, the lifecycle configuration
-//     node, one node per run setting (base, grafana, tempo, repo, and no
-//     color), each read in its constructor from its default and its SLAB_*
-//     variable with its root flag (--base, --grafana, --tempo, --repo,
-//     --no-color) overriding them, and the client node, the HTTP client to
-//     the service bound to the base node's URL; the root flags, accepted at
-//     any depth; and the output source the families on the tree render
-//     through, over the no color node;
+//     node, one node per run setting (base, grafana, repo, and no color),
+//     each read in its constructor from its default and its SLAB_*
+//     variable with its root flag (--base, --grafana, --repo, --no-color)
+//     overriding them, and the client node, the HTTP client to the service
+//     bound to the base node's URL; the root flags, accepted at any depth;
+//     and the output source the families on the tree render through, over
+//     the no color node;
 //   - domain.go and admin.go: mountDomain, one root.Add(pkg.Commands(...)...)
 //     per domain (org and docs), and mountAdmin, the admin command over the
 //     database and storage families;
-//   - demo.go: the demo command, over slab's own scenario runner, and list,
-//     the scenario listing;
+//   - scenario.go: defineScenarioNodes, the need nodes the scenarios
+//     declare (service and grafana up, each a lifecycle Starter that probes
+//     what it names before a scenario's first step), and mountScenarios,
+//     go-cli-sdk's scenario parent over the scenarios package, one leaf per
+//     scenario, each declaring the nodes it reads, and the root's help
+//     Footer, the same scenario listing the parent's help ends with;
 //   - version.go: the version command, which declares no nodes.
 //
 // [Nodes] holds one handle per node: each define function fills its own
@@ -25,12 +29,11 @@
 // declares the nodes it needs with Use; the dispatcher builds them, with
 // the lifecycle configuration node, only when the command runs, and shuts
 // them down when it returns. A run that builds nothing, such as help, a
-// usage error, version, or list, reads no configuration. The root's PreRun
+// usage error, or version, reads no configuration. The root's PreRun
 // records which root flags a dispatch set, so a setting's node applies its
 // flag over its variable only when the flag was given. No aggregate
 // configuration gathers the settings: a command declares only the ones it
-// reads. Every command
-// dispatches through go-cli-sdk.
+// reads. Every command dispatches through go-cli-sdk.
 //
 // The App publishes its composition: [App.Graph], [App.Nodes], and
 // [App.Root] return the graph, a handle on each of its nodes, and the

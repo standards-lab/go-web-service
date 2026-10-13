@@ -1,12 +1,13 @@
-// Package httpx is the HTTP client slab's scenarios call the service
-// through. It holds everything about HTTP that is not specific to the
+// Package httpx is the HTTP client slab's commands and scenarios call the
+// service through. It holds everything about HTTP that is not specific to the
 // service.
 //
 // The package exports:
 //
 //   - [Client] and [NewClient], which send a request to the service
-//   - [Response], one exchange as observed, which the reporter renders
+//   - [Response], one exchange as observed, which output.Response renders
 //   - [Header] and [IfMatch], a request header and the precondition one
 //   - [RawQuery], which joins query pairs as the printed request shows them
-//   - [Live] and [GrafanaLive], the probes a scenario's Need checks with
+//   - [Probe] and [ProbeGrafana], which probe an endpoint at a base URL, and
+//     [StatusError], a probe answered with a status other than 200
 package httpx

@@ -2,14 +2,17 @@ package style
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
 )
 
 // JSON colors an already-indented, already-valid JSON document: object keys
 // in one color, string and number values in another, punctuation and
 // literals unchanged. It walks the text with encoding/json's tokenizer, so
-// it never has to lex JSON itself; on any tokenizer error it returns the
-// input unchanged.
+// it never has to lex JSON itself. Text that fails to tokenize anywhere,
+// or ends inside an open object or array, is returned unchanged with no
+// color at all, never colored up to the break.
 func (s Style) JSON(text string) string {
 	if !s.on {
 		return text
@@ -28,8 +31,14 @@ func (s Style) JSON(text string) string {
 	pos := 0 // bytes of text copied so far
 	for {
 		tok, err := dec.Token()
-		if err != nil {
+		// The tokenizer reports a document cut off between tokens as a
+		// plain io.EOF, so an end of input with a container still open
+		// counts as broken too.
+		if errors.Is(err, io.EOF) && len(stack) == 0 {
 			break
+		}
+		if err != nil {
+			return text
 		}
 		// Everything between the last token's end and this token's start
 		// is whitespace and punctuation Indent put there; copy it as is

@@ -1,33 +1,438 @@
-package demo_test
+package app_test
 
 import (
-	"bytes"
-	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net/http"
-	"net/http/httptest"
-	"path"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"uuid"
 
 	"github.com/standards-lab/go-web-sdk"
 
 	"github.com/standards-lab/go-web-service/tools/slab/admin/database"
-	"github.com/standards-lab/go-web-service/tools/slab/demo"
 	"github.com/standards-lab/go-web-service/tools/slab/domain/document"
 	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
-	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/input"
 	"github.com/standards-lab/go-web-service/tools/slab/repo"
-	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
+
+// The fakes the domain, problems, and storage scenarios run against at the
+// App seam, each on an httptest listener the run reaches through
+// SLAB_BASE and SLAB_GRAFANA. orgFake stands in for the service's
+// organization surface and Grafana on one listener; storageFake for its
+// storage surface. Each answers the service's readiness probe, /readyz,
+// and Grafana's health probe, /api/health, with 200, so the need nodes
+// start.
+
+// codePattern is the layer's code rule, domain/organization's codePattern,
+// repeated here so the fake refuses a code the service would.
+var codePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
+// orgFake stands in for the service and Grafana on one
+// listener: the routes do not overlap. It holds the organization tree in
+// memory, reseeds it on the admin reset, and records each request's line
+// and precondition so the test can check what the steps sent.
+//
+// Each route makes the checks the real handler makes, in the real order,
+// and a rejection is the problem document the real service would write:
+// the SDK's own parsers reject a path id, a query, a body, and an If-Match
+// header, and the fake's own vocabulary stands in for the domain's and the
+// store's, mapped to statuses the way domain/organization's status and
+// data's Status map them. Every response carries the trace id in
+// X-Request-Id, as the service's request-id middleware does.
+type orgFake struct {
+	mu       sync.Mutex
+	rows     []*organization.Organization
+	trace    string
+	problems *web.ErrorWriter
+	requests []string
+	err      error
+}
+
+const fakeTrace = "4bf92f3577b34da6a3ce929d0e0e4736"
+
+// fakeMaxPageSize is the largest size a list request may ask for:
+// internal/config/reads.go's defaultReadsMaxSize.
+const fakeMaxPageSize = 100
+
+// fakeMaxCommandBody is the byte limit the service puts on a command's
+// request body: domain/organization/handler.go's maxCommandBody.
+const fakeMaxCommandBody = 1 << 16
+
+// stateRoute is the database admin service's reset, the route the
+// scenarios' first step posts to.
+const stateRoute = database.Database + "/state"
+
+// The fake's error vocabulary: the domain's validation and cycle errors, the
+// path parser's, and the store's stale version and constraint violation,
+// with the wording the real ones carry. An absent row is sql.ErrNoRows, as
+// the store returns it.
+var (
+	errPathID     = errors.New("must be a UUID")
+	errValidation = errors.New("invalid command")
+	errCycle      = errors.New("transfer would create a cycle")
+	errStale      = errors.New("version mismatch")
+	errConstraint = errors.New("constraint violation")
+)
+
+// fakeStatus maps the fake's vocabulary to statuses as the service's two
+// matchers do. The SDK's own errors map themselves ahead of it.
+func fakeStatus(err error) (web.Problem, bool) {
+	switch {
+	case errors.Is(err, errPathID), errors.Is(err, errValidation):
+		return web.Problem{Status: http.StatusBadRequest}, true
+	case errors.Is(err, sql.ErrNoRows):
+		return web.Problem{Status: http.StatusNotFound}, true
+	case errors.Is(err, errCycle), errors.Is(err, errConstraint):
+		return web.Problem{Status: http.StatusConflict}, true
+	case errors.Is(err, errStale):
+		return web.Problem{Status: http.StatusPreconditionFailed}, true
+	}
+	return web.Problem{}, false
+}
+
+// seededTree is data/seeds/default.json as the fake holds it: parent code,
+// code, name, in file order.
+var seededTree = [][3]string{
+	{"", "acme", "Acme Corporation"},
+	{"acme", "engineering", "Engineering"},
+	{"engineering", "platform", "Platform"},
+	{"engineering", "product", "Product"},
+	{"acme", "operations", "Operations"},
+	{"operations", "logistics", "Logistics"},
+	{"acme", "finance", "Finance"},
+}
+
+func newOrgFake() *orgFake {
+	f := &orgFake{trace: fakeTrace, problems: web.NewErrorWriter(slog.New(slog.DiscardHandler), fakeStatus)}
+	f.reseed()
+	return f
+}
+
+func (f *orgFake) reseed() {
+	f.rows = nil
+	for i, row := range seededTree {
+		o := &organization.Organization{ID: fakeID(i + 1), Code: row[1], Name: row[2], Version: 1}
+		if row[0] != "" {
+			id := f.byCode(row[0]).ID
+			o.ParentID = &id
+		}
+		f.rows = append(f.rows, o)
+	}
+}
+
+func fakeID(n int) string { return fmt.Sprintf("00000000-0000-0000-0000-%012d", n) }
+
+func (f *orgFake) byCode(code string) *organization.Organization {
+	for _, o := range f.rows {
+		if o.Code == code {
+			return o
+		}
+	}
+	return nil
+}
+
+func (f *orgFake) byID(id string) *organization.Organization {
+	for _, o := range f.rows {
+		if o.ID == id {
+			return o
+		}
+	}
+	return nil
+}
+
+func (f *orgFake) pathOf(o *organization.Organization) string {
+	if o.ParentID == nil {
+		return "/" + o.Code
+	}
+	return f.pathOf(f.byID(*o.ParentID)) + "/" + o.Code
+}
+
+// view is o as the read model presents it, its path composed.
+func (f *orgFake) view(o *organization.Organization) organization.Organization {
+	v := *o
+	v.Path = f.pathOf(o)
+	return v
+}
+
+// fail records a request no route answers, for the test to report, and
+// answers it with 400 and no body: a scenario's own mistake, not a problem
+// the service would write.
+func (f *orgFake) fail(w http.ResponseWriter, format string, args ...any) {
+	if f.err == nil {
+		f.err = fmt.Errorf(format, args...)
+	}
+	w.WriteHeader(http.StatusBadRequest)
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func (f *orgFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	line := r.Method + " " + r.URL.RequestURI()
+	if m := r.Header.Get("If-Match"); m != "" {
+		line += " If-Match: " + m
+	}
+	f.requests = append(f.requests, line)
+
+	w.Header().Set("X-Request-Id", f.trace)
+	r = r.WithContext(web.WithRequestID(r.Context(), f.trace))
+	if err := f.route(w, r); err != nil {
+		_ = f.problems.Write(w, r, err)
+	}
+}
+
+// route dispatches r to the handler for its method and path, the way the
+// service's router does. A handler's error is the problem the response
+// reports.
+func (f *orgFake) route(w http.ResponseWriter, r *http.Request) error {
+	switch {
+	case r.Method == http.MethodGet && (r.URL.Path == "/readyz" || r.URL.Path == "/api/health"):
+		w.WriteHeader(http.StatusOK)
+	case r.Method == http.MethodPost && r.URL.Path == stateRoute:
+		f.reseed()
+		writeJSON(w, http.StatusOK, map[string]string{"state": "default"})
+	case r.Method == http.MethodGet && r.URL.Path == organization.Organizations:
+		return f.list(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == organization.Organizations+"/lookup":
+		for _, o := range f.rows {
+			if r.URL.Query().Get("path") == f.pathOf(o) {
+				writeJSON(w, http.StatusOK, f.view(o))
+				return nil
+			}
+		}
+		return sql.ErrNoRows
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, organization.Organizations+"/"):
+		return f.find(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == organization.Organizations:
+		return f.create(w, r)
+	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/transfer"):
+		return f.transfer(w, r)
+	case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, organization.Organizations+"/"):
+		return f.edit(w, r)
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, organization.Organizations+"/"):
+		return f.delete(w, r)
+	default:
+		f.fail(w, "unexpected request %s %s", r.Method, r.URL.RequestURI())
+	}
+	return nil
+}
+
+// pathID reads the {id} segment of r's path and parses it as a UUID, the
+// check web.PathUUID makes, with its wording.
+func pathID(r *http.Request) (string, error) {
+	raw := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, organization.Organizations+"/"), "/transfer")
+	if _, err := uuid.Parse(raw); err != nil {
+		return "", fmt.Errorf("path id=%q: %w", raw, errPathID)
+	}
+	return raw, nil
+}
+
+// command reads a guarded command's three inputs in the order sdk.Command
+// does: the path id, the If-Match version, and the body, strictly decoded
+// and bounded at the command body limit.
+func orgCommand[T any](w http.ResponseWriter, r *http.Request) (id string, version int64, body T, err error) {
+	if id, err = pathID(r); err != nil {
+		return "", 0, body, err
+	}
+	if version, err = web.IfMatch(r); err != nil {
+		return "", 0, body, err
+	}
+	if body, err = web.DecodeJSON[T](w, r, fakeMaxCommandBody); err != nil {
+		return "", 0, body, err
+	}
+	return id, version, body, nil
+}
+
+// validate is the create and edit commands' own rules, with the wording
+// domain/organization's validCode and validName carry.
+func orgValidate(code, name string) error {
+	if !codePattern.MatchString(code) {
+		return fmt.Errorf("%w: code must be lowercase words joined by single hyphens", errValidation)
+	}
+	if name == "" {
+		return fmt.Errorf("%w: name must not be empty", errValidation)
+	}
+	return nil
+}
+
+// guard is the store's version guard: the row at id, at version, or the
+// error the guard returns when there is no such row or it is at another
+// version.
+func (f *orgFake) guard(id string, version int64) (*organization.Organization, error) {
+	o := f.byID(id)
+	if o == nil {
+		return nil, sql.ErrNoRows
+	}
+	if o.Version != version {
+		return nil, fmt.Errorf("%w: expected %d, current %d", errStale, version, o.Version)
+	}
+	return o, nil
+}
+
+// list parses the query as the handler does and pages the rows by it. The
+// filters are not applied: no test reads the queried list's items.
+func (f *orgFake) list(w http.ResponseWriter, r *http.Request) error {
+	q, err := web.ParseQuery(r.URL.Query(), web.Limits{DefaultSize: input.DefaultPageSize, MaxSize: fakeMaxPageSize})
+	if err != nil {
+		return err
+	}
+	items := make([]organization.Organization, 0, len(f.rows))
+	for _, o := range f.rows {
+		items = append(items, f.view(o))
+	}
+	start := min((q.Page-1)*q.Size, len(items))
+	end := min(start+q.Size, len(items))
+	writeJSON(w, http.StatusOK, web.NewPage(items[start:end], q, web.Paging{Total: new(len(f.rows)), More: end < len(items)}))
+	return nil
+}
+
+func (f *orgFake) find(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r)
+	if err != nil {
+		return err
+	}
+	o := f.byID(id)
+	if o == nil {
+		return sql.ErrNoRows
+	}
+	writeJSON(w, http.StatusOK, f.view(o))
+	return nil
+}
+
+// create decodes and validates the body, then makes the store's two checks
+// as the schema's constraints would: the parent must exist (the foreign
+// key) and no sibling may carry the code (the unique constraint, null
+// parents equal).
+func (f *orgFake) create(w http.ResponseWriter, r *http.Request) error {
+	body, err := web.DecodeJSON[organization.CreateOrganization](w, r, fakeMaxCommandBody)
+	if err != nil {
+		return err
+	}
+	if err := orgValidate(body.Code, body.Name); err != nil {
+		return err
+	}
+	if body.ParentID != nil && f.byID(*body.ParentID) == nil {
+		return fmt.Errorf("%w: parent %s does not exist", errConstraint, *body.ParentID)
+	}
+	for _, o := range f.rows {
+		if o.Code == body.Code && sameParent(o.ParentID, body.ParentID) {
+			return fmt.Errorf("%w: code %q exists under the same parent", errConstraint, body.Code)
+		}
+	}
+	o := &organization.Organization{ID: fakeID(len(f.rows) + 1), ParentID: body.ParentID, Code: body.Code, Name: body.Name, Version: 1}
+	f.rows = append(f.rows, o)
+	w.Header().Set("Location", organization.Organizations+"/"+o.ID)
+	writeJSON(w, http.StatusCreated, organization.Identity{ID: o.ID, Version: o.Version})
+	return nil
+}
+
+func sameParent(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func (f *orgFake) edit(w http.ResponseWriter, r *http.Request) error {
+	id, version, body, err := orgCommand[organization.EditOrganization](w, r)
+	if err != nil {
+		return err
+	}
+	if err := orgValidate(body.Code, body.Name); err != nil {
+		return err
+	}
+	o, err := f.guard(id, version)
+	if err != nil {
+		return err
+	}
+	o.Code, o.Name = body.Code, body.Name
+	o.Version++
+	writeJSON(w, http.StatusOK, organization.Identity{ID: o.ID, Version: o.Version})
+	return nil
+}
+
+// transfer checks the destination against the subtree before the guard,
+// as the store does under the tree lock.
+func (f *orgFake) transfer(w http.ResponseWriter, r *http.Request) error {
+	type transferOrganization struct {
+		ParentID *string `json:"parent_id"`
+	}
+	id, version, body, err := orgCommand[transferOrganization](w, r)
+	if err != nil {
+		return err
+	}
+	if body.ParentID != nil {
+		for p := f.byID(*body.ParentID); p != nil; p = f.parentOf(p) {
+			if p.ID == id {
+				return fmt.Errorf("%w: %s is in the subtree of %s", errCycle, *body.ParentID, id)
+			}
+		}
+	}
+	o, err := f.guard(id, version)
+	if err != nil {
+		return err
+	}
+	o.ParentID = body.ParentID
+	o.Version++
+	writeJSON(w, http.StatusOK, organization.Identity{ID: o.ID, Version: o.Version})
+	return nil
+}
+
+func (f *orgFake) parentOf(o *organization.Organization) *organization.Organization {
+	if o.ParentID == nil {
+		return nil
+	}
+	return f.byID(*o.ParentID)
+}
+
+func (f *orgFake) delete(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r)
+	if err != nil {
+		return err
+	}
+	version, err := web.IfMatch(r)
+	if err != nil {
+		return err
+	}
+	o, err := f.guard(id, version)
+	if err != nil {
+		return err
+	}
+	for _, child := range f.rows {
+		if child.ParentID != nil && *child.ParentID == id {
+			return fmt.Errorf("%w: %s has children", errConstraint, id)
+		}
+	}
+	f.rows = append(f.rows[:f.index(o)], f.rows[f.index(o)+1:]...)
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (f *orgFake) index(o *organization.Organization) int {
+	for i, row := range f.rows {
+		if row == o {
+			return i
+		}
+	}
+	return -1
+}
 
 // The storage scenario's fixed targets as the service states them: acme,
 // whose logo and tree it walks, finance, the other organization its
@@ -79,11 +484,11 @@ type seeded struct {
 // loadSeed reads the repository's default seed file.
 func loadSeed(t *testing.T) seedFile {
 	t.Helper()
-	fsys, err := repo.FS(context.Background())
+	fsys, err := repo.FS("")
 	if err != nil {
 		t.Fatalf("find the repository: %v", err)
 	}
-	raw, err := fs.ReadFile(fsys, path.Join(demo.SeedsDir, demo.SeedState+".json"))
+	raw, err := fs.ReadFile(fsys, "data/seeds/default.json")
 	if err != nil {
 		t.Fatalf("read the seed: %v", err)
 	}
@@ -276,7 +681,7 @@ func (f *storageFake) route(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
 	logo := organization.Organizations + "/" + fakeAcmeID + "/logo"
 	switch {
-	case r.Method == http.MethodGet && p == "/healthz":
+	case r.Method == http.MethodGet && p == "/readyz":
 		w.WriteHeader(http.StatusOK)
 	case r.Method == http.MethodGet && p == schemaRoute:
 		writeJSON(w, http.StatusOK, fakeSchema)
@@ -288,7 +693,7 @@ func (f *storageFake) route(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, n)
 	case r.Method == http.MethodPost && p == stateRoute:
 		f.reseed()
-		writeJSON(w, http.StatusOK, map[string]any{"state": demo.SeedState, "schema": fakeSchema, "seeded": f.resetCounts()})
+		writeJSON(w, http.StatusOK, map[string]any{"state": "default", "schema": fakeSchema, "seeded": f.resetCounts()})
 	case r.Method == http.MethodGet && p == organization.Organizations+"/lookup":
 		switch r.URL.Query().Get("path") {
 		case acmePath:
@@ -401,7 +806,7 @@ func (f *storageFake) fileView(n *fakeNode) document.File {
 
 // ifMatch reads the request's If-Match as the version it quotes, answering
 // 428 when it is missing and 412 when it is not want.
-func ifMatch(w http.ResponseWriter, r *http.Request, want int64) bool {
+func storageIfMatch(w http.ResponseWriter, r *http.Request, want int64) bool {
 	v := r.Header.Get("If-Match")
 	if v == "" {
 		writeProblem(w, http.StatusPreconditionRequired, "the request requires an If-Match header")
@@ -454,7 +859,7 @@ func (f *storageFake) serveDocuments(w http.ResponseWriter, r *http.Request, seg
 		case http.MethodGet:
 			writeJSON(w, http.StatusOK, f.fileView(n))
 		case http.MethodDelete:
-			if ifMatch(w, r, n.version) {
+			if storageIfMatch(w, r, n.version) {
 				delete(f.nodes, n.id)
 				w.WriteHeader(http.StatusNoContent)
 			}
@@ -483,7 +888,7 @@ func (f *storageFake) serveDirectory(w http.ResponseWriter, r *http.Request, n *
 			f.fail(w, r)
 			return
 		}
-		if !ifMatch(w, r, n.version) {
+		if !storageIfMatch(w, r, n.version) {
 			return
 		}
 		n.status, n.version = document.DirectoryDeleting, n.version+1
@@ -571,338 +976,4 @@ func (f *storageFake) list(w http.ResponseWriter, r *http.Request, n *fakeNode, 
 		p.Items = append(p.Items, f.fileView(n))
 	}
 	writeJSON(w, http.StatusOK, p)
-}
-
-// runStorage runs the storage scenario against fake and returns its error
-// and output; the fake's own error, a request no route answers, fails the
-// test.
-func runStorage(t *testing.T, fake *storageFake) (string, error) {
-	t.Helper()
-	srv := httptest.NewServer(fake)
-	t.Cleanup(srv.Close)
-	ctx := env.WithContext(context.Background(), env.Env{Base: srv.URL, Grafana: srv.URL, Tempo: srv.URL})
-	var out bytes.Buffer
-	err := scenario.Run(ctx, demo.Storage(), scenario.NewReporter(&out, false))
-	srv.Close()
-	if fake.err != nil {
-		t.Fatalf("the scenario sent a bad request: %v\n%s", fake.err, out.String())
-	}
-	return out.String(), err
-}
-
-// storageSteps is the scenario's headings in order.
-var storageSteps = []string{
-	"[1/16] Migration Sets", "[2/16] Additive Seed", "[3/16] Logo Read",
-	"[4/16] Logo Revalidation", "[5/16] Logo Replacement", "[6/16] Logo Delete",
-	"[7/16] Document Tree", "[8/16] Cursor Walk", "[9/16] Missing If-Match",
-	"[10/16] Stale If-Match", "[11/16] Taken Name", "[12/16] Another Organization",
-	"[13/16] Branch Creation", "[14/16] Recursive Delete", "[15/16] Sweep", "[16/16] Reset",
-}
-
-func TestStorage_RunsSixteenStepsInOrderAgainstTheFake(t *testing.T) {
-	out, err := runStorage(t, newStorageFake(t))
-	if err != nil {
-		t.Fatalf("run: %v\n%s", err, out)
-	}
-	last := -1
-	for _, s := range storageSteps {
-		at := strings.Index(out, s)
-		if at < 0 {
-			t.Fatalf("output lacks %q:\n%s", s, out)
-		}
-		if at < last {
-			t.Errorf("%q is out of order", s)
-		}
-		last = at
-	}
-	if strings.Contains(out, "[17/") {
-		t.Errorf("the scenario narrates more than sixteen steps:\n%s", out)
-	}
-}
-
-func TestStorage_SendsTheScenarioSequence(t *testing.T) {
-	fake := newStorageFake(t)
-	out, err := runStorage(t, fake)
-	if err != nil {
-		t.Fatalf("run: %v\n%s", err, out)
-	}
-	paths := fake.acmeTree.paths()
-	logo := organization.Organizations + "/" + fakeAcmeID + "/logo"
-	docs := document.Documents + "/" + fakeAcmeID
-	readme := docs + "/files/" + paths[guardedFilePath]
-	// Each entry is one request the fake recorded, in the order the steps
-	// send them, matched whole or, where prefix is set, by its start;
-	// requests between them are not checked.
-	want := []struct {
-		line   string
-		prefix bool
-	}{
-		{"GET " + schemaRoute, false},
-		{"POST " + seedRoute, false},
-		{"GET " + logo, false},
-		{"GET " + logo + ` If-None-Match: "0x1"`, false},
-		{"PUT " + logo, false},
-		{"GET " + logo, false},
-		{"DELETE " + logo, false},
-		{"GET " + logo, false},
-		{"GET " + docs + "/directories/root/directories?sort=name", false},
-		{"GET " + docs + "/directories/root/files?sort=name", false},
-		{"GET " + docs + "/directories/root/directories?size=1&sort=name", false},
-		{"GET " + docs + "/directories/root/directories?size=1&sort=name&cursor=after%3Aengineering", false},
-		{"GET " + docs + "/directories/root/directories?size=1&sort=name&cursor=after%3Afinance", false},
-		{"GET " + readme, false},
-		{"DELETE " + readme, false},
-		{"DELETE " + readme + ` If-Match: "1"`, false},
-		{"POST " + docs + "/directories", false},
-		{"GET " + docs + "/directories/" + paths[takenDirPath+"/"], false},
-		{"GET " + document.Documents + "/" + fakeFinanceID + "/directories/" + paths[takenDirPath+"/"], false},
-		{"POST " + docs + "/directories", false},
-		{"POST " + docs + "/directories", false},
-		{"POST " + docs + "/directories/", true},
-		{"DELETE " + docs + "/directories/", true},
-		{"POST " + stateRoute, false},
-	}
-	i := 0
-	for _, got := range fake.requests {
-		if i == len(want) {
-			break
-		}
-		if w := want[i]; got == w.line || (w.prefix && strings.HasPrefix(got, w.line)) {
-			i++
-		}
-	}
-	if i < len(want) {
-		t.Errorf("the requests lack %q in order; sent:\n%s", want[i].line, strings.Join(fake.requests, "\n"))
-	}
-	if !strings.Contains(strings.Join(fake.requests, "\n"), `?recursive=true If-Match: "1"`) {
-		t.Errorf("the recursive delete did not guard on the branch's version; sent:\n%s", strings.Join(fake.requests, "\n"))
-	}
-}
-
-func TestStorage_LeavesTheFakeAsTheResetSeededIt(t *testing.T) {
-	fake := newStorageFake(t)
-	if _, err := runStorage(t, fake); err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(fake.logo, fakeSeedLogo) {
-		t.Error("the run left acme without its seeded logo")
-	}
-	if got, want := len(fake.nodes), len(fake.acmeTree.paths())+1; got != want {
-		t.Errorf("the run left %d nodes, want the seeded %d", got, want)
-	}
-}
-
-func TestStorage_RunsTwiceAgainstTheSameFake(t *testing.T) {
-	fake := newStorageFake(t)
-	for run := 1; run <= 2; run++ {
-		if out, err := runStorage(t, fake); err != nil {
-			t.Fatalf("run %d: %v\n%s", run, err, out)
-		}
-	}
-}
-
-func TestStorage_RestoresADeletedLogoThroughTheAdditiveSeed(t *testing.T) {
-	fake := newStorageFake(t)
-	fake.logo = nil // an earlier run stopped after its logo delete
-	out, err := runStorage(t, fake)
-	if err != nil {
-		t.Fatalf("run: %v\n%s", err, out)
-	}
-	if !strings.Contains(step(t, out, "[2/16]"), `"logos": 1`) {
-		t.Errorf("the additive seed does not report the logo it wrote again:\n%s", out)
-	}
-}
-
-func TestStorage_FailsNamingTheStepOnAnUnexpectedResponse(t *testing.T) {
-	fake := newStorageFake(t)
-	fake.fault = http.MethodDelete + " " + organization.Organizations + "/" + fakeAcmeID + "/logo"
-	out, err := runStorage(t, fake)
-	if err == nil {
-		t.Fatalf("run = nil, want the logo delete's failure:\n%s", out)
-	}
-	if want := "storage: step 6 (Logo Delete): status = 500"; !strings.Contains(err.Error(), want) {
-		t.Errorf("run error = %v; want it to contain %q", err, want)
-	}
-	if strings.Contains(out, "[7/16]") {
-		t.Errorf("the run went on past the failed step:\n%s", out)
-	}
-}
-
-func TestStorage_FailsWhenTheConflictDetailIsNotTheCuratedOne(t *testing.T) {
-	fake := newStorageFake(t)
-	fake.takenDetail = "the request conflicts with the current state"
-	out, err := runStorage(t, fake)
-	if err == nil || !strings.Contains(err.Error(), "storage: step 11 (Taken Name): the conflict's detail is") {
-		t.Errorf("run error = %v; want the taken name's detail check to fail:\n%s", err, out)
-	}
-}
-
-func TestStorage_FailsWhenASeededEntryIsMissingFromTheTree(t *testing.T) {
-	fake := newStorageFake(t)
-	fake.nodes[fake.seed.Documents[0].Entries[0].ID].name = "renamed.txt"
-	out, err := runStorage(t, fake)
-	if err == nil || !strings.Contains(err.Error(), "storage: step 7 (Document Tree): the tree has /README.txt") {
-		t.Errorf("run error = %v; want the tree check to name the missing entry:\n%s", err, out)
-	}
-}
-
-func TestStorage_NarratesEachStepAsNoteRequestResponse(t *testing.T) {
-	out, err := runStorage(t, newStorageFake(t))
-	if err != nil {
-		t.Fatalf("run: %v\n%s", err, out)
-	}
-	logo := organization.Organizations + "/" + fakeAcmeID + "/logo"
-	for _, c := range []struct{ heading, note, request, status string }{
-		{"[1/16]", "two migration sets", "GET " + schemaRoute, "HTTP 200 OK"},
-		{"[2/16]", "A seed is additive", "POST " + seedRoute, "HTTP 200 OK"},
-		{"[3/16]", "served by proxy", "GET " + logo, "HTTP 200 OK"},
-		{"[4/16]", "If-None-Match", "GET " + logo, "HTTP 304 Not Modified"},
-		{"[5/16]", "takes no version", "PUT " + logo, "HTTP 201 Created"},
-		{"[6/16]", "retires whatever logo", "DELETE " + logo, "HTTP 204 No Content"},
-		{"[7/16]", "hang from its own root", "GET " + document.Documents, "HTTP 200 OK"},
-		{"[8/16]", "next cursor", "GET " + document.Documents, "HTTP 200 OK"},
-		{"[9/16]", "428 Precondition Required", "DELETE " + document.Documents, "HTTP 428 Precondition Required"},
-		{"[10/16]", "412 Precondition Failed", "DELETE " + document.Documents, "HTTP 412 Precondition Failed"},
-		{"[11/16]", "Names are unique", "POST " + document.Documents, "HTTP 409 Conflict"},
-		{"[12/16]", "checks its scope first", "GET " + document.Documents + "/" + fakeFinanceID, "HTTP 404 Not Found"},
-		{"[13/16]", "A small branch", "POST " + document.Documents, "HTTP 201 Created"},
-		{"[14/16]", "two stages", "DELETE " + document.Documents, "HTTP 202 Accepted"},
-		{"[15/16]", "until it answers 404", "GET " + document.Documents, "HTTP 404 Not Found"},
-		{"[16/16]", "actually clears", "POST " + stateRoute, "HTTP 200 OK"},
-	} {
-		flat := strings.Join(strings.Fields(step(t, out, c.heading)), " ")
-		note, request, status := strings.Index(flat, c.note), strings.Index(flat, c.request), strings.Index(flat, c.status)
-		if note < 0 || request < 0 || status < 0 {
-			t.Errorf("step %s lacks its note %q, request %q, or status %q:\n%s", c.heading, c.note, c.request, c.status, flat)
-			continue
-		}
-		if note > request || request > status {
-			t.Errorf("step %s is not note, request, response in order:\n%s", c.heading, flat)
-		}
-	}
-}
-
-func TestStorage_SummarizesTheLogoBytesAndShowsItsValidators(t *testing.T) {
-	out, err := runStorage(t, newStorageFake(t))
-	if err != nil {
-		t.Fatalf("run: %v\n%s", err, out)
-	}
-	read := step(t, out, "[3/16]")
-	for _, want := range []string{
-		fmt.Sprintf("    (%d bytes of image/png)\n", len(fakeSeedLogo)),
-		"    ETag: \"0x1\"\n",
-		"    Last-Modified: ",
-	} {
-		if !strings.Contains(read, want) {
-			t.Errorf("the logo read lacks %q:\n%s", want, read)
-		}
-	}
-	if strings.Contains(read, "PNG") {
-		t.Errorf("the logo read prints the bytes:\n%s", read)
-	}
-	if replace := step(t, out, "[5/16]"); !strings.Contains(replace, "bytes of "+demo.FixturesDir+"/"+replacementFixture+")") {
-		t.Errorf("the replacement's request does not name its fixture:\n%s", replace)
-	}
-}
-
-func TestStorage_PrintsTheTreeTheDeletingStatusAndTheSeededCounts(t *testing.T) {
-	fake := newStorageFake(t)
-	out, err := runStorage(t, fake)
-	if err != nil {
-		t.Fatalf("run: %v\n%s", err, out)
-	}
-	paths := fake.acmeTree.paths()
-	treeStep := step(t, out, "[7/16]")
-	if !strings.Contains(treeStep, "  acme's document tree\n") {
-		t.Errorf("the tree step lacks its table:\n%s", treeStep)
-	}
-	for p, id := range paths {
-		if !strings.Contains(treeStep, p) || !strings.Contains(treeStep, id) {
-			t.Errorf("the tree table lacks %s at %s", p, id)
-		}
-	}
-	if !strings.Contains(step(t, out, "[14/16]"), `"status": "deleting"`) {
-		t.Errorf("the recursive delete does not show the deleting status:\n%s", out)
-	}
-	if !strings.Contains(step(t, out, "[15/16]"), "· the sweep removed the branch within ") {
-		t.Errorf("the sweep step does not report the wait:\n%s", out)
-	}
-	counts := fake.seed.counts()
-	reset := step(t, out, "[16/16]")
-	for _, row := range []string{
-		fmt.Sprintf("organizations  %d", counts.Organizations),
-		fmt.Sprintf("logos          %d", counts.Logos),
-		fmt.Sprintf("documents      %d", counts.Documents),
-	} {
-		if !strings.Contains(reset, row) {
-			t.Errorf("the reset's table lacks %q:\n%s", row, reset)
-		}
-	}
-}
-
-func TestStorage_KeepsEveryNoteLineWithinEightyColumns(t *testing.T) {
-	out, err := runStorage(t, newStorageFake(t))
-	if err != nil {
-		t.Fatalf("run: %v\n%s", err, out)
-	}
-	for line := range strings.SplitSeq(out, "\n") {
-		// A note line is indented two spaces; a request or status line
-		// shares the indent but carries a path, which may run past 80.
-		if !strings.HasPrefix(line, "  ") || strings.HasPrefix(line, "    ") || len(line) <= 80 {
-			continue
-		}
-		if first, _, _ := strings.Cut(strings.TrimSpace(line), " "); first == "HTTP" || strings.ToUpper(first) == first {
-			continue
-		}
-		t.Errorf("note line is %d columns: %q", len(line), line)
-	}
-}
-
-func TestStorage_FailsWhenTheResetSeedsOtherThanTheSeedFile(t *testing.T) {
-	fake := newStorageFake(t)
-	fake.miscount = 1
-	out, err := runStorage(t, fake)
-	if err == nil || !strings.Contains(err.Error(), "storage: step 16 (Reset): the reset seeded") {
-		t.Errorf("run error = %v; want the reset's counts check to fail:\n%s", err, out)
-	}
-}
-
-// A directory beyond the seeded ones, such as a branch an interrupted run
-// left behind, falls wherever its name sorts, and the walk still finds the
-// seeded ones in order among the rest.
-func TestStorage_CursorWalkToleratesAnUnseededDirectory(t *testing.T) {
-	fake := newStorageFake(t)
-	root := fake.acmeTree.Root
-	fake.nodes["left-behind"] = &fakeNode{id: "left-behind", parent: root, name: "f-left-behind", dir: true, status: document.DirectoryActive, version: 1}
-	out, err := runStorage(t, fake)
-	if err != nil {
-		t.Fatalf("run: %v\n%s", err, out)
-	}
-	if !strings.Contains(step(t, out, "[8/16]"), `"name": "f-left-behind"`) {
-		t.Errorf("the walk did not page through the extra directory:\n%s", out)
-	}
-}
-
-func TestStorage_FailsWhenTheCursorWalkIsOutOfOrder(t *testing.T) {
-	fake := newStorageFake(t)
-	fake.descendingWalk = true
-	out, err := runStorage(t, fake)
-	if err == nil || !strings.Contains(err.Error(), "storage: step 8 (Cursor Walk): the walk visited") {
-		t.Errorf("run error = %v; want the walk's order check to fail:\n%s", err, out)
-	}
-}
-
-// A body that is no JSON, a download's bytes, is summarized; a problem
-// document is JSON and prints as it came.
-func TestStorage_PrintsAFailedLogoReadsProblemAsIs(t *testing.T) {
-	fake := newStorageFake(t)
-	fake.fault = http.MethodGet + " " + organization.Organizations + "/" + fakeAcmeID + "/logo"
-	out, err := runStorage(t, fake)
-	if err == nil {
-		t.Fatalf("run = nil, want the logo read's failure:\n%s", out)
-	}
-	read := step(t, out, "[3/16]")
-	if !strings.Contains(read, `"status": 500`) || strings.Contains(read, "bytes of") {
-		t.Errorf("the logo read does not print the problem as it came:\n%s", read)
-	}
 }

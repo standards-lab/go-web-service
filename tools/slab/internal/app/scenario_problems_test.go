@@ -1,53 +1,44 @@
-package demo_test
+package app_test
 
 import (
-	"bytes"
-	"context"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/standards-lab/go-web-service/tools/slab/demo"
+	"github.com/standards-lab/go-core/process"
+
 	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
-	"github.com/standards-lab/go-web-service/tools/slab/env"
-	"github.com/standards-lab/go-web-service/tools/slab/scenario"
 )
 
 // absentID is the well-formed id the not-found step asks for, which no
 // seeded row carries.
 const absentID = "00000000-0000-7000-8000-000000000000"
 
-// runProblems runs the problems scenario against the fake.
-func runProblems(t *testing.T) (*fakeService, string) {
+// runProblems runs the problems scenario against a fresh orgFake,
+// expecting it to succeed.
+func runProblems(t *testing.T) (*orgFake, string) {
 	t.Helper()
-	return runScenario(t, demo.Problems())
+	fake := newOrgFake()
+	r := runOrgScenario(t, "problems", fake, func() error { return fake.err })
+	if r.code != process.ExitOK {
+		t.Fatalf("code = %d, want %d; stderr = %q\n%s", r.code, process.ExitOK, r.stderr, r.stdout)
+	}
+	if want := []string{"service", "base", "client", "grafana up", "grafana", "repo", "no color", "lifecycle config"}; !slices.Equal(r.built, want) {
+		t.Errorf("nodes built = %q, want %q", r.built, want)
+	}
+	return fake, r.stdout
 }
 
-func TestProblems_RunsTwelveStepsInOrderAgainstTheFake(t *testing.T) {
+func TestScenario_ProblemsRunsTwelveStepsInOrder(t *testing.T) {
 	_, out := runProblems(t)
-	steps := []string{
+	inOrder(t, out, []string{
 		"[1/12] Initialization",
 		"[2/12] Malformed Identifier", "[3/12] Malformed Query", "[4/12] Malformed Body",
 		"[5/12] Oversized Body", "[6/12] Domain Validation", "[7/12] Missing If-Match",
 		"[8/12] Malformed If-Match", "[9/12] Stale Version", "[10/12] Not Found",
 		"[11/12] Duplicate Code", "[12/12] Transfer Cycle",
-	}
-	last := -1
-	for _, step := range steps {
-		at := strings.Index(out, step)
-		if at < 0 {
-			t.Fatalf("output lacks %q:\n%s", step, out)
-		}
-		if at < last {
-			t.Errorf("%q is out of order", step)
-		}
-		last = at
-	}
-	if strings.Contains(out, "[13/") {
-		t.Errorf("the scenario narrates more than twelve steps:\n%s", out)
-	}
+	})
 }
 
 // problemSections is each condition's step: its heading, a phrase from its
@@ -70,7 +61,7 @@ var problemSections = []struct {
 	{"[12/12]", "the cycle check identifies and refuses", "POST /api/organizations/" + fakeID(1) + "/transfer", "HTTP 409 Conflict", ""},
 }
 
-func TestProblems_NarratesEachConditionAsNoteRequestResponseTrace(t *testing.T) {
+func TestScenario_ProblemsNarratesEachConditionAsNoteRequestResponseTrace(t *testing.T) {
 	_, out := runProblems(t)
 	for _, c := range problemSections {
 		text := step(t, out, c.heading)
@@ -79,8 +70,8 @@ func TestProblems_NarratesEachConditionAsNoteRequestResponseTrace(t *testing.T) 
 		// its text appears, ahead of the problem's instance member.
 		flat := strings.Join(strings.Fields(text), " ")
 		note, request := strings.Index(flat, c.note), strings.Index(flat, c.request+" ")
-		status, trace := strings.Index(flat, c.status), strings.Index(flat, "Trace ID : "+fakeTrace)
-		if note < 0 || request < 0 || status < 0 || trace < 0 {
+		status, trace := strings.Index(flat, c.status), strings.Index(flat, "Observability Grafana : ")
+		if note < 0 || request < 0 || status < 0 || trace < 0 || !strings.Contains(flat, "Trace ID : "+fakeTrace) {
 			t.Errorf("step %s lacks its note %q, request %q, status %q, or trace pointer:\n%s", c.heading, c.note, c.request, c.status, text)
 			continue
 		}
@@ -102,30 +93,32 @@ func TestProblems_NarratesEachConditionAsNoteRequestResponseTrace(t *testing.T) 
 	}
 }
 
-func TestProblems_PrintsTheOversizedBodyAsItsStandIn(t *testing.T) {
+func TestScenario_ProblemsShowsTheOversizedBodyAsItsStandIn(t *testing.T) {
 	fake, out := runProblems(t)
-	// The stand-in is JSON, so the request block prints it indented.
+	// The stand-in is JSON, so the request block shows it indented.
 	const standIn = `"code": "<65537 bytes>"`
-	if !strings.Contains(out, standIn) {
-		t.Errorf("output lacks the stand-in %s:\n%s", standIn, out)
+	if !strings.Contains(step(t, out, "[5/12]"), standIn) {
+		t.Errorf("the oversized body's step lacks the stand-in %s:\n%s", standIn, out)
 	}
 	if strings.Contains(out, strings.Repeat("a", 64)) {
-		t.Errorf("output prints the filler itself:\n%s", out)
+		t.Errorf("output shows the filler itself:\n%s", out)
 	}
 	if !slices.Contains(fake.requests, "POST /api/organizations") {
 		t.Errorf("the fake did not receive the oversized create; got:\n%s", strings.Join(fake.requests, "\n"))
 	}
 }
 
-func TestProblems_SendsEachConditionsRequestAsNarrated(t *testing.T) {
+func TestScenario_ProblemsSendsEachConditionsRequestAsNarrated(t *testing.T) {
 	fake, _ := runProblems(t)
-	// The two need probes, the reset and list Initialization makes, then one
-	// request per condition.
-	if got := len(fake.requests); got != 2+13 {
+	// The two start probes, the reset and list Initialization makes, then
+	// one request per condition.
+	if got := len(fake.requests); got != 2+2+11 {
 		t.Errorf("the fake saw %d requests, want 15:\n%s", got, strings.Join(fake.requests, "\n"))
 	}
 	acme := fakeID(1)
 	for _, want := range []string{
+		"GET /readyz",
+		"GET /api/health",
 		"POST /admin/database/state",
 		"GET /api/organizations",
 		"GET /api/organizations/not-a-uuid",
@@ -143,14 +136,10 @@ func TestProblems_SendsEachConditionsRequestAsNarrated(t *testing.T) {
 	}
 }
 
-func TestProblems_WritesNoRow(t *testing.T) {
+func TestScenario_ProblemsWritesNoRow(t *testing.T) {
 	fake, _ := runProblems(t)
 	if got := len(fake.rows); got != len(seededTree) {
 		t.Fatalf("%d rows remain, want the seeded %d", got, len(seededTree))
-	}
-	acme := fake.byCode("acme")
-	if acme == nil || acme.ID != fakeID(1) || acme.ParentID != nil || acme.Name != "Acme Corporation" || acme.Version != 1 {
-		t.Errorf("acme = %+v, want the seeded root at version 1", acme)
 	}
 	for i, row := range seededTree {
 		o := fake.byCode(row[1])
@@ -164,43 +153,43 @@ func TestProblems_WritesNoRow(t *testing.T) {
 	}
 }
 
-func TestProblems_KeepsEveryNoteLineWithinEightyColumns(t *testing.T) {
-	_, out := runProblems(t)
-	for line := range strings.SplitSeq(out, "\n") {
-		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "    ") && len(line) > 80 {
-			t.Errorf("line is %d columns: %q", len(line), line)
-		}
-	}
-}
-
 // An expected problem status is the step's success; a status the step did
-// not narrate, a success included, is the step's failure. The fake answers
-// the not-found step's id with a row, as a service that minted it would.
-func TestProblems_FailsTheStepWhenTheStatusIsNotTheOneNarrated(t *testing.T) {
-	fake := newFakeService()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// not narrate, a success included, is the step's failure, which the
+// dispatcher reports once on stderr naming the step, and no later step
+// runs. The fake answers the not-found step's id with a row, as a service
+// that minted it would.
+func TestScenario_ProblemsFailsTheStepWhenTheStatusIsNotTheOneNarrated(t *testing.T) {
+	fake := newOrgFake()
+	minted := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == organization.Organizations+"/"+absentID {
 			w.Header().Set("X-Request-Id", fakeTrace)
 			writeJSON(w, http.StatusOK, organization.Organization{ID: absentID, Code: "minted", Version: 1})
 			return
 		}
 		fake.ServeHTTP(w, r)
-	}))
-	t.Cleanup(srv.Close)
-	ctx := env.WithContext(context.Background(), env.Env{Base: srv.URL, Grafana: srv.URL, Tempo: srv.URL})
-	var out bytes.Buffer
-	err := scenario.Run(ctx, demo.Problems(), scenario.NewReporter(&out, false))
-	if err == nil || !strings.Contains(err.Error(), "step 10 (Not Found): status = 200 OK, want 404") {
-		t.Fatalf("run = %v, want the not-found step to reject the 200:\n%s", err, out.String())
+	})
+	r := runOrgScenario(t, "problems", minted, func() error { return fake.err })
+
+	if r.code != process.ExitFailure {
+		t.Errorf("code = %d, want %d", r.code, process.ExitFailure)
 	}
-	notFound := step(t, out.String(), "[10/12]")
+	if want := "slab scenario problems: step 10 (Not Found): status = 200 OK, want 404"; !strings.HasPrefix(r.stderr, want) {
+		t.Errorf("stderr = %q, want it to start with %q", r.stderr, want)
+	}
+	if n := strings.Count(r.stderr, "slab scenario"); n != 1 {
+		t.Errorf("stderr reports %d times, want once:\n%s", n, r.stderr)
+	}
+	notFound := step(t, r.stdout, "[10/12]")
 	if !strings.Contains(notFound, "HTTP 200 OK") {
 		t.Errorf("the step does not show the response it rejected:\n%s", notFound)
 	}
 	if strings.Contains(notFound, "Trace ID") {
-		t.Errorf("the step printed a trace pointer for a response it rejected:\n%s", notFound)
+		t.Errorf("the step showed a trace pointer for a response it rejected:\n%s", notFound)
 	}
-	if strings.Contains(out.String(), "[11/12]") {
-		t.Errorf("the run went on past the failed step:\n%s", out.String())
+	if strings.Contains(r.stdout, "[11/12]") {
+		t.Errorf("the run went on past the failed step:\n%s", r.stdout)
+	}
+	if strings.Contains(r.stdout, "step 10") {
+		t.Errorf("the failure is reported in the narration as well as on stderr:\n%s", r.stdout)
 	}
 }

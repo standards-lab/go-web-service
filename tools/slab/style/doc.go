@@ -9,5 +9,7 @@
 // Key, Value, ...) every format builds on. A format's own coloring lives in
 // its own file, named for what it colors (sql.go, json.go): it composes the
 // core wrappers into one method on Style, named for the format (SQL, JSON),
-// and reaches for nothing outside the core and its own file.
+// and reaches for nothing outside the core and its own file. SQL dims
+// comments, gives sqlate's {{ }} markers the Value color, and bolds the
+// keywords in the code between; JSON colors keys and values.
 package style

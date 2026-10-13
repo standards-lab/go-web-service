@@ -1,4 +1,4 @@
-package demo
+package scenarios
 
 import (
 	"bytes"
@@ -13,13 +13,17 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/standards-lab/go-cli-sdk"
+	"github.com/standards-lab/go-cli-sdk/scenario"
+	"github.com/standards-lab/go-core/graph"
+
 	"github.com/standards-lab/go-web-service/tools/slab/admin/database"
 	"github.com/standards-lab/go-web-service/tools/slab/domain/document"
 	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
-	"github.com/standards-lab/go-web-service/tools/slab/env"
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
+	"github.com/standards-lab/go-web-service/tools/slab/output"
 	"github.com/standards-lab/go-web-service/tools/slab/repo"
-	"github.com/standards-lab/go-web-service/tools/slab/scenario"
+	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
 // The organizations the storage scenario addresses by path: acme, whose
@@ -37,12 +41,12 @@ const (
 	takenDirPath    = "/engineering"
 )
 
-// FixturesDir is the seeded fixtures' directory under SeedsDir.
+// fixturesDir is the seeded fixtures' directory under seedsDir.
 // replacementFixture is the seeded fixture the logo step uploads in place
 // of acme's own: another organization's logo, a PNG that passes the
-// upload's sniffed-type rule, under FixturesDir.
+// upload's sniffed-type rule, under fixturesDir.
 const (
-	FixturesDir        = SeedsDir + "/fixtures"
+	fixturesDir        = seedsDir + "/fixtures"
 	replacementFixture = "engineering.png"
 )
 
@@ -63,7 +67,7 @@ const detailNameTaken = "an entry with that name already exists"
 // schemaRoute and seedRoute are the database admin service's schema status
 // and additive seed, inside the /admin mount, the routes database.Client's
 // Status and Seed send to; the steps build their requests beside their
-// narration, as Reset does.
+// narration, as reset does.
 const (
 	schemaRoute = database.Database + "/schema"
 	seedRoute   = database.Database + "/seed"
@@ -155,13 +159,14 @@ func (t seedTree) paths() map[string]string {
 	return out
 }
 
-// loadSeed reads and decodes data/seeds/<SeedState>.json from the repository.
-func loadSeed(ctx context.Context) (seedFile, error) {
-	fsys, err := repo.FS(ctx)
+// loadSeed reads and decodes data/seeds/<seedState>.json from the
+// repository the repo override locates.
+func loadSeed(override string) (seedFile, error) {
+	fsys, err := repo.FS(override)
 	if err != nil {
 		return seedFile{}, err
 	}
-	file := path.Join(SeedsDir, SeedState+".json")
+	file := path.Join(seedsDir, seedState+".json")
 	raw, err := fs.ReadFile(fsys, file)
 	if err != nil {
 		return seedFile{}, err
@@ -173,11 +178,14 @@ func loadSeed(ctx context.Context) (seedFile, error) {
 	return s, nil
 }
 
-// storageState is what the steps hand forward: the client, the seed file
-// and acme's seeded paths, the two organizations, the logo's validator,
-// the guarded file as last read, and the branch the recursive delete
-// removes, with the Location its 202 named.
-type storageState struct {
+// storage is what the storage scenario's steps hand forward: the client,
+// the seed file and acme's seeded paths, the two organizations, the logo's
+// validator, the guarded file as last read, and the branch the recursive
+// delete removes, with the Location its 202 named. Each is replaced by the
+// step that reads it first, the client by the first step, so nothing a
+// run reads is left from a run before it.
+type storage struct {
+	n        Nodes
 	client   *httpx.Client
 	seed     seedFile
 	paths    map[string]string
@@ -190,16 +198,21 @@ type storageState struct {
 	location string
 }
 
-// Storage returns the storage scenario over fresh state.
-func Storage() scenario.Scenario {
-	s := &storageState{}
+// Storage returns the storage scenario over n: the migration sets, a
+// logo's replace cycle, acme's document tree and a cursor walk, the scoped
+// refusals, a recursive delete swept to 404, and a reset, against the
+// running service. It starts with an additive seed rather than a reset,
+// and names what it creates for the run, so it runs twice in a row without
+// a reset between. It declares the service node, which it calls, the repo
+// node, which locates the seed file and the fixture it reads, and the no
+// color node, which decides its blocks' color; it points at no trace, so
+// it declares no grafana up.
+func Storage(n Nodes) scenario.Scenario {
+	s := &storage{n: n}
 	return scenario.Scenario{
 		Name:    "storage",
-		Summary: "Storage end to end against the running service: the migration sets, a logo's replace cycle, acme's document tree and a cursor walk, the scoped refusals, a recursive delete swept to 404, and a reset (needs postgres, azurite, and the service)",
-		Needs: []scenario.Need{
-			{What: "postgres and azurite", Task: "db:up"},
-			{What: "the service", Task: "serve", Check: httpx.Live},
-		},
+		Summary: "Storage end to end against the running service: the migration sets, a logo's replace cycle, acme's document tree and a cursor walk, the scoped refusals, a recursive delete swept to 404, and a reset",
+		Nodes:   []graph.Ref{n.Service, n.Repo, n.NoColor},
 		Steps: []scenario.Step{
 			{Intent: "Migration Sets", Action: s.migrationSets},
 			{Intent: "Additive Seed", Action: s.additiveSeed},
@@ -221,15 +234,14 @@ func Storage() scenario.Scenario {
 	}
 }
 
-func (s *storageState) migrationSets(ctx context.Context, r *scenario.Reporter) error {
-	s.client = httpx.NewClient(env.FromContext(ctx).Base)
+func (s *storage) migrationSets(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
+	s.client = inv.Get(s.n.Service).Client
+	st := styleOf(s.n, inv)
 	r.Note("The service's schema is two migration sets, applied at startup in declaration order: blobfs, go-database's file hierarchy (directories, files, and their statuses), and app, the service's own tables, whose owner rows (an organization's logo image and its document root) reference blobfs's. The schema status reports each set's applied version against the latest it carries.")
-	r.Request(http.MethodGet, schemaRoute, nil, nil)
-	res, err := s.client.Get(ctx, schemaRoute)
+	res, err := call(ctx, r, st, s.client, http.MethodGet, schemaRoute, nil, nil)
 	if err != nil {
 		return err
 	}
-	r.Response(res)
 	if err := res.Expect(http.StatusOK); err != nil {
 		return err
 	}
@@ -265,12 +277,11 @@ func (s *storageState) migrationSets(ctx context.Context, r *scenario.Reporter) 
 			return fmt.Errorf("the schema status lists no %s set", want)
 		}
 	}
-	r.Table("Migration sets", rows)
-	return nil
+	return show(r, "Migration sets", output.Table(st, rows))
 }
 
-func (s *storageState) additiveSeed(ctx context.Context, r *scenario.Reporter) error {
-	seed, err := loadSeed(ctx)
+func (s *storage) additiveSeed(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
+	seed, err := loadSeed(inv.Get(s.n.Repo))
 	if err != nil {
 		return err
 	}
@@ -280,14 +291,12 @@ func (s *storageState) additiveSeed(ctx context.Context, r *scenario.Reporter) e
 		return err
 	}
 	s.paths, s.root = tree.paths(), tree.Root
-	r.Note("A seed is additive: it applies the %q state's rows over what is there and leaves alone what it already finds, so on a database the state seeded it reports zero rows written. A logo that an interrupted run deleted is written again, so the steps below always start from acme's seeded logo and document tree.", SeedState)
-	body := database.State{State: SeedState}
-	r.Request(http.MethodPost, seedRoute, nil, body)
-	res, err := s.client.Post(ctx, seedRoute, body)
+	r.Note("A seed is additive: it applies the %q state's rows over what is there and leaves alone what it already finds, so on a database the state seeded it reports zero rows written. A logo that an interrupted run deleted is written again, so the steps below always start from acme's seeded logo and document tree.", seedState)
+	body := database.State{State: seedState}
+	res, err := call(ctx, r, styleOf(s.n, inv), s.client, http.MethodPost, seedRoute, nil, body)
 	if err != nil {
 		return err
 	}
-	r.Response(res)
 	if err := res.Expect(http.StatusOK); err != nil {
 		return err
 	}
@@ -305,7 +314,7 @@ func (s *storageState) additiveSeed(ctx context.Context, r *scenario.Reporter) e
 // lookup finds the organization at orgPath without narrating it: the ids
 // are bookkeeping for the steps that follow, not something this scenario
 // demonstrates.
-func (s *storageState) lookup(ctx context.Context, orgPath string) (organization.Organization, error) {
+func (s *storage) lookup(ctx context.Context, orgPath string) (organization.Organization, error) {
 	res, err := s.client.Get(ctx, organization.Organizations+"/lookup?"+httpx.RawQuery([2]string{"path", orgPath}))
 	if err != nil {
 		return organization.Organization{}, err
@@ -321,18 +330,16 @@ func (s *storageState) lookup(ctx context.Context, orgPath string) (organization
 }
 
 // logoPath is acme's logo route.
-func (s *storageState) logoPath() string {
+func (s *storage) logoPath() string {
 	return organization.Organizations + "/" + s.acme.ID + "/logo"
 }
 
-func (s *storageState) readLogo(ctx context.Context, r *scenario.Reporter) error {
+func (s *storage) readLogo(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
 	r.Note("The logo is served by proxy from the object store. Its ETag is the store's tag for the bytes, and Last-Modified the file's last change; the bytes themselves are summarized below rather than printed.")
-	r.Request(http.MethodGet, s.logoPath(), nil, nil)
-	res, err := s.client.Get(ctx, s.logoPath())
+	res, err := s.getLogo(ctx, r, styleOf(s.n, inv))
 	if err != nil {
 		return err
 	}
-	r.Response(summarized(res))
 	if err := res.Expect(http.StatusOK); err != nil {
 		return err
 	}
@@ -343,36 +350,39 @@ func (s *storageState) readLogo(ctx context.Context, r *scenario.Reporter) error
 	return nil
 }
 
-func (s *storageState) revalidateLogo(ctx context.Context, r *scenario.Reporter) error {
+func (s *storage) revalidateLogo(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
 	r.Note("A conditional read names the ETag it holds in If-None-Match. The bytes have not changed, so the answer is 304 Not Modified with no body, and the object is never opened.")
 	headers := []httpx.Header{{Name: "If-None-Match", Value: s.etag}}
-	r.Request(http.MethodGet, s.logoPath(), headers, nil)
-	res, err := s.client.Get(ctx, s.logoPath(), headers...)
+	res, err := call(ctx, r, styleOf(s.n, inv), s.client, http.MethodGet, s.logoPath(), headers, nil)
 	if err != nil {
 		return err
 	}
-	r.Response(res)
 	return res.Expect(http.StatusNotModified)
 }
 
-func (s *storageState) replaceLogo(ctx context.Context, r *scenario.Reporter) error {
-	fsys, err := repo.FS(ctx)
+func (s *storage) replaceLogo(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
+	fsys, err := repo.FS(inv.Get(s.n.Repo))
 	if err != nil {
 		return err
 	}
-	file := path.Join(FixturesDir, replacementFixture)
+	file := path.Join(fixturesDir, replacementFixture)
 	png, err := fs.ReadFile(fsys, file)
 	if err != nil {
 		return err
 	}
 	r.Note("The logo is a singleton addressed by its organization, so it takes no version: a PUT replaces whatever is active, the last write winning. It answers 201 with the new file's id and no version, since every PUT creates a new file, and the replaced file is retired. This uploads another organization's seeded logo, %s, as acme's; the read after it shows the new bytes under a new ETag.", replacementFixture)
+	st := styleOf(s.n, inv)
 	headers := []httpx.Header{{Name: "Content-Type", Value: "image/png"}}
-	r.Request(http.MethodPut, s.logoPath(), headers, fmt.Sprintf("(%d bytes of %s)", len(png), file))
+	if err := showApart(r, "", output.Request(st, http.MethodPut, s.logoPath(), headers, fmt.Sprintf("(%d bytes of %s)", len(png), file))); err != nil {
+		return err
+	}
 	res, err := s.client.Put(ctx, s.logoPath(), png, headers...)
 	if err != nil {
 		return err
 	}
-	r.Response(res)
+	if err := showApart(r, "", output.Response(st, res)); err != nil {
+		return err
+	}
 	if err := res.Expect(http.StatusCreated); err != nil {
 		return err
 	}
@@ -386,12 +396,10 @@ func (s *storageState) replaceLogo(ctx context.Context, r *scenario.Reporter) er
 	if _, ok := created["version"]; ok {
 		return fmt.Errorf("the logo PUT names a version, which a logo does not take; body: %s", res.Body)
 	}
-	r.Request(http.MethodGet, s.logoPath(), nil, nil)
-	res, err = s.client.Get(ctx, s.logoPath())
+	res, err = s.getLogo(ctx, r, st)
 	if err != nil {
 		return err
 	}
-	r.Response(summarized(res))
 	if err := res.Expect(http.StatusOK); err != nil {
 		return err
 	}
@@ -405,48 +413,59 @@ func (s *storageState) replaceLogo(ctx context.Context, r *scenario.Reporter) er
 	return nil
 }
 
-func (s *storageState) deleteLogo(ctx context.Context, r *scenario.Reporter) error {
+func (s *storage) deleteLogo(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
 	r.Note("A DELETE retires whatever logo is active, again with no version, and the read after it is 404. The seeded logo comes back with the reset at the end of this run, and the additive seed at the start of the next run writes it again if this one stops before then.")
-	r.Request(http.MethodDelete, s.logoPath(), nil, nil)
-	res, err := s.client.Delete(ctx, s.logoPath())
+	st := styleOf(s.n, inv)
+	res, err := call(ctx, r, st, s.client, http.MethodDelete, s.logoPath(), nil, nil)
 	if err != nil {
 		return err
 	}
-	r.Response(res)
 	if err := res.Expect(http.StatusNoContent); err != nil {
 		return err
 	}
-	r.Request(http.MethodGet, s.logoPath(), nil, nil)
-	res, err = s.client.Get(ctx, s.logoPath())
+	res, err = call(ctx, r, st, s.client, http.MethodGet, s.logoPath(), nil, nil)
 	if err != nil {
 		return err
 	}
-	r.Response(res)
 	_, err = res.Problem(http.StatusNotFound)
 	return err
 }
 
+// getLogo sends a narrated GET of acme's logo, its response shown
+// summarized: the logo's bytes are a PNG, which would print as noise.
+func (s *storage) getLogo(ctx context.Context, r *scenario.Reporter, st style.Style) (*httpx.Response, error) {
+	if err := showApart(r, "", output.Request(st, http.MethodGet, s.logoPath(), nil, nil)); err != nil {
+		return nil, err
+	}
+	res, err := s.client.Get(ctx, s.logoPath())
+	if err != nil {
+		return nil, err
+	}
+	return res, showApart(r, "", output.Response(st, summarized(res)))
+}
+
 // documents is an organization's document route.
-func (s *storageState) documents(org string) string {
+func (s *storage) documents(org string) string {
 	return document.Documents + "/" + org
 }
 
 // directory is one of an organization's directories, by id or the root
 // alias.
-func (s *storageState) directory(org, id string) string {
+func (s *storage) directory(org, id string) string {
 	return s.documents(org) + "/directories/" + id
 }
 
-func (s *storageState) documentTree(ctx context.Context, r *scenario.Reporter) error {
+func (s *storage) documentTree(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
+	st := styleOf(s.n, inv)
 	r.Note("Each organization's documents hang from its own root, one directory the %q alias names, with every entry beneath it the organization's by containment. A directory's contents read as two listings, its child directories and its files, each paged, filtered, and sorted. Below are the root's two listings, then the whole tree the seed wrote, walked a listing at a time, every entry at the fixed id the seed file gives it.", document.RootAlias)
 	var dirs document.DirectoryPage
 	listDirs := s.directory(s.acme.ID, document.RootAlias) + "/directories?" + httpx.RawQuery([2]string{"sort", "name"})
-	if err := s.get(ctx, r, listDirs, &dirs); err != nil {
+	if err := s.get(ctx, r, st, listDirs, &dirs); err != nil {
 		return err
 	}
 	var files document.FilePage
 	listFiles := s.directory(s.acme.ID, document.RootAlias) + "/files?" + httpx.RawQuery([2]string{"sort", "name"})
-	if err := s.get(ctx, r, listFiles, &files); err != nil {
+	if err := s.get(ctx, r, st, listFiles, &files); err != nil {
 		return err
 	}
 	found := make(map[string]string)
@@ -478,7 +497,9 @@ func (s *storageState) documentTree(ctx context.Context, r *scenario.Reporter) e
 	if err := walk("/", dirs.Items, files.Items); err != nil {
 		return err
 	}
-	r.Table("acme's document tree", rows)
+	if err := show(r, "acme's document tree", output.Table(st, rows)); err != nil {
+		return err
+	}
 	for p, id := range s.paths {
 		if found[p] != id {
 			return fmt.Errorf("the tree has %s at id %q, want the seeded id %s", p, found[p], id)
@@ -493,13 +514,11 @@ func (s *storageState) documentTree(ctx context.Context, r *scenario.Reporter) e
 }
 
 // get sends a narrated GET of p, expects 200, and decodes the body into v.
-func (s *storageState) get(ctx context.Context, r *scenario.Reporter, p string, v any) error {
-	r.Request(http.MethodGet, p, nil, nil)
-	res, err := s.client.Get(ctx, p)
+func (s *storage) get(ctx context.Context, r *scenario.Reporter, st style.Style, p string, v any) error {
+	res, err := call(ctx, r, st, s.client, http.MethodGet, p, nil, nil)
 	if err != nil {
 		return err
 	}
-	r.Response(res)
 	if err := res.Expect(http.StatusOK); err != nil {
 		return err
 	}
@@ -508,7 +527,7 @@ func (s *storageState) get(ctx context.Context, r *scenario.Reporter, p string, 
 
 // getQuiet is get without the narration, for the reads a step makes to
 // build what it prints rather than to show.
-func (s *storageState) getQuiet(ctx context.Context, p string, v any) error {
+func (s *storage) getQuiet(ctx context.Context, p string, v any) error {
 	res, err := s.client.Get(ctx, p)
 	if err != nil {
 		return err
@@ -519,7 +538,8 @@ func (s *storageState) getQuiet(ctx context.Context, p string, v any) error {
 	return res.JSON(v)
 }
 
-func (s *storageState) cursorWalk(ctx context.Context, r *scenario.Reporter) error {
+func (s *storage) cursorWalk(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
+	st := styleOf(s.n, inv)
 	r.Note("A listing's envelope carries a next cursor while more rows follow. Sending cursor=<next> in place of page, with the same sort, continues after the last row the previous page showed, so a tree that changes between requests neither skips nor repeats an entry; a continued page carries no page number. This walks the root's child directories %d to a page until more is false.", cursorPageSize)
 	base := s.directory(s.acme.ID, document.RootAlias) + "/directories?"
 	var names []string
@@ -533,7 +553,7 @@ func (s *storageState) cursorWalk(ctx context.Context, r *scenario.Reporter) err
 			query = append(query, [2]string{"cursor", cursor})
 		}
 		var p document.DirectoryPage
-		if err := s.get(ctx, r, base+httpx.RawQuery(query...), &p); err != nil {
+		if err := s.get(ctx, r, st, base+httpx.RawQuery(query...), &p); err != nil {
 			return err
 		}
 		if total < 0 && p.Total != nil {
@@ -580,7 +600,7 @@ func inOrder(got, want []string) bool {
 }
 
 // seededID returns the fixed id of acme's seeded entry at p.
-func (s *storageState) seededID(p string) (string, error) {
+func (s *storage) seededID(p string) (string, error) {
 	id, ok := s.paths[p]
 	if !ok {
 		return "", fmt.Errorf("the seed has no entry at %s", p)
@@ -588,27 +608,27 @@ func (s *storageState) seededID(p string) (string, error) {
 	return id, nil
 }
 
-func (s *storageState) missingIfMatch(ctx context.Context, r *scenario.Reporter) error {
+func (s *storage) missingIfMatch(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
+	st := styleOf(s.n, inv)
 	id, err := s.seededID(guardedFilePath)
 	if err != nil {
 		return err
 	}
 	r.Note("A move or a delete acts on a row the client read, which another request may have changed since, so it carries the version it read as If-Match. This reads the seeded %s for its version, then deletes it with no If-Match: 428 Precondition Required, refused before anything is touched.", guardedFilePath[1:])
 	filePath := s.documents(s.acme.ID) + "/files/" + id
-	if err := s.get(ctx, r, filePath, &s.guarded); err != nil {
+	if err := s.get(ctx, r, st, filePath, &s.guarded); err != nil {
 		return err
 	}
-	r.Request(http.MethodDelete, filePath, nil, nil)
-	res, err := s.client.Delete(ctx, filePath)
+	res, err := call(ctx, r, st, s.client, http.MethodDelete, filePath, nil, nil)
 	if err != nil {
 		return err
 	}
-	r.Response(res)
 	_, err = res.Problem(http.StatusPreconditionRequired)
 	return err
 }
 
-func (s *storageState) staleIfMatch(ctx context.Context, r *scenario.Reporter) error {
+func (s *storage) staleIfMatch(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
+	st := styleOf(s.n, inv)
 	stale := s.guarded.Version - 1
 	if stale < 1 {
 		stale = s.guarded.Version + 1
@@ -616,27 +636,24 @@ func (s *storageState) staleIfMatch(ctx context.Context, r *scenario.Reporter) e
 	r.Note("The same delete with a well-formed If-Match naming version %d, not the %d the read showed, is 412 Precondition Failed: the guarded statement matches no row at that version, so the file stays.", stale, s.guarded.Version)
 	filePath := s.documents(s.acme.ID) + "/files/" + s.guarded.ID
 	headers := []httpx.Header{httpx.IfMatch(stale)}
-	r.Request(http.MethodDelete, filePath, headers, nil)
-	res, err := s.client.Delete(ctx, filePath, headers...)
+	res, err := call(ctx, r, st, s.client, http.MethodDelete, filePath, headers, nil)
 	if err != nil {
 		return err
 	}
-	r.Response(res)
 	_, err = res.Problem(http.StatusPreconditionFailed)
 	return err
 }
 
-func (s *storageState) takenName(ctx context.Context, r *scenario.Reporter) error {
+func (s *storage) takenName(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
+	st := styleOf(s.n, inv)
 	name := path.Base(takenDirPath)
 	r.Note("Names are unique within a directory. Creating a second %s directory under the root is a 409 Conflict whose detail is a fixed text naming the kind of conflict, %q, never the underlying error's own, which would name the library's operation, ids, and constraints.", name, detailNameTaken)
 	route := s.documents(s.acme.ID) + "/directories"
 	body := document.CreateDirectory{ParentID: document.RootAlias, Name: name}
-	r.Request(http.MethodPost, route, nil, body)
-	res, err := s.client.Post(ctx, route, body)
+	res, err := call(ctx, r, st, s.client, http.MethodPost, route, nil, body)
 	if err != nil {
 		return err
 	}
-	r.Response(res)
 	p, err := res.Problem(http.StatusConflict)
 	if err != nil {
 		return err
@@ -647,52 +664,50 @@ func (s *storageState) takenName(ctx context.Context, r *scenario.Reporter) erro
 	return nil
 }
 
-func (s *storageState) anotherOrganization(ctx context.Context, r *scenario.Reporter) error {
+func (s *storage) anotherOrganization(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
+	st := styleOf(s.n, inv)
 	id, err := s.seededID(takenDirPath + "/")
 	if err != nil {
 		return err
 	}
 	r.Note("Every route that takes an id checks its scope first: the id must lie within the addressed organization's root. acme's %s directory reads under acme, and the same id under finance is 404, indistinguishable from an id that does not exist, so no request reads, moves, or deletes across organizations.", path.Base(takenDirPath))
 	var d document.Directory
-	if err := s.get(ctx, r, s.directory(s.acme.ID, id), &d); err != nil {
+	if err := s.get(ctx, r, st, s.directory(s.acme.ID, id), &d); err != nil {
 		return err
 	}
 	other := s.directory(s.other.ID, id)
-	r.Request(http.MethodGet, other, nil, nil)
-	res, err := s.client.Get(ctx, other)
+	res, err := call(ctx, r, st, s.client, http.MethodGet, other, nil, nil)
 	if err != nil {
 		return err
 	}
-	r.Response(res)
 	_, err = res.Problem(http.StatusNotFound)
 	return err
 }
 
-func (s *storageState) createBranch(ctx context.Context, r *scenario.Reporter) error {
+func (s *storage) createBranch(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
+	st := styleOf(s.n, inv)
 	name := "storage-demo-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	r.Note("A small branch for the recursive delete to remove: a directory under the root named for this run, %s, so a second run never collides with the first, a subdirectory in it, and a file in that. The directory's read closes the step with its status, active, and the version the delete guards on.", name)
 	route := s.documents(s.acme.ID) + "/directories"
-	top, err := s.createDirectory(ctx, r, route, document.CreateDirectory{ParentID: document.RootAlias, Name: name})
+	top, err := s.createDirectory(ctx, r, st, route, document.CreateDirectory{ParentID: document.RootAlias, Name: name})
 	if err != nil {
 		return err
 	}
-	sub, err := s.createDirectory(ctx, r, route, document.CreateDirectory{ParentID: top.ID, Name: "drafts"})
+	sub, err := s.createDirectory(ctx, r, st, route, document.CreateDirectory{ParentID: top.ID, Name: "drafts"})
 	if err != nil {
 		return err
 	}
 	filePath := s.directory(s.acme.ID, sub.ID) + "/files?name=notes.txt"
 	headers := []httpx.Header{{Name: "Content-Type", Value: "text/plain; charset=utf-8"}}
 	content := "Draft notes, removed with their branch.\n"
-	r.Request(http.MethodPost, filePath, headers, content)
-	res, err := s.client.Post(ctx, filePath, content, headers...)
+	res, err := call(ctx, r, st, s.client, http.MethodPost, filePath, headers, content)
 	if err != nil {
 		return err
 	}
-	r.Response(res)
 	if err := res.Expect(http.StatusCreated); err != nil {
 		return err
 	}
-	if err := s.get(ctx, r, s.directory(s.acme.ID, top.ID), &s.branch); err != nil {
+	if err := s.get(ctx, r, st, s.directory(s.acme.ID, top.ID), &s.branch); err != nil {
 		return err
 	}
 	if s.branch.Status != document.DirectoryActive {
@@ -702,13 +717,11 @@ func (s *storageState) createBranch(ctx context.Context, r *scenario.Reporter) e
 }
 
 // createDirectory sends a narrated directory create and expects 201.
-func (s *storageState) createDirectory(ctx context.Context, r *scenario.Reporter, route string, body document.CreateDirectory) (document.Identity, error) {
-	r.Request(http.MethodPost, route, nil, body)
-	res, err := s.client.Post(ctx, route, body)
+func (s *storage) createDirectory(ctx context.Context, r *scenario.Reporter, st style.Style, route string, body document.CreateDirectory) (document.Identity, error) {
+	res, err := call(ctx, r, st, s.client, http.MethodPost, route, nil, body)
 	if err != nil {
 		return document.Identity{}, err
 	}
-	r.Response(res)
 	if err := res.Expect(http.StatusCreated); err != nil {
 		return document.Identity{}, err
 	}
@@ -719,16 +732,15 @@ func (s *storageState) createDirectory(ctx context.Context, r *scenario.Reporter
 	return id, nil
 }
 
-func (s *storageState) recursiveDelete(ctx context.Context, r *scenario.Reporter) error {
+func (s *storage) recursiveDelete(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
+	st := styleOf(s.n, inv)
 	r.Note("With recursive=true a directory delete takes the branch in two stages: one transaction marks the directory and everything beneath it deleting, and the request answers 202 Accepted with the directory's read as its Location; the sweep, nudged after the commit, then removes the rows and their objects. Until it finishes the directory reads deleting, and a listing within the branch is 404. The nudged sweep is quick, so the read may already find the branch gone.")
 	route := s.directory(s.acme.ID, s.branch.ID) + "?recursive=true"
 	headers := []httpx.Header{httpx.IfMatch(s.branch.Version)}
-	r.Request(http.MethodDelete, route, headers, nil)
-	res, err := s.client.Delete(ctx, route, headers...)
+	res, err := call(ctx, r, st, s.client, http.MethodDelete, route, headers, nil)
 	if err != nil {
 		return err
 	}
-	r.Response(res)
 	if err := res.Expect(http.StatusAccepted); err != nil {
 		return err
 	}
@@ -741,12 +753,10 @@ func (s *storageState) recursiveDelete(ctx context.Context, r *scenario.Reporter
 		return fmt.Errorf("location %q: %w", location, err)
 	}
 	s.location = u.RequestURI()
-	r.Request(http.MethodGet, s.location, nil, nil)
-	res, err = s.client.Get(ctx, s.location)
+	res, err = call(ctx, r, st, s.client, http.MethodGet, s.location, nil, nil)
 	if err != nil {
 		return err
 	}
-	r.Response(res)
 	switch res.Status {
 	case http.StatusOK:
 		var d document.Directory
@@ -762,42 +772,38 @@ func (s *storageState) recursiveDelete(ctx context.Context, r *scenario.Reporter
 		return res.Expect(http.StatusOK)
 	}
 	listing := s.location + "/directories"
-	r.Request(http.MethodGet, listing, nil, nil)
-	res, err = s.client.Get(ctx, listing)
+	res, err = call(ctx, r, st, s.client, http.MethodGet, listing, nil, nil)
 	if err != nil {
 		return err
 	}
-	r.Response(res)
 	_, err = res.Problem(http.StatusNotFound)
 	return err
 }
 
-func (s *storageState) sweep(ctx context.Context, r *scenario.Reporter) error {
+func (s *storage) sweep(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
+	st := styleOf(s.n, inv)
 	r.Note("This polls the Location, as dirs delete --wait does, until it answers 404: the sweep has removed the branch's rows and objects. It gives up after %s.", sweepLimit)
 	took, err := document.AwaitSweep(ctx, document.NewClient(s.client), s.location, sweepLimit)
 	if err != nil {
 		return err
 	}
-	r.Tick("the sweep removed the branch within %s", took.Round(time.Millisecond))
-	r.Request(http.MethodGet, s.location, nil, nil)
-	res, err := s.client.Get(ctx, s.location)
+	r.Note("The sweep removed the branch within %s.", took.Round(time.Millisecond))
+	res, err := call(ctx, r, st, s.client, http.MethodGet, s.location, nil, nil)
 	if err != nil {
 		return err
 	}
-	r.Response(res)
 	_, err = res.Problem(http.StatusNotFound)
 	return err
 }
 
-func (s *storageState) reset(ctx context.Context, r *scenario.Reporter) error {
-	r.Note("A reset is what actually clears: it reverts every migration set, reapplies them, and seeds the %q state, answering with the schema status and what it seeded. The counts are the seed file's: its organizations, their logos, and acme's document entries, directories and files.", SeedState)
-	body := database.Reset{State: SeedState, Confirm: true}
-	r.Request(http.MethodPost, stateRoute, nil, body)
-	res, err := s.client.Post(ctx, stateRoute, body)
+func (s *storage) reset(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
+	st := styleOf(s.n, inv)
+	r.Note("A reset is what actually clears: it reverts every migration set, reapplies them, and seeds the %q state, answering with the schema status and what it seeded. The counts are the seed file's: its organizations, their logos, and acme's document entries, directories and files.", seedState)
+	body := database.Reset{State: seedState, Confirm: true}
+	res, err := call(ctx, r, st, s.client, http.MethodPost, stateRoute, nil, body)
 	if err != nil {
 		return err
 	}
-	r.Response(res)
 	if err := res.Expect(http.StatusOK); err != nil {
 		return err
 	}
@@ -807,11 +813,13 @@ func (s *storageState) reset(ctx context.Context, r *scenario.Reporter) error {
 	if err := res.JSON(&tr); err != nil {
 		return err
 	}
-	r.Table("Seeded", [][2]string{
+	if err := show(r, "Seeded", output.Table(st, [][2]string{
 		{"organizations", strconv.Itoa(tr.Seeded.Organizations)},
 		{"logos", strconv.Itoa(tr.Seeded.Logos)},
 		{"documents", strconv.Itoa(tr.Seeded.Documents)},
-	})
+	})); err != nil {
+		return err
+	}
 	if want := s.seed.seedCounts(); tr.Seeded != want {
 		return fmt.Errorf("the reset seeded %+v, want the seed file's %+v", tr.Seeded, want)
 	}

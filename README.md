@@ -371,9 +371,9 @@ mise. `serve`'s full command also needs a shell that understands `/dev/tcp` (bas
 | `mise run stack:down` | `db:down` and `otel:down` | Stop the local Postgres and Azurite and the observability profile (keep data) |
 | `mise run stack:reset` | `db:reset` and `otel:reset` | Stop the local Postgres and Azurite and the observability profile and drop their data |
 | `mise run db:state <state>` | `curl -d '{"state":"<state>","confirm":true}' localhost:8080/admin/database/state` | Reset the running service's database to a named state |
-| `mise run slab -- list` | `cd tools/slab && go run ./cmd/slab` | Run the narrated demo scenarios — see [`tools/slab/README.md`](tools/slab/README.md) |
+| `mise run slab -- scenario <name>` | `cd tools/slab && go run ./cmd/slab` | Run a narrated scenario (`mise run slab -- scenario` lists them) — see [`tools/slab/README.md`](tools/slab/README.md) |
 
-`mise run slab -- demo storage` narrates the storage end to end against the running service: the
+`mise run slab -- scenario storage` narrates the storage end to end against the running service: the
 two migration sets, the seeded logos and document tree, the validators and refusals, and a
 recursive delete waited out through the sweep.
 

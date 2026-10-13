@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/standards-lab/go-core/reactor"
 	godb "github.com/standards-lab/go-database"
 	"github.com/standards-lab/go-database/admin"
 	"github.com/standards-lab/go-web-sdk"
@@ -24,7 +25,6 @@ import (
 
 	"github.com/standards-lab/go-web-service/admin/database"
 	"github.com/standards-lab/go-web-service/data"
-	"github.com/standards-lab/go-web-service/sdk"
 )
 
 // dialect is the scripted driver's dialect with the server-version
@@ -43,7 +43,7 @@ func (dialect) ServerVersion() string { return "SELECT version()" }
 // is an open one no sweep holds.
 func module(t *testing.T, seed string, responses ...sqltest.Response) (http.Handler, *sqltest.Recorder) {
 	t.Helper()
-	return gatedModule(t, new(sdk.Gate), seed, responses...)
+	return gatedModule(t, new(reactor.Gate), seed, responses...)
 }
 
 // gatedModule is module over the given schema gate, which a test holds
@@ -304,7 +304,7 @@ func sendWithin(t *testing.T, h http.Handler, d time.Duration, path, body string
 // the reset runs, here into a scripted failure, and releases the gate in
 // turn.
 func TestState_WaitsForTheSweepPassInFlight(t *testing.T) {
-	gate := new(sdk.Gate)
+	gate := new(reactor.Gate)
 	pass, err := gate.Shared(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -348,7 +348,7 @@ func TestState_WaitsForTheSweepPassInFlight(t *testing.T) {
 // it, each waits until its request gives up, having run nothing. verify,
 // force, and seed hold nothing, so each answers under the pass.
 func TestVerbs_ChangingTheSchemaHoldTheGate(t *testing.T) {
-	gate := new(sdk.Gate)
+	gate := new(reactor.Gate)
 	pass, err := gate.Shared(context.Background())
 	if err != nil {
 		t.Fatal(err)

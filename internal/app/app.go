@@ -9,6 +9,7 @@ import (
 	"github.com/standards-lab/go-core/graph"
 	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-core/logging"
+	"github.com/standards-lab/go-core/reactor"
 	"github.com/standards-lab/go-database"
 	"github.com/standards-lab/go-database/admin"
 	"github.com/standards-lab/go-storage"
@@ -18,7 +19,6 @@ import (
 	"github.com/standards-lab/go-web-service/domain/document"
 	"github.com/standards-lab/go-web-service/domain/organization"
 	"github.com/standards-lab/go-web-service/internal/config"
-	"github.com/standards-lab/go-web-service/sdk"
 )
 
 // App is the application layer: the dependency graph that describes the
@@ -52,7 +52,7 @@ type Nodes struct {
 	Telemetry *graph.Node[*Telemetry] // "telemetry"
 
 	// Admin (admin.go).
-	Gate   *graph.Node[*sdk.Gate]      // "gate"
+	Gate   *graph.Node[*reactor.Gate]  // "gate"
 	Schema *graph.Node[*admin.Service] // "schema"
 
 	// Domain (domain.go).
@@ -60,8 +60,8 @@ type Nodes struct {
 	Document     *graph.Node[*document.Service]     // "document"
 
 	// Reactors (reactors.go).
-	Wake    *graph.Node[*Wake]                   // "wake"
-	Sweeper *graph.Node[*sdk.Reactor[time.Time]] // "sweeper"
+	Wake    *graph.Node[*Wake]                       // "wake"
+	Sweeper *graph.Node[*reactor.Reactor[time.Time]] // "sweeper"
 
 	// The request edge (server.go).
 	Readiness *graph.Node[*lifecycle.Readiness] // "readiness"

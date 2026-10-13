@@ -10,7 +10,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	libconfig "github.com/standards-lab/go-core/config"
 	"github.com/standards-lab/go-core/graph"
 	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-web-sdk"
@@ -226,6 +228,52 @@ func TestGraph_SchemaBetweenConnectionsAndSweeper(t *testing.T) {
 	}
 	if sweeper <= schema {
 		t.Errorf("sweeper in layer %d, schema in layer %d, want the sweeper above", sweeper, schema)
+	}
+}
+
+// The sweeper cancels a pass still running half the shutdown timeout into
+// its drain, go-core's CancelWithin rule, and its drain reports the period:
+// under the 10s default, "handlers cancelled after 5s". A shorter timeout
+// keeps the test fast. The pass in flight is one waiting on the gate, which
+// the test holds exclusively, as a schema-changing admin verb would, so no
+// live engine is needed.
+func TestGraph_SweeperCancelsWithinTheShutdownTimeout(t *testing.T) {
+	cfg := configtest.Config(t)
+	cfg.ShutdownTimeout = libconfig.Duration(200 * time.Millisecond)
+	a := app.New(cfg, io.Discard)
+	n := a.Nodes()
+	sys, err := a.Graph().Build(n.Sweeper)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	release, err := sys.Get(n.Gate).Exclusive(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	sweeper := sys.Get(n.Sweeper)
+	if err := sweeper.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// The wake's construction nudge is pending when the source starts
+	// receiving, so the pass begins at once and waits on the gate; the
+	// pause lets it reach the wait before the drain stops the source.
+	deadline := time.Now().Add(5 * time.Second)
+	for !sweeper.Ready() {
+		if time.Now().After(deadline) {
+			t.Fatal("the sweeper never became ready")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(20 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err = sweeper.Shutdown(ctx)
+	if err == nil || !strings.Contains(err.Error(), "handlers cancelled after 100ms") {
+		t.Errorf("Shutdown = %v, want the pass cancelled after 100ms, half the shutdown timeout", err)
 	}
 }
 

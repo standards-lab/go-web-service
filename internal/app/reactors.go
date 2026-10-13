@@ -5,8 +5,7 @@ import (
 
 	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/go-core/graph"
-
-	"github.com/standards-lab/go-web-service/sdk"
+	"github.com/standards-lab/go-core/reactor"
 )
 
 // defineReactors defines the reactors on g into n: the entry points that
@@ -28,7 +27,7 @@ func defineReactors(g *graph.Graph, n *Nodes) {
 // from any node value's Ready, and the source's own readiness is the
 // sweeper's to report, so the probe gains no "wake" check.
 type Wake struct {
-	source *sdk.Waker
+	source *reactor.Waker
 }
 
 // Nudge asks the sweeper for a pass as soon as it is free.
@@ -42,7 +41,7 @@ func (w *Wake) Nudge() { w.source.Nudge() }
 // than an interval later.
 func newWake(n *Nodes) func(*graph.Scope) (*Wake, error) {
 	return func(s *graph.Scope) (*Wake, error) {
-		w := &Wake{source: sdk.Wake(s.Use(n.Config).Sweep.Interval.Duration())}
+		w := &Wake{source: reactor.Wake(s.Use(n.Config).Sweep.Interval.Duration())}
 		w.Nudge()
 		return w, nil
 	}
@@ -54,22 +53,18 @@ func newWake(n *Nodes) func(*graph.Scope) (*Wake, error) {
 // drains it, reports it, and ends the run on its failure with no
 // registration here. It orders itself after the schema, so it starts once
 // every table it touches is verified, and stops before the schema's layer
-// beneath it.
-//
-// Its Grace is half the shutdown timeout: the drain stops the server first
-// under the one timeout, so the server keeps its share, and a reactor that
-// had to cancel its handlers says so before the coordinator's deadline
-// drops the report.
-func newSweeper(n *Nodes) func(*graph.Scope) (*sdk.Reactor[time.Time], error) {
-	return func(s *graph.Scope) (*sdk.Reactor[time.Time], error) {
+// beneath it. It cancels a pass still running within the shutdown timeout
+// the coordinator drains under.
+func newSweeper(n *Nodes) func(*graph.Scope) (*reactor.Reactor[time.Time], error) {
+	return func(s *graph.Scope) (*reactor.Reactor[time.Time], error) {
 		s.After(n.Schema)
 		cfg := s.Use(n.Config)
-		grace := sdk.Grace(cfg.ShutdownTimeout.Duration() / 2)
 
 		sweep := s.Use(n.Files).SweepWorker(s.Use(n.SQL).DB, s.Use(n.Gate), s.Use(n.Logger),
 			bfdata.Batch(*cfg.Sweep.Batch),
 			bfdata.StaleOlderThan(cfg.Sweep.StaleAge.Duration()),
 		)
-		return sdk.New(s.Use(n.Wake).source, sweep, grace), nil
+		return reactor.New(s.Use(n.Wake).source, sweep,
+			reactor.CancelWithin(cfg.ShutdownTimeout.Duration())), nil
 	}
 }

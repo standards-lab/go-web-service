@@ -119,11 +119,9 @@ construction sites.
 
 Library promotion candidates stage in the base `sdk` package: flat, a package meant to empty out
 accumulates no sub-packages, with each file named for the library its contents are bound for.
-Staging is cheap and deliberate; the `v1.data.evaluation` task rules on every tenant. The tenants
-are `Command`, the guarded-command read composing the SDK's `PathUUID` (promoted from here in
-go-web-sdk v0.13.0), `IfMatch`, and `DecodeJSON`, bound for go-web-sdk; and the reactor
-(`reactor.go`, with the `Every` and `Wake` sources) with the quiesce gate (`gate.go`, a
-context-aware readers-writer gate that prefers its exclusive side), both bound for go-core.
+Staging is cheap and deliberate; the `v1.data.evaluation` task rules on every tenant. The one
+tenant is `Command`, the guarded-command read composing the SDK's `PathUUID` (promoted from here
+in go-web-sdk v0.13.0), `IfMatch`, and `DecodeJSON`, bound for go-web-sdk.
 
 ## The operation-shape principle
 

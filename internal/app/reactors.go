@@ -23,9 +23,8 @@ func defineReactors(g *graph.Graph, n *Nodes) {
 // Wake is the wake node's value, where the sweep's two halves meet: the
 // document layer nudges it after each branch it marks, so it is that
 // layer's document.Sweeper, and the sweeper receives from its source. It
-// deliberately has no Ready method: the lifecycle infers a readiness check
-// from any node value's Ready, and the source's own readiness is the
-// sweeper's to report, so the probe gains no "wake" check.
+// has no Ready method: the source's own readiness is the sweeper's to
+// report, so the probe gains no "wake" check.
 type Wake struct {
 	source *reactor.Waker
 }

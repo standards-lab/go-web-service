@@ -127,11 +127,11 @@ func TestGraph_ServerAloneInTopLayer(t *testing.T) {
 	})
 }
 
-// The readiness checks the lifecycle infers from the node values are the
-// database, the object store, the schema, and the sweeper, in that order;
-// /readyz reports them after "lifecycle". No other value has a Ready: not
-// the sweep's wake, whose source's readiness the sweeper reports, and not
-// the readiness node itself.
+// The readiness checks the lifecycle infers from the node values, each one
+// that both starts and reports Ready, are the database, the object store,
+// the schema, and the sweeper, in that order; /readyz reports them after
+// "lifecycle". No other value is both: not the sweep's wake, whose source's
+// readiness the sweeper reports, and not the readiness node itself.
 func TestGraph_ReadinessChecks(t *testing.T) {
 	cfg := configtest.Config(t)
 	a := app.New(cfg, io.Discard)
@@ -278,8 +278,8 @@ func TestGraph_SweeperCancelsWithinTheShutdownTimeout(t *testing.T) {
 }
 
 // Each lifecycle participant is the value of one node only: the same value
-// in two nodes would start twice, stop twice, and, as a ReadinessChecker,
-// be reported twice. The admin storage routes read the storage node's
+// in two nodes would start twice, stop twice, and, as a ReadyStarter, be
+// reported twice. The admin storage routes read the storage node's
 // store rather than holding it as a node of their own.
 func TestGraph_EachParticipantInOneNode(t *testing.T) {
 	a := app.New(configtest.Config(t), io.Discard)

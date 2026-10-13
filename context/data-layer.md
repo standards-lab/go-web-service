@@ -71,9 +71,8 @@ surfaces, routes, constraint names, and enum vocabularies are settled per task.
 
 ## Evaluation evidence (`v1.data.evaluation`)
 
-The `v1.data.evaluation` task weighs this evidence. The `sdk` package stages `Command` for
-go-web-sdk, and the reactor and the quiesce gate for go-core; `Command`'s path parse is already
-promoted, as go-web-sdk v0.13.0's `PathUUID`. The `data` package holds the shared status matcher and
+The `v1.data.evaluation` task weighs this evidence. The `sdk` package stages only `Command`, for
+go-web-sdk; its path parse is already promoted, as go-web-sdk v0.13.0's `PathUUID`. The `data` package holds the shared status matcher and
 the directives lowering, which the template cannot scaffold while it stays engine-free. A generic
 seed helper is a fit question for the evaluation: it promotes to go-database when its shape is the
 library's own, not when a second service repeats the per-table loop. It also decides whether a

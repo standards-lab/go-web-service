@@ -143,6 +143,11 @@ accumulate under [Unreleased] until the first cut.
   partway unchanged and uncolored.
 - Pins: go-core v0.8.0 and go-web-sdk v0.15.2, in both modules; their own changes are in their
   CHANGELOGs.
+- The sweep runs on go-core's `reactor` package, pinned at go-core v0.9.0 in both modules: the
+  sweeper, its wake, and the sweep worker use `reactor.Reactor`, `reactor.Wake`, and
+  `reactor.Draining`, and the quiesce gate is `reactor.Gate`. The sweeper's cancel-after period
+  is `reactor.CancelWithin` of the shutdown timeout, half of it, as before. Grafana moves to
+  13.2.4.
 - Every time the API's JSON carries (an organization's, a directory's, and a file's
   `created_at` and `updated_at`) is in UTC, ending in `Z`, whatever zone the process runs in. It
   carried the host's offset before. The UTC guarantee comes from the libraries' releases, which
@@ -288,6 +293,8 @@ accumulate under [Unreleased] until the first cut.
 - The `internal/infrastructure`, `internal/domain`, and `internal/reactors` packages.
 - `sdk.IfMatch`, promoted to go-web-sdk v0.6.0 with the strict body decode, and `sdk.PathID`,
   promoted to go-web-sdk v0.13.0 as `PathUUID`.
+- The reactor and the quiesce gate `sdk` staged (`reactor.go` and `gate.go`), promoted to go-core
+  v0.9.0's `reactor` package.
 - `slab demo` and `slab list`, superseded by `slab scenario`, along with slab's own scenario
   runner and its `env` package; and the `--tempo`/`SLAB_TEMPO` setting, which nothing read.
 

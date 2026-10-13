@@ -137,8 +137,8 @@ in `internal/app` (`defineDomain` in `domain.go` for a domain service, for examp
 handle to `Nodes`. Its part in the lifecycle is inferred from its value's methods: a `Start` or
 `Shutdown` makes it a participant, a `Ready` on a value that also has `Start` adds its check to
 `/readyz` (a `Ready` alone adds none), and an `Err` channel has its runtime failure watched, so
-nothing registers it. Its place in the order follows from the nodes it uses. A reactor's node also joins `Nodes.Reactors`, which `Run` builds as roots and the
-server orders itself after.
+nothing registers it. Its place in the order follows from the nodes it uses. A reactor's node
+also joins `Nodes.Reactors`, which `Run` builds as roots and the server orders itself after.
 
 ## API
 

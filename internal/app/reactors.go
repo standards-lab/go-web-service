@@ -52,8 +52,9 @@ func newWake(n *Nodes) func(*graph.Scope) (*Wake, error) {
 // drains it, reports it, and ends the run on its failure with no
 // registration here. It orders itself after the schema, so it starts once
 // every table it touches is verified, and stops before the schema's layer
-// beneath it. It cancels a pass still running within the shutdown timeout
-// the coordinator drains under.
+// beneath it. Its reactor.CancelWithin option cancels a pass still running
+// at half the shutdown timeout, so the sweeper reports the cancellation
+// before the coordinator's deadline drops it.
 func newSweeper(n *Nodes) func(*graph.Scope) (*reactor.Reactor[time.Time], error) {
 	return func(s *graph.Scope) (*reactor.Reactor[time.Time], error) {
 		s.After(n.Schema)

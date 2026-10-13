@@ -41,7 +41,7 @@ that carries its direction:
 - **The management listener** — the admin mount on its own listener, a composition-root
   reshape here and in the template; the coordinator's admin-listener note explores it.
 - **Messaging and reactor services** — NATS through go-messaging, and the reactor layer it
-  makes real; the sweep already runs on go-core's reactor.
+  makes real; go-core's `reactor` package already runs the sweep.
 - **AI** — the go-ai capability demonstrated in a documented layer.
 - **Embedded client** — a web client embedded in and served by the service binary.
 - **Deployment** — deployment infrastructure in its own repository, targeting this service.

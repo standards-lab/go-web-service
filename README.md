@@ -21,6 +21,9 @@ this one.
   [go-storage](https://github.com/standards-lab/go-storage) and its `azureblob` provider, with
   [blobfs](https://github.com/standards-lab/blobfs) and its `postgres` engine keeping the file
   tree's rows in the same Postgres. Locally it runs Azurite from the compose file.
+- Messaging: NATS JetStream, through [go-messaging](https://github.com/standards-lab/go-messaging)
+  and its `nats` provider, with its `postgres` engine keeping the outbox and inbox in the same
+  Postgres. Locally it runs NATS from the compose file.
 - Observability: OpenTelemetry, reached through a `docker compose` profile (`mise run otel:up`)
   that runs the collector and a local Loki, Tempo, Mimir, and Grafana stack — see
   [`compose/README.md`](compose/README.md). The service exports traces and metrics over OTLP and
@@ -102,7 +105,7 @@ this step comes first:
 mise trust && mise install
 cp secrets.example.json secrets.json
 
-mise run db:up      # start the local Postgres and Azurite and wait for health
+mise run db:up      # start the local Postgres, Azurite, and NATS and wait for health
 mise run otel:up    # start the observability collector and stack
 mise run serve      # run the service
 ```
@@ -113,17 +116,18 @@ limitation.
 
 The service is one dependency graph, described in `internal/app`, and startup runs it in layer
 order. Telemetry starts first, so its providers are installed before anything they record. The
-database and the object store connect next, together in one layer. The schema starts after
-both: it applies any pending migration, checks every statement against the schema, and seeds the
-configured state (the `local` overlay names `default`). The [sweep](#sweep) starts after the
-schema, and the server starts last, alone in the top layer. The drain runs in reverse: the server
-drains first, so in-flight requests complete before what they run on closes, and telemetry
-flushes last. The service then logs `server ready` on `localhost:8080` (the `local` overlay binds
+database, the object store, and the NATS broker connect next, together in one layer. The schema
+starts after them: it applies any pending migration, checks every statement against the schema,
+and seeds the configured state (the `local` overlay names `default`). The [sweep](#sweep) and
+the messaging relay start after the schema, and the server starts last, alone in the top layer.
+The drain runs in reverse: the server drains first, so in-flight requests complete before what
+they run on closes; the relay then makes its last pass, publishing what those requests
+committed, before the broker and the database close; and telemetry flushes last. The service then logs `server ready` on `localhost:8080` (the `local` overlay binds
 loopback and runs debug logging). From a second shell:
 
 ```sh
 curl localhost:8080/healthz   # 200 {"status":"ok"}
-curl localhost:8080/readyz    # 200 {"status":"ready","checks":[...]}  — lifecycle, database, storage, schema, sweeper
+curl localhost:8080/readyz    # 200 {"status":"ready","checks":[...]}  — lifecycle, database, storage, broker, schema, sweeper, relay
 ```
 
 Ctrl-C drains in-flight requests and exits with `server stopped`. That serve, probe, and
@@ -138,7 +142,10 @@ handle to `Nodes`. Its part in the lifecycle is inferred from its value's method
 `Shutdown` makes it a participant, a `Ready` on a value that also has `Start` adds its check to
 `/readyz` (a `Ready` alone adds none), and an `Err` channel has its runtime failure watched, so
 nothing registers it. Its place in the order follows from the nodes it uses. A reactor's node
-also joins `Nodes.Reactors`, which `Run` builds as roots and the server orders itself after.
+also joins `Nodes.Reactors`, which `Run` builds as roots and the server orders itself after. A
+node that commits events outside a request, such as a consuming reactor, Uses the relay's node,
+so it drains before the relay's last pass; a request-driven producer, as every domain service
+is, needs no edge, since the server drains first.
 
 ## API
 
@@ -272,8 +279,9 @@ library function startup runs; the schema verbs answer with the resulting schema
 | `POST` | `/admin/database/seed` | Apply the configured set, or `{"state": "…"}`, over what is there (403 with no set) |
 | `POST` | `/admin/database/state` | Reset to `{"state": "…", "confirm": true}`: revert every set, apply them, seed the state (the configured set when `state` is empty; 403 with none) |
 
-The schema is two migration sets, run in declaration order: `blobfs`, blobfs's own tables, and
-`app`, the service's (`data/migrations`), whose migrations reference the tables beneath. The
+The schema is three migration sets, run in declaration order: `messaging`, go-messaging's outbox
+and inbox; `blobfs`, blobfs's own tables; and `app`, the service's (`data/migrations`), whose
+migrations reference the tables beneath. The
 status reports each set; `up` and `verify` act on every set, and `down`, `steps`, and `force`
 name the set they act on, refused with 400 when it is missing or undeclared.
 
@@ -289,14 +297,15 @@ the run stored under the same keys. The rows commit in one transaction first, an
 written after it commits, since a file's object is put outside any transaction.
 
 The state operation is destructive, in the class of `down` and `force`, and
-`mise run db:state <state>` runs it against the local service. A reset reverts blobfs's tables
-but leaves the objects in the container, which is accepted in development: a seeded file carries
+`mise run db:state <state>` runs it against the local service. A reset reverts the messaging
+set too, dropping any event still pending in the outbox. It reverts blobfs's tables but leaves
+the objects in the container, which is accepted in development: a seeded file carries
 a fixed id (the `5eed…` ids in the state file), so the reseed writes it again under the same key
 and replaces the object left there.
 
 The verbs that change the schema (`up`, `down`, `steps`, and the state reset) share a quiesce
-gate with the sweep: a verb waits for a sweep pass in flight to finish, and the sweep starts no
-pass until the verb is done. Without the gate, a pass and a reset would deadlock on the
+gate with the sweep and the relay: a verb waits for a sweep pass or a relayed row in flight to
+finish, and neither starts another until the verb is done. Without the gate, a pass and a reset would deadlock on the
 document root's owner table. The gate is per process: with several replicas, another replica's
 sweep can still meet a reset, which is a development operation.
 
@@ -361,15 +370,15 @@ mise. `serve`'s full command also needs a shell that understands `/dev/tcp` (bas
 | `mise run fmt` | `gofmt -w .` | Format the source |
 | `mise run tidy` | `go mod tidy` | Reconcile module requirements |
 | `mise run lint` | `golangci-lint run --build-tags integration ./... && go tool sqlint`, then `golangci-lint run ./...` in `tools/slab` | Lint the Go and the SQL, slab included |
-| `mise run db:up` | `docker compose up -d --wait --build` | Start the local Postgres and Azurite |
-| `mise run db:down` | `docker compose down` | Stop the local Postgres and Azurite (keep data) |
-| `mise run db:reset` | `docker compose down -v` | Stop the local Postgres and Azurite and drop their data |
+| `mise run db:up` | `docker compose up -d --wait --build` | Start the local Postgres, Azurite, and NATS |
+| `mise run db:down` | `docker compose down` | Stop the local Postgres, Azurite, and NATS (keep data) |
+| `mise run db:reset` | `docker compose down -v` | Stop the local Postgres, Azurite, and NATS and drop their data |
 | `mise run otel:up` | `docker compose ... up -d --wait --build`, then polls Mimir until it can query | Start the collector, Loki, Tempo, Mimir, and Grafana |
 | `mise run otel:down` | `docker compose --profile observability down …` | Stop the observability profile (keep data) |
 | `mise run otel:reset` | `docker compose --profile observability down -v …` | Stop the observability profile and drop its data |
-| `mise run stack:up` | `db:up` and `otel:up` | Start the local Postgres and Azurite and the observability profile |
-| `mise run stack:down` | `db:down` and `otel:down` | Stop the local Postgres and Azurite and the observability profile (keep data) |
-| `mise run stack:reset` | `db:reset` and `otel:reset` | Stop the local Postgres and Azurite and the observability profile and drop their data |
+| `mise run stack:up` | `db:up` and `otel:up` | Start the local Postgres, Azurite, and NATS and the observability profile |
+| `mise run stack:down` | `db:down` and `otel:down` | Stop the local Postgres, Azurite, and NATS and the observability profile (keep data) |
+| `mise run stack:reset` | `db:reset` and `otel:reset` | Stop the local Postgres, Azurite, and NATS and the observability profile and drop their data |
 | `mise run db:state <state>` | `curl -d '{"state":"<state>","confirm":true}' localhost:8080/admin/database/state` | Reset the running service's database to a named state |
 | `mise run slab -- scenario <name>` | `cd tools/slab && go run ./cmd/slab` | Run a narrated scenario (`mise run slab -- scenario` lists them) — see [`tools/slab/README.md`](tools/slab/README.md) |
 
@@ -398,12 +407,12 @@ service's own record of it. The service adds only its configuration and state co
 the admin mount; nothing in the service exists for the tests' sake.
 
 The task runs the same `compose.yml` as its own project (`go-web-service-integration`, Postgres
-on 5433 and Azurite on 10001), so the development stack and its data are never touched, and
+on 5433, Azurite on 10001, and NATS on 4223), so the development stack and its data are never touched, and
 tears the stack down with its volumes when the suite ends, so every run starts from an empty
 database and container. A failing run prints the stack's logs before the teardown; CI's
 `integration` job runs the task as it is. The harness honors `APP_DATABASE_HOST`,
-`APP_DATABASE_PORT`, `APP_DATABASE_PASSWORD`, `APP_STORAGE_ENDPOINT`, `APP_STORAGE_ACCOUNT`, and
-`APP_STORAGE_KEY` for a stack elsewhere.
+`APP_DATABASE_PORT`, `APP_DATABASE_PASSWORD`, `APP_STORAGE_ENDPOINT`, `APP_STORAGE_ACCOUNT`,
+`APP_STORAGE_KEY`, and `APP_NATS_URL` for a stack elsewhere.
 
 ## Configuration
 
@@ -418,7 +427,8 @@ Configuration layers in a fixed precedence, later sources winning:
 4. `APP_*` environment variables, the final override: the log, server, and shutdown variables,
    the `APP_DATABASE_*` family (`APP_DATABASE_HOST`, `APP_DATABASE_NAME`,
    `APP_DATABASE_USER`, `APP_DATABASE_PASSWORD`, `APP_DATABASE_PORT`, and the pool settings),
-   the `APP_STORAGE_*` family (below), `APP_OBSERVABILITY_ENDPOINT` and
+   the `APP_STORAGE_*` family (below), the `APP_MESSAGING_*` and `APP_NATS_*` families
+   (below), `APP_OBSERVABILITY_ENDPOINT` and
    `APP_OBSERVABILITY_SAMPLE_RATIO`, the rate limit (`APP_RATE_LIMIT_REQUESTS`,
    `APP_RATE_LIMIT_WINDOW`), the reads paging policy
    (`APP_READS_DEFAULT_SIZE`, `APP_READS_MAX_SIZE`), the admin seed set (`APP_ADMIN_SEED`, a
@@ -468,10 +478,22 @@ The `sweep` block schedules the [sweep](#sweep): `interval` (`APP_SWEEP_INTERVAL
 backstop wake; `batch` (`APP_SWEEP_BATCH`, 100), the records one pass handles; and `stale_age`
 (`APP_SWEEP_STALE_AGE`, `1h`), the age past which a pass reclaims an unfinished upload or delete.
 
-The compose file honors `POSTGRES_PORT` for the Postgres container's published port and
-`AZURITE_BLOB_PORT` for Azurite's, but the service does not read them: moving a port off its
-default splits the two until the matching `APP_DATABASE_PORT` or `APP_STORAGE_ENDPOINT` variable
-follows. Postgres's user, password, and database (`app` each) are baked into
+The `messaging` block is go-messaging's: `source` (`APP_MESSAGING_SOURCE`, `web-service` in
+`config.json`, required), the CloudEvents source of every event the service emits;
+`relay_poll` (`APP_MESSAGING_RELAY_POLL`, `250ms`), the relay's wait between passes once the
+outbox is empty; and `relay_timeout` (`APP_MESSAGING_RELAY_TIMEOUT`, `10s`), the bound on one
+publish. The `nats` block is go-messaging's NATS provider's: `url` (`APP_NATS_URL`,
+`nats://127.0.0.1:4222` in `config.json`), `name` (`APP_NATS_NAME`, the connection's name),
+`stream` (`APP_NATS_STREAM`, `WEB_SERVICE`), `prefix` (`APP_NATS_PREFIX`, `web-service`, the
+namespace of the service's event types), `owner` (`APP_NATS_OWNER`, `true`: the service creates
+or updates its stream on start), and, on the owner only, `duplicates` (`APP_NATS_DUPLICATES`,
+the stream's deduplication window) and `max_age` (`APP_NATS_MAX_AGE`, its retention, 0 keeping
+every event). An invalid block fails startup, naming it.
+
+The compose file honors `POSTGRES_PORT` for the Postgres container's published port,
+`AZURITE_BLOB_PORT` for Azurite's, and `NATS_PORT` for NATS's, but the service does not read
+them: moving a port off its default splits the two until the matching `APP_DATABASE_PORT`,
+`APP_STORAGE_ENDPOINT`, or `APP_NATS_URL` variable follows. Postgres's user, password, and database (`app` each) are baked into
 `compose/postgres/Dockerfile`; they pair with `config.json` and `secrets.example.json`, so change
 both sides together.
 

@@ -28,6 +28,15 @@
       "try_timeout": "5s"
     }
   },
+  "messaging": {
+    "source": "web-service"
+  },
+  "nats": {
+    "url": "nats://127.0.0.1:4222",
+    "stream": "WEB_SERVICE",
+    "prefix": "web-service",
+    "owner": true
+  },
   "observability": {
     "endpoint": "127.0.0.1:4317"
   },

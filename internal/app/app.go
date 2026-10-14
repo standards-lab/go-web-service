@@ -6,12 +6,15 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/standards-lab/go-core/event"
 	"github.com/standards-lab/go-core/graph"
 	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-core/logging"
 	"github.com/standards-lab/go-core/reactor"
 	"github.com/standards-lab/go-database"
 	"github.com/standards-lab/go-database/admin"
+	"github.com/standards-lab/go-messaging"
+	"github.com/standards-lab/go-messaging/nats"
 	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-web-sdk"
 
@@ -45,6 +48,7 @@ type Nodes struct {
 	Logger   *graph.Node[*slog.Logger]   // "logger"
 	Database *graph.Node[*database.DB]   // "database"
 	Storage  *graph.Node[*storage.Store] // "storage"
+	Broker   *graph.Node[*nats.Broker]   // "broker"
 	SQL      *graph.Node[*data.Database] // "sql"
 	Files    *graph.Node[*data.Storage]  // "files"
 
@@ -60,8 +64,10 @@ type Nodes struct {
 	Document     *graph.Node[*document.Service]     // "document"
 
 	// Reactors (reactors.go).
-	Wake    *graph.Node[*Wake]                       // "wake"
-	Sweeper *graph.Node[*reactor.Reactor[time.Time]] // "sweeper"
+	Wake    *graph.Node[*Wake]                         // "wake"
+	Sweeper *graph.Node[*reactor.Reactor[time.Time]]   // "sweeper"
+	Runtime *graph.Node[*messaging.Runtime]            // "runtime"
+	Relay   *graph.Node[*reactor.Reactor[event.Event]] // "relay"
 
 	// The request edge (server.go).
 	Readiness *graph.Node[*lifecycle.Readiness] // "readiness"

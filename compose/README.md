@@ -9,7 +9,7 @@ Every service builds from its own `compose/<service>/Dockerfile`, whose `FROM` l
 service's one image pin. No `image:` line names an image, in compose or in CI, and
 `mise run currency` reads the `FROM` lines. The Dockerfile bakes in the service's configuration,
 environment, and command, so compose bind-mounts no configuration. Where the base image can run
-a probe (Postgres, Azurite, Grafana), a `HEALTHCHECK` in the Dockerfile defines readiness. The
+a probe (Postgres, Azurite, NATS, Grafana), a `HEALTHCHECK` in the Dockerfile defines readiness. The
 collector, Loki, Tempo, and Mimir images ship no shell, so their Dockerfiles have no
 `HEALTHCHECK`, and compose waits on them as running. Every `up` passes `--build`, so an edited
 Dockerfile or configuration file takes effect on the next start. These are development stacks:
@@ -34,6 +34,17 @@ account's published key, which is never a production credential. Azurite runs wi
 `--skipApiVersionCheck`, because the Azure SDK the service's provider pins sends a service
 version newer than the image accepts by default. The service creates its container on start.
 Data persists in the `go-web-service-azurite` volume.
+
+## NATS
+
+`compose/nats.yml` runs NATS 2 with JetStream (`compose/nats/`), the broker the service's
+messaging runtime publishes through (see [Stack](../README.md#stack)). Like Postgres it carries
+no profile, so `mise run db:up` starts it with the others and `db:down` and `db:reset` stop it.
+It listens on `127.0.0.1:4222` (`NATS_PORT` to change it), the URL `config.json`'s `nats` block
+names; the monitoring endpoint stays inside the container, where the health check waits for
+JetStream itself (`/healthz?js-enabled-only=true`), not merely the listener. The service owns
+its stream, `WEB_SERVICE`, and creates it on start. Data persists in the `go-web-service-nats`
+volume.
 
 ## The observability profile
 

@@ -29,7 +29,7 @@ type Storage struct {
 // records the store on db, whose session runs the store's rows, so
 // [Seeder.Verify] checks its statements. No I/O happens here.
 func NewStorage(db *Database, fs *bfdata.Store, objects *storage.Store) *Storage {
-	db.record(fs)
+	db.Record(fs)
 	return &Storage{FS: fs, Objects: &Objects{store: objects}}
 }
 

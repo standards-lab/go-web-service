@@ -7,6 +7,8 @@ import (
 	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-core/logging"
 	"github.com/standards-lab/go-database"
+	"github.com/standards-lab/go-messaging"
+	"github.com/standards-lab/go-messaging/nats"
 	"github.com/standards-lab/go-observability"
 	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-web-sdk"
@@ -18,7 +20,8 @@ import (
 const envPrefix = "app"
 
 // Config is the service's root configuration: the library capability blocks
-// (the object store among them) plus the service-owned reads policy, the
+// (the object store, the messaging runtime, and its NATS broker among them)
+// plus the service-owned reads policy, the
 // admin switches, and the sweep's schedule. It embeds the lifecycle
 // Coordinator's configuration by value and untagged, so its
 // shutdown_timeout is a top-level key and ShutdownTimeout a promoted field;
@@ -31,6 +34,8 @@ type Config struct {
 	Server        web.Config           `json:"server"`
 	Database      database.Config      `json:"database"`
 	Storage       storage.Config       `json:"storage"`
+	Messaging     messaging.Config     `json:"messaging"`
+	NATS          nats.Config          `json:"nats"`
 	Observability observability.Config `json:"observability"`
 	RateLimit     ratelimit.Config     `json:"rate_limit"`
 	Reads         ReadsConfig          `json:"reads"`
@@ -49,6 +54,8 @@ func (c *Config) Merge(src *Config) {
 	c.Server.Merge(&src.Server)
 	c.Database.Merge(&src.Database)
 	c.Storage.Merge(&src.Storage)
+	c.Messaging.Merge(&src.Messaging)
+	c.NATS.Merge(&src.NATS)
 	c.Observability.Merge(&src.Observability)
 	c.RateLimit.Merge(&src.RateLimit)
 	c.Reads.Merge(&src.Reads)
@@ -61,9 +68,10 @@ func (c *Config) Merge(src *Config) {
 // The lifecycle block's error returns as it is, unlabelled, since it names
 // its own key or variable: it applies the 10s default shutdown timeout,
 // reads <PREFIX>_SHUTDOWN_TIMEOUT, and rejects a non-positive timeout, on
-// which the lifecycle coordinator panics. An empty prefix composes no
-// variable name, so it disables every environment override — the hermetic
-// form tests use.
+// which the lifecycle coordinator panics. The nats block's error returns
+// unlabelled too, since go-messaging's provider labels its own ("nats:
+// config: ..."). An empty prefix composes no variable name, so it disables
+// every environment override — the hermetic form tests use.
 func (c *Config) Finalize(envPrefix string) error {
 	if err := c.Config.Finalize(envPrefix); err != nil {
 		return err
@@ -79,6 +87,12 @@ func (c *Config) Finalize(envPrefix string) error {
 	}
 	if err := c.Storage.Finalize(envPrefix); err != nil {
 		return fmt.Errorf("storage: %w", err)
+	}
+	if err := c.Messaging.Finalize(envPrefix); err != nil {
+		return fmt.Errorf("messaging: %w", err)
+	}
+	if err := c.NATS.Finalize(envPrefix); err != nil {
+		return err
 	}
 	if err := c.Observability.Finalize(envPrefix); err != nil {
 		return fmt.Errorf("observability: %w", err)

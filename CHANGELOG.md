@@ -9,6 +9,23 @@ accumulate under [Unreleased] until the first cut.
 
 ### Added
 
+- Messaging, with no event kind yet: go-messaging's runtime over its NATS JetStream broker and
+  its Postgres outbox and inbox. The `messaging` block (`APP_MESSAGING_*`: `source`,
+  `relay_poll`, `relay_timeout`) and the `nats` block (`APP_NATS_*`: `url`, `name`, `stream`,
+  `prefix`, `owner`, `duplicates`, `max_age`) configure it; `config.json` sets the source
+  `web-service`, the owned stream `WEB_SERVICE` under the prefix `web-service`, and a local NATS
+  URL, and an invalid block fails startup naming it. The messaging migration set (`messaging`)
+  runs first, beneath blobfs's and the service's own, its statements verified at startup with
+  the other stores', and the database admin's listings and state reset cover it. The broker
+  starts in the pool's layer and the relay, the reactor that publishes the outbox's committed
+  events, after the schema; `/readyz` lists the `broker` and `relay` checks. With NATS down the
+  service is unready and keeps running, ready again when NATS returns. The relay holds the
+  quiesce gate for each row, so a schema verb runs with it paused, and it drains after the
+  server, publishing in a last pass what was committed during the drain.
+- NATS 2.15 with JetStream in the compose file (`compose/nats/`, on 4222, `NATS_PORT` to move
+  it), started and stopped with the `db:` and `stack:` tasks; the integration task runs it on
+  4223 in its own project.
+
 - Object storage: the `storage` configuration block (`APP_STORAGE_*`, go-storage's), an Azure
   Blob Storage provider through `go-storage/azureblob`, Azurite in the compose file, and blobfs
   with `blobfs/postgres` for the file tree's rows, its migration set (`blobfs`) run beneath the
@@ -143,6 +160,8 @@ accumulate under [Unreleased] until the first cut.
   partway unchanged and uncolored.
 - Pins: go-core v0.10.0 and go-web-sdk v0.15.2, in both modules; their own changes are in their
   CHANGELOGs.
+- Pins: go-messaging v0.2.0, go-messaging/postgres v0.1.0, and go-messaging/nats v0.2.0, which
+  brings nats.go v1.54.0, in the base module.
 - The sweep runs on go-core's `reactor` package: the sweeper, its wake, and the sweep worker use
   `reactor.Reactor`, `reactor.Wake`, and `reactor.Draining`, and the quiesce gate is
   `reactor.Gate`. The sweeper's cancel-after period is `reactor.CancelWithin` of the shutdown

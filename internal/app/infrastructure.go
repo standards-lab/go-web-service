@@ -11,6 +11,7 @@ import (
 	"github.com/standards-lab/go-core/logging"
 	"github.com/standards-lab/go-database"
 	"github.com/standards-lab/go-database/postgres"
+	"github.com/standards-lab/go-messaging/nats"
 	"github.com/standards-lab/go-observability"
 	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-storage/azureblob"
@@ -28,18 +29,23 @@ import (
 // the provider's pool with its start, readiness, and shutdown, which the
 // schema node administers; the domains never see it. storage is the object
 // store itself, a lifecycle participant too, which the storage admin
-// domain administers. sql is the database as the domains see it: the
-// session over the same pool with the dialect, grouped with the pattern
-// catalog every statement compiles against. files is the object storage as
-// the domains see it: blobfs's store over that session, and the data
-// package's adapter over the object store its keys name. The database is
-// defined before the object store: the two share a layer, and the readiness
-// probe reports a layer's checks in definition order.
+// domain administers. broker is the NATS JetStream broker the messaging
+// runtime (reactors.go) publishes through, a lifecycle participant whose
+// readiness is its connection's. sql is the database as the domains see
+// it: the session over the same pool with the dialect, grouped with the
+// pattern catalog every statement compiles against. files is the object
+// storage as the domains see it: blobfs's store over that session, and the
+// data package's adapter over the object store its keys name. The
+// database, the object store, and the broker are defined in that order:
+// the three share a layer, and the readiness probe reports a layer's
+// checks in definition order.
 //
 // It constructs nothing, and no constructor opens a connection:
 // connectivity belongs to each participant's Start, so a failed Build leaks
 // none. This file is the one place a provider is named: the database's,
-// the object store's, and blobfs's engine.
+// the object store's, the broker's, and blobfs's engine. The schema
+// (admin.go) declares the engines' migration sets, and the runtime
+// (reactors.go) takes go-messaging's engine statements.
 func defineInfrastructure(g *graph.Graph, n *Nodes, cfg *config.Config, w io.Writer) {
 	n.Config = g.Define("config", func(*graph.Scope) (*config.Config, error) {
 		return cfg, nil
@@ -47,6 +53,7 @@ func defineInfrastructure(g *graph.Graph, n *Nodes, cfg *config.Config, w io.Wri
 	n.Logger = g.Define("logger", newLogger(n, w))
 	n.Database = g.Define("database", newDatabase(n))
 	n.Storage = g.Define("storage", newStorage(n))
+	n.Broker = g.Define("broker", newBroker(n))
 	n.SQL = g.Define("sql", newSQL(n))
 	n.Files = g.Define("files", newFiles(n))
 }
@@ -83,6 +90,18 @@ func newStorage(n *Nodes) func(*graph.Scope) (*storage.Store, error) {
 			return nil, err
 		}
 		return storage.New(client, cfg), nil
+	}
+}
+
+// newBroker constructs the NATS broker from the config node's nats block,
+// ordered after telemetry as the connections are. Its Start connects, and
+// provisions the stream the block's owner switch makes it own; a broker
+// whose server is down at startup fails startup, and one whose connection
+// drops later reconnects without limit, unready until it is back.
+func newBroker(n *Nodes) func(*graph.Scope) (*nats.Broker, error) {
+	return func(s *graph.Scope) (*nats.Broker, error) {
+		s.After(n.Telemetry)
+		return nats.New(s.Use(n.Config).NATS)
 	}
 }
 

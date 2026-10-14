@@ -20,9 +20,11 @@ var files embed.FS
 // DB; it defines no patterns of its own. It also keeps the statements
 // registry: every domain registers its compiled inventory at wiring, so
 // the admin service can walk the whole service's SQL the way the catalog
-// lists its patterns. Each [Database.Register] call, and [NewStorage] for
-// blobfs's store, also records the store's verifier for [Seeder.Verify], so
-// no store that runs statements is left out of the startup check.
+// lists its patterns. Each [Database.Register] call, [NewStorage] for
+// blobfs's store, and [Database.Record] for a library's statements the
+// composition root wires, such as go-messaging's, also records the store's
+// verifier for [Seeder.Verify], so no store that runs statements is left
+// out of the startup check.
 // The package's own statement, under statements/, is the lock; it compiles
 // once here and registers under "data". The seed's statements are the
 // domains' own (Seed).
@@ -65,9 +67,11 @@ func (d *Database) Register(name string, stmts *query.Statements, verifier query
 	d.verifiers = append(d.verifiers, verifier)
 }
 
-// record adds v to the verifiers [Seeder.Verify] runs without a registry
-// entry, for a store such as blobfs's that owns its statements.
-func (d *Database) record(v query.Verifier) {
+// Record adds v to the verifiers [Seeder.Verify] runs without a registry
+// entry, for a store that owns its statements: blobfs's, which
+// [NewStorage] records, and go-messaging's outbox and inbox, which the
+// composition root records beside their migration set.
+func (d *Database) Record(v query.Verifier) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.verifiers = append(d.verifiers, v)

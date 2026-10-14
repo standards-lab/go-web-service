@@ -182,7 +182,8 @@ func TestConfig_FinalizeEmptyPrefixReadsNoShutdownOverride(t *testing.T) {
 // minimalFile is a config.json carrying the required fields, plus extra,
 // raw JSON members appended at the top level.
 func minimalFile(extra string) string {
-	body := `"database": {"name": "app"}, "storage": {"container": "c"}, "observability": {"endpoint": "127.0.0.1:4317"}`
+	body := `"database": {"name": "app"}, "storage": {"container": "c"}, "observability": {"endpoint": "127.0.0.1:4317"}, ` +
+		`"messaging": {"source": "web-service"}, "nats": {"stream": "WEB_SERVICE", "prefix": "web-service"}`
 	if extra != "" {
 		body += ", " + extra
 	}
@@ -371,5 +372,68 @@ func TestConfig_BaseStorageBoundsFitTheServer(t *testing.T) {
 	}
 	if ahead := option("block_size", 4<<20) * option("concurrency", 4); cfg.Storage.MaxObjectSize > ahead {
 		t.Errorf("max_object_size %d exceeds what azureblob reads ahead, %d", cfg.Storage.MaxObjectSize, ahead)
+	}
+}
+
+// The messaging and nats blocks finalize under the service's prefix, as
+// the other blocks do: APP_MESSAGING_* and APP_NATS_* override the file.
+func TestConfig_FinalizeReadsMessagingAndNATSEnv(t *testing.T) {
+	t.Setenv("APP_MESSAGING_SOURCE", "web-service-b")
+	t.Setenv("APP_MESSAGING_RELAY_POLL", "1s")
+	t.Setenv("APP_NATS_URL", "nats://nats.internal:4222")
+	t.Setenv("APP_NATS_OWNER", "true")
+	t.Setenv("APP_NATS_MAX_AGE", "168h")
+
+	cfg := configtest.Minimal()
+	if err := cfg.Finalize("app"); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	if cfg.Messaging.Source != "web-service-b" || cfg.Messaging.RelayPoll.Duration() != time.Second {
+		t.Errorf("messaging = %+v, want source and relay_poll from APP_MESSAGING_*", cfg.Messaging)
+	}
+	if cfg.NATS.URL != "nats://nats.internal:4222" || cfg.NATS.Owner == nil || !*cfg.NATS.Owner || cfg.NATS.MaxAge.Duration() != 168*time.Hour {
+		t.Errorf("nats = %+v, want url, owner, and max_age from APP_NATS_*", cfg.NATS)
+	}
+}
+
+// An invalid messaging or nats block fails Finalize, and so startup, with
+// the error naming the block.
+func TestConfig_FinalizeNamesInvalidMessagingBlocks(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		spoil func(*config.Config)
+		block string
+	}{
+		{"no source", func(c *config.Config) { c.Messaging.Source = "" }, "messaging:"},
+		{"no stream", func(c *config.Config) { c.NATS.Stream = "" }, "nats:"},
+		{"a non-owner's max_age", func(c *config.Config) { c.NATS.MaxAge = libconfig.Duration(time.Hour) }, "nats:"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := configtest.Minimal()
+			tc.spoil(cfg)
+			err := cfg.Finalize("")
+			if err == nil {
+				t.Fatal("Finalize accepted the block")
+			}
+			if !strings.HasPrefix(err.Error(), tc.block) {
+				t.Errorf("error = %v, want it to name the block, %s", err, tc.block)
+			}
+		})
+	}
+}
+
+// The base file names the service's messaging: its CloudEvents source, the
+// stream it owns, its types' prefix, and a local NATS server.
+func TestConfig_BaseMessaging(t *testing.T) {
+	cfg, err := libconfig.Load[config.Config](libconfig.Options{Dir: "../..", SecretsName: "secrets.example.json"})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Messaging.Source != "web-service" {
+		t.Errorf("messaging source = %q, want web-service", cfg.Messaging.Source)
+	}
+	n := cfg.NATS
+	if n.Stream != "WEB_SERVICE" || n.Prefix != "web-service" || n.Owner == nil || !*n.Owner || n.URL != "nats://127.0.0.1:4222" {
+		t.Errorf("nats = %+v, want the owned WEB_SERVICE stream under web-service on the local server", n)
 	}
 }

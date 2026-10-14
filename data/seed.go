@@ -114,10 +114,10 @@ func NewSeeder(db *Database, contributions ...Contribution) *Seeder {
 
 // Verify checks every store recorded on the database when it runs against
 // the live schema: each verifier passed to [Database.Register], the
-// package's own statements among them, and blobfs's store, which
-// [NewStorage] records. The admin service runs it at startup, before it
-// seeds, and on a verify request; it is the service's only statement
-// check.
+// package's own statements among them, blobfs's store, which [NewStorage]
+// records, and each verifier [Database.Record] adds. The admin service
+// runs it at startup, before it seeds, and on a verify request; it is the
+// service's only statement check.
 func (s *Seeder) Verify(ctx context.Context) error {
 	return query.Verify(ctx, s.db.DB, s.db.recorded()...)
 }

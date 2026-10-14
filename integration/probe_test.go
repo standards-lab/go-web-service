@@ -21,7 +21,7 @@ import (
 
 // readyChecks is the readiness probe's checks in the order it lists them:
 // the coordinator itself, then each service's check in start order.
-var readyChecks = []string{"lifecycle", "database", "storage", "schema", "sweeper"}
+var readyChecks = []string{"lifecycle", "database", "storage", "broker", "schema", "sweeper", "relay"}
 
 // checkNames is the names of a readiness report's checks, in its order.
 func checkNames(checks []check) []string {
@@ -189,8 +189,9 @@ const (
 // declared body is only partly sent, so the request stays in flight. It
 // waits for the server's 100 Continue, the handler's first read of the
 // body, so the request is in its handler when it returns. The connection
-// is closed at cleanup.
-func holdUpload(t *testing.T, s *integration.Service, path string) {
+// is closed at cleanup, or earlier by the caller, which releases the
+// request.
+func holdUpload(t *testing.T, s *integration.Service, path string) net.Conn {
 	t.Helper()
 	conn, err := net.DialTimeout("tcp", s.Addr(), processtest.Failsafe)
 	if err != nil {
@@ -214,6 +215,7 @@ func holdUpload(t *testing.T, s *integration.Service, path string) {
 	if _, err := conn.Write([]byte("partial")); err != nil {
 		t.Fatalf("send part of the body: %v", err)
 	}
+	return conn
 }
 
 // The drain is bounded by shutdown_timeout: an upload held in flight past

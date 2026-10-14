@@ -8,6 +8,9 @@ require (
 	github.com/standards-lab/go-core v0.10.0
 	github.com/standards-lab/go-database v0.8.0
 	github.com/standards-lab/go-database/postgres v0.5.0
+	github.com/standards-lab/go-messaging v0.2.0
+	github.com/standards-lab/go-messaging/nats v0.2.0
+	github.com/standards-lab/go-messaging/postgres v0.1.0
 	github.com/standards-lab/go-observability v0.2.0
 	github.com/standards-lab/go-observability/otlp v0.2.0
 	github.com/standards-lab/go-storage v0.6.0
@@ -40,8 +43,11 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/pgx/v5 v5.11.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/klauspost/compress v1.19.2 // indirect
+	github.com/klauspost/compress v1.20.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
+	github.com/nats-io/nats.go v1.54.0 // indirect
+	github.com/nats-io/nkeys v0.4.16 // indirect
+	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/pierrec/lz4/v4 v4.1.28 // indirect
 	github.com/standards-lab/sqlate/sqlint v0.3.0 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
@@ -56,6 +62,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.47.0 // indirect
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.11.1 // indirect
+	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect

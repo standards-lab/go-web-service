@@ -4,14 +4,16 @@
 // the architecture's layer list:
 //
 //   - infrastructure.go: defineInfrastructure, the configuration, the
-//     logger, the database pool, the object store, and the two the domains
-//     see them through, the sql session and the files store;
+//     logger, the database pool, the object store, the NATS broker, and
+//     the two the domains see the first two through, the sql session and
+//     the files store;
 //   - telemetry.go: defineTelemetry, the trace and meter providers, which
 //     start before the connections and flush after them;
 //   - admin.go: defineAdmin, the quiesce gate and the schema service, and
 //     the /admin mount;
 //   - domain.go: defineDomain, the domain services, and the /api mount;
-//   - reactors.go: defineReactors, the sweep's wake and its sweeper;
+//   - reactors.go: defineReactors, the sweep's wake and its sweeper, and
+//     the messaging runtime and its relay;
 //   - server.go: defineServer, the request edge: the readiness the probes
 //     report, the router, and the server;
 //   - routes.go: the list of mounts;
@@ -37,21 +39,28 @@
 // has its runtime error watched. Nodes start in layer order and drain in
 // reverse.
 // No layer file registers anything with the Coordinator. The order is
-// computed from what each node uses, plus three After edges, which order
-// two nodes without passing a value: the database and the object store
-// after telemetry, the sweeper after the schema, and the server after the
-// sweeper and the schema, so it is alone in the top layer, starts last, and
-// drains first. The probes report the
+// computed from what each node uses, plus four After edges, which order
+// two nodes without passing a value: the database, the object store, and
+// the broker after telemetry, the sweeper and the relay after the schema,
+// and the server after every reactor and the schema, so it is alone in the
+// top layer, starts last, and drains first. The drain therefore runs the
+// server, then the reactors (the relay with its last pass, which publishes
+// what the server's requests committed while they drained), then the
+// schema, then the broker and the connections. The probes report the
 // Coordinator's status under the "lifecycle" name, then the database, the
-// object store, the schema, and the sweeper, in layer, then definition,
-// order. [Telemetry] and [Wake] are the two node values the package owns:
-// telemetry as a participant whose shutdown never fails the run, and the
-// sweep's wake, which has no Ready, so the probe gains no check for it.
+// object store, the broker, the schema, the sweeper, and the relay, in
+// layer, then definition, order. [Telemetry] and [Wake] are the two node
+// values the package owns: telemetry as a participant whose shutdown never
+// fails the run, and the sweep's wake, which has no Ready, so the probe
+// gains no check for it.
 //
 // Routes and reactors are the two ways work enters the running process: a
 // caller drives a route, and an occurrence drives a reactor. A reactor
 // commonly dispatches to a domain service; the sweep's dispatches to none
-// (the README's Sweep section). Extending the service means defining a node
+// (the README's Sweep section), and the relay's publishes to the broker. A
+// node that commits events outside a request Uses the relay's node, so it
+// drains before the relay's last pass; a request-driven producer, as
+// every domain service is, relies on the server draining first. Extending the service means defining a node
 // in its layer's define function, and appending a reactor's node to
 // Nodes.Reactors; the signatures, cmd/server, and [App.Run] stay untouched.
 package app

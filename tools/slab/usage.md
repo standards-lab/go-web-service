@@ -169,6 +169,26 @@ mise run slab -- admin storage diagnostics     # ready, the container, the key l
 mise run slab -- admin storage container       # creates the container; succeeds when it exists
 ```
 
+## `events` — the service's events, live
+
+```sh
+mise run slab -- events watch                  # waits; each event the service publishes prints as it arrives
+```
+
+In another terminal, make the service publish one, then Ctrl-C the watcher (exit 0):
+
+```sh
+mise run slab -- docs files put <acme-id> root q3.pdf      # the watcher prints web-service.document.file.uploaded
+```
+
+```sh
+mise run slab -- events watch --from-start     # replays every event the stream holds, then follows
+mise run slab -- events watch --nats nats://127.0.0.1:4299   # exit 1: nothing answers (start the stack with: mise run db:up)
+```
+
+The watcher reads the stream through an ephemeral ordered consumer, deletes it when it ends, and
+acknowledges nothing, so it leaves the stream and the service's own consumers as it found them.
+
 ## `scenario` — the narrated scenarios
 
 ```sh

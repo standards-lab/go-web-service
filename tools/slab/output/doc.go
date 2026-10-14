@@ -17,7 +17,8 @@
 // The package exports:
 //
 //   - [Output] and [New], the one value every output concern is configured
-//     on, which renders a success, a status, or an object
+//     on, which renders a success, a status, an object, or a block a
+//     command streams, such as each event a watch receives
 //   - [Source], how a command on go-cli-sdk reaches its Output, and
 //     [Source.Respond], which finishes a command's Run over one request
 //   - [Expect], which turns a response with the wrong status into the error

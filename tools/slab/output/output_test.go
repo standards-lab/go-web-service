@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -67,6 +68,21 @@ func TestStatus_WritesTheStatusLineThenEachLine(t *testing.T) {
 // Object shows the headers it knows in its own order, whatever order the
 // response carried them in, and skips the ones the response lacks and any
 // it does not know.
+// Block writes the Render to stdout and returns its error.
+func TestBlock_WritesTheRenderToStdout(t *testing.T) {
+	o, out := plain()
+	if err := o.Block(output.Table(style.New(false), [][2]string{{"id", "e1"}})); err != nil {
+		t.Fatalf("Block: %v", err)
+	}
+	if want := "id  e1\n"; out.String() != want {
+		t.Errorf("Block wrote %q, want %q", out.String(), want)
+	}
+	failed := errors.New("failed")
+	if err := o.Block(func(io.Writer) error { return failed }); !errors.Is(err, failed) {
+		t.Errorf("Block = %v, want the Render's error", err)
+	}
+}
+
 func TestObject_WritesTheStatusTheKnownHeadersAndTheSavedFile(t *testing.T) {
 	o, out := plain()
 	header := http.Header{}

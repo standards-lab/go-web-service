@@ -9,6 +9,14 @@ accumulate under [Unreleased] until the first cut.
 
 ### Added
 
+- `slab events watch`, which prints each event the service publishes as it arrives, until
+  interrupted (exit 0): its type, id, subject, time, and data, in slab's output style. It binds
+  the `WEB_SERVICE` stream through go-messaging's NATS broker as a non-owner and reads it with
+  JetStream's ordered consumer filtered on `web-service.>`, ephemeral and unacknowledged, which
+  it deletes on exit. It shows only new events unless `--from-start` replays the stream first.
+  With nothing answering it exits 1 naming `mise run db:up`, and with no stream `mise run serve`.
+  The root flags `--nats`, `--nats-stream`, and `--nats-prefix` (`SLAB_NATS`,
+  `SLAB_NATS_STREAM`, `SLAB_NATS_PREFIX`) default to `config.json`'s `nats` block.
 - The service's first event, `web-service.document.file.uploaded`: a document upload
   (`POST /api/documents/{org}/directories/{id}/files`) emits it through the messaging runtime's
   recorder in the transaction that makes the file available, so it commits exactly when the

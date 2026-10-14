@@ -15,8 +15,8 @@ github.com/standards-lab/blobfs v0.6.0 h1:ruNVhWYgIclLD3qnNfy6zG+99c4F25NSrPrISD
 github.com/standards-lab/blobfs v0.6.0/go.mod h1:TPVserSOd5D6G/G1s9eIFy3Ta6vvZzBEBnwB15FYBq4=
 github.com/standards-lab/go-cli-sdk v0.2.0 h1:MrIkdYqtBsOqV5Dw+CLk4JbPmiKv6xYgZ7hk8M3Ts68=
 github.com/standards-lab/go-cli-sdk v0.2.0/go.mod h1:Oga+KQsA8FQyqZ0bQjJqc+9Rp2J78LBDkBCQiI7yLAU=
-github.com/standards-lab/go-core v0.9.0 h1:qvGiKwL+9flCMC1WZrxypYy4AHk2LEpSkO4H+4u+sGA=
-github.com/standards-lab/go-core v0.9.0/go.mod h1:Yl/R+gM9YWczsePBCKXdPGh3FSdZ/5i8SapLIh3BDHU=
+github.com/standards-lab/go-core v0.10.0 h1:Sb5xuyl/j+7bRwFXegXkEa8CnDUQ4Kz7/vWDogjDptg=
+github.com/standards-lab/go-core v0.10.0/go.mod h1:Yl/R+gM9YWczsePBCKXdPGh3FSdZ/5i8SapLIh3BDHU=
 github.com/standards-lab/go-web-sdk v0.15.2 h1:5Kha74IY8wT0XPcQEnZ/1bLBkxy13r33cgT6i2/X3E0=
 github.com/standards-lab/go-web-sdk v0.15.2/go.mod h1:aQyDvkE5cfwL1n1s79X5UnNmSPwtDTqhoFcsHKsdyJQ=
 github.com/standards-lab/sqlate v0.5.0 h1:2QEbhIzy2mtMxY2XMfqqqzOlCZs2I3vZNN7fB9daBjw=

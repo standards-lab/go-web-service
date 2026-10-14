@@ -65,9 +65,6 @@ func TestStatus_WritesTheStatusLineThenEachLine(t *testing.T) {
 	}
 }
 
-// Object shows the headers it knows in its own order, whatever order the
-// response carried them in, and skips the ones the response lacks and any
-// it does not know.
 // Block writes the Render to stdout and returns its error.
 func TestBlock_WritesTheRenderToStdout(t *testing.T) {
 	o, out := plain()
@@ -83,6 +80,9 @@ func TestBlock_WritesTheRenderToStdout(t *testing.T) {
 	}
 }
 
+// Object shows the headers it knows in its own order, whatever order the
+// response carried them in, and skips the ones the response lacks and any
+// it does not know.
 func TestObject_WritesTheStatusTheKnownHeadersAndTheSavedFile(t *testing.T) {
 	o, out := plain()
 	header := http.Header{}

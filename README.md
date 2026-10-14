@@ -47,7 +47,10 @@ pool through go-database's provider, takes the dialect from sqlate's, builds the
 client through go-storage's `azureblob` and the broker through go-messaging's `nats`, and
 installs blobfs's `postgres` engine; `admin.go` declares blobfs's and go-messaging's `postgres`
 migration sets, and `reactors.go` gives the messaging runtime go-messaging's `postgres` outbox
-and inbox. Every other package is provider-free, and native use stays in SQL files. There are
+and inbox. The configuration, `internal/config`, imports go-messaging's `nats` too, for its
+`nats` block alone: go-messaging keeps the broker's settings with its provider, not in its base,
+as go-database and go-storage keep theirs. Every other package is provider-free, and native use
+stays in SQL files. There are
 two exceptions, both outside the service's process: the integration harness, which builds its
 own clients (go-database's `postgres` pool, `azureblob`, and go-messaging's `nats` broker) to
 reach the database, the store, and the stream beneath the API; and the tool module's

@@ -18,8 +18,10 @@ import (
 // object store the rows' keys name. A domain runs blobfs's file protocols
 // (FS.WriteFile, FS.EnsureFile, FS.RemoveFile, FS.RemoveFileID,
 // FS.PurgeFile) over Objects, with its scope checks and its own rows in
-// their callbacks, and runs blobfs's steps directly for the rest. Serve
-// reads an available file in the web SDK's terms.
+// their callbacks, or the sdk package's staged form of one (sdk.WriteFile,
+// whose completion's transaction also carries the domain's event), and
+// runs blobfs's steps directly for the rest. Serve reads an available file
+// in the web SDK's terms.
 type Storage struct {
 	FS      *bfdata.Store
 	Objects *Objects

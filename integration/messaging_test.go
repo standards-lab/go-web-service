@@ -27,10 +27,10 @@ type probeData struct {
 }
 
 // probe is the suite's own event kind, under the service's prefix so the
-// broker accepts it. No domain raises an event yet, so the suite is the
-// producer: emitProbe commits an event through go-messaging's outbox, the
-// path a domain's command takes, and the running service's relay publishes
-// it as it would a domain's.
+// broker accepts it. The suite is its producer, beneath the API: emitProbe
+// commits an event through go-messaging's outbox, the path a domain's
+// command takes, at a moment no request could, and the running service's
+// relay publishes it as it would a domain's.
 var probe = event.Define[probeData]("web-service.integration.probe")
 
 // emitProbe commits one probe event to the outbox through db, in its own
@@ -235,10 +235,11 @@ func indexOf(out, msg string, id string) int {
 // server drains, with a request still in flight, is published before the
 // process exits. The request is an upload held open partway, so the server
 // is still draining; the event is the suite's probe, committed beneath the
-// API once the server has stopped accepting connections, standing in for a
-// producer's commit during the drain until a domain raises an event of its
-// own. Once the request is released the process exits cleanly, and its log
-// records the publish before "server stopped".
+// API once the server has stopped accepting connections, while the server
+// still drains. Once the request is released the process exits cleanly, and
+// its log records the publish before "server stopped". The request-driven
+// case, the held upload's own event, is
+// TestEvents_AnUploadInFlightAtTheInterruptIsPublished.
 func TestMessaging_EventCommittedDuringTheDrainIsPublished(t *testing.T) {
 	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	c := s.Client()

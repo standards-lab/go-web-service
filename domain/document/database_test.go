@@ -12,6 +12,9 @@ import (
 	"github.com/standards-lab/blobfs"
 	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/blobfs/data/datatest"
+	"github.com/standards-lab/go-core/event"
+	"github.com/standards-lab/go-messaging/outbox"
+	msgpg "github.com/standards-lab/go-messaging/postgres"
 	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-storage/storagetest"
 	"github.com/standards-lab/sqlate"
@@ -73,7 +76,27 @@ func serviceNudged(t *testing.T, responses ...sqltest.Response) (*document.Servi
 	t.Cleanup(func() { _ = objects.Shutdown(context.Background()) })
 	db := data.New(sqlate.Wrap(pool, dialect), catalog)
 	sweep := &nudges{rec: rec}
-	return document.New(db, data.NewStorage(db, fs, objects), sweep), rec, fake, sweep
+	return document.New(db, data.NewStorage(db, fs, objects), sweep, recorder(t)), rec, fake, sweep
+}
+
+// eventID and eventTime are what the tests' recorder stamps on every
+// event it emits.
+const eventID = "00000000-0000-7000-8000-0000000000ee"
+
+var eventTime = time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+
+// recorder is the recorder the composition root injects, go-messaging's
+// over its Postgres outbox, with the id and the time it stamps fixed: its
+// event's write is one statement on the command's transaction, which the
+// scripted driver records.
+func recorder(t *testing.T) *document.Recorder {
+	t.Helper()
+	ob, err := outbox.New(msgpg.Outbox())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return event.NewRecorder(ob.Sink(), "web-service",
+		event.IDs(func() string { return eventID }), event.Clock(func() time.Time { return eventTime }))
 }
 
 // root scripts the owner row's read: the organization's document root, or
@@ -208,7 +231,7 @@ func TestSeed_VerifiesTheRegisteredStores(t *testing.T) {
 	}
 	pool, rec := sqltest.Open(t)
 	db := data.New(sqlate.Wrap(pool, sqltest.Dialect{}), catalog)
-	svc := document.New(db, data.NewStorage(db, fs, nil), nil)
+	svc := document.New(db, data.NewStorage(db, fs, nil), nil, nil)
 	if err := data.NewSeeder(db, svc.Seed()).Verify(context.Background()); err != nil {
 		t.Fatal(err)
 	}

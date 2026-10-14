@@ -15,6 +15,7 @@ import (
 	"github.com/standards-lab/sqlate"
 
 	"github.com/standards-lab/go-web-service/data"
+	"github.com/standards-lab/go-web-service/sdk"
 )
 
 // listing reads one page of blobfs's listing l, Directories' or Files',
@@ -268,8 +269,10 @@ func (s *store) moveDirectory(ctx context.Context, organizationID, id string, ve
 
 // uploadFile stores the upload as a new file named name in the directory,
 // ensuring the root when the directory is its alias, by blobfs's two-phase
-// write, whose first transaction runs the scope check with the pending
-// row's insert. A put or completion that fails abandons the row, and the
+// write as the sdk package stages it, whose first transaction runs the
+// scope check with the pending row's insert and whose completion's
+// transaction emits FileUploaded. A put or completion that fails, the
+// event's write among them, abandons the row and commits no event, and the
 // sweep finishes one whose abandon fails too. A completion refused as
 // deleting (a blobfs.DeletingError, which names whose delete it was)
 // deletes the object just put.
@@ -279,12 +282,14 @@ func (s *store) uploadFile(ctx context.Context, organizationID, directoryID, nam
 	if err != nil {
 		return Identity{}, err
 	}
-	file, err := st.FS.WriteFile(ctx, s.db.DB, st.Objects, u.Body, u.Size, func(tx *sqlate.Tx) (blobfs.File, error) {
+	file, err := sdk.WriteFile(ctx, st.FS, s.db.DB, st.Objects, u.Body, u.Size, func(tx *sqlate.Tx) (blobfs.File, error) {
 		_, dir, err := s.scope(ctx, tx, organizationID, directoryID)
 		if err != nil {
 			return blobfs.File{}, err
 		}
 		return st.FS.Files.Create(ctx, tx, st.Objects, dir, name, u.ContentType)
+	}, func(tx *sqlate.Tx, f blobfs.File) error {
+		return s.emitUploaded(ctx, tx, organizationID, f)
 	})
 	return Identity{ID: file.ID, Version: file.Version}, err
 }

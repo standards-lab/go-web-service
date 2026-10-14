@@ -9,6 +9,15 @@ accumulate under [Unreleased] until the first cut.
 
 ### Added
 
+- The service's first event, `web-service.document.file.uploaded`: a document upload
+  (`POST /api/documents/{org}/directories/{id}/files`) emits it through the messaging runtime's
+  recorder in the transaction that makes the file available, so it commits exactly when the
+  upload completes and never for one whose put or completion fails. Its subject is the file's
+  id and its data the file's metadata (`file_id`, `organization_id`, `directory_id`, `name`,
+  `content_type`, `size`, `etag`, `version`), never its content. The upload runs blobfs's
+  two-phase write as `sdk.WriteFile` stages it, bound for blobfs: the same steps, with a hook in
+  the completion's transaction. The upload's responses are unchanged; logo writes, seeds, and
+  every other command emit nothing.
 - Messaging, with no event kind yet: go-messaging's runtime over its NATS JetStream broker and
   its Postgres outbox and inbox. The `messaging` block (`APP_MESSAGING_*`: `source`,
   `relay_poll`, `relay_timeout`) and the `nats` block (`APP_NATS_*`: `url`, `name`, `stream`,

@@ -16,6 +16,9 @@
 //
 //   - [Service], built by [New]: the layer's operations, one per endpoint.
 //   - [Sweeper]: the nudge the layer gives the sweep after marking a branch.
+//   - [Recorder]: the recorder the layer emits its events through.
+//   - [FileUploaded], with [FileUploadedData]: the event an upload emits
+//     in the transaction that makes its file available.
 //   - [Routes]: the route group the composition root mounts.
 //   - [Directory], [File], [Content], [Identity]: the read shapes, the
 //     download, and a command's result.

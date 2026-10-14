@@ -25,6 +25,7 @@ var files embed.FS
 type store struct {
 	db               *data.Database
 	storage          *data.Storage
+	events           *Recorder
 	stmts            *query.Statements
 	documentRootRows query.Rows[string]
 	organizationRows query.Rows[string]
@@ -36,11 +37,12 @@ type store struct {
 // handles, and registers the inventory under the domain's name with the
 // store as its verifier, so the seeder's Verify checks it. A compile
 // failure is a wiring defect and panics; no I/O happens here.
-func newStore(db *data.Database, st *data.Storage) *store {
+func newStore(db *data.Database, st *data.Storage, events *Recorder) *store {
 	stmts := db.Catalog.MustCompile(files, "statements", db.Dialect())
 	s := &store{
 		db:               db,
 		storage:          st,
+		events:           events,
 		stmts:            stmts,
 		documentRootRows: stmts.Statement("document_root").Scan(query.Scalar[string]),
 		organizationRows: stmts.Statement("organization_exists").Scan(query.Scalar[string]),

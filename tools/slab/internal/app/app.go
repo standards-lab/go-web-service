@@ -7,6 +7,7 @@ import (
 	"github.com/standards-lab/go-core/graph"
 	"github.com/standards-lab/go-core/lifecycle"
 
+	"github.com/standards-lab/go-web-service/tools/slab/events"
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 	"github.com/standards-lab/go-web-service/tools/slab/scenarios"
 )
@@ -42,6 +43,7 @@ func New(streams cli.Streams) *App {
 	a.root.Add(versionCommand())
 	mountDomain(a.root, &a.nodes)
 	mountAdmin(a.root, &a.nodes)
+	mountEvents(a.root, &a.nodes)
 	mountScenarios(a.root, &a.nodes)
 	return a
 }
@@ -68,7 +70,11 @@ type Nodes struct {
 	Grafana         *graph.Node[string]            // "grafana", Grafana's base URL
 	Repo            *graph.Node[string]            // "repo", the repository root override; empty when not given
 	NoColor         *graph.Node[bool]              // "no color", print without ANSI color even on a terminal
+	NATS            *graph.Node[string]            // "nats", the NATS server's URL
+	NATSStream      *graph.Node[string]            // "nats stream", the service's stream
+	NATSPrefix      *graph.Node[string]            // "nats prefix", the prefix of the service's event types
 	Client          *graph.Node[*httpx.Client]     // "client"
+	Broker          *graph.Node[*events.Broker]    // "broker", the NATS broker on the service's stream, started before a command runs
 	Service         *graph.Node[scenarios.Service] // "service", the running service, checked ready at start
 	GrafanaUp       *graph.Node[scenarios.Grafana] // "grafana up", the running Grafana, checked up at start
 }

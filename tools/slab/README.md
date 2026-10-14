@@ -1,7 +1,7 @@
 # slab
 
 `slab` calls go-web-service's own endpoints directly, one subcommand per route under `org`,
-`docs`, and `admin`, and runs narrated scenarios under `scenario`: each scenario says what it
+`docs`, and `admin`, watches the events the service publishes under `events`, and runs narrated scenarios under `scenario`: each scenario says what it
 is about to do, does it — against the real running stack, or, for `sqlate`, in process over the
 repository's own sources — and prints what it observed. The direct commands are a scriptable
 replacement for ad-hoc curl; the scenarios are the architect's own instrument for briefing
@@ -9,7 +9,8 @@ colleagues and leadership on the workspace's progress, and a self-serve path in 
 exploring it themselves.
 
 It is its own Go module, rooted here, so its command machinery never enters `cmd/server`'s
-dependency graph: go-cli-sdk, and the `golang.org/x/term` and `golang.org/x/sys` modules the
+dependency graph: go-cli-sdk, go-messaging's NATS provider and nats.go, which `events watch`
+reads the service's stream through, and the `golang.org/x/term` and `golang.org/x/sys` modules the
 `style` package detects a terminal with. Anyone with `go-web-service` cloned already has it.
 
 [`usage.md`](usage.md) walks through every command by hand against the real running stack.
@@ -27,12 +28,13 @@ mise run slab -- scenario storage                # logos, documents, the refusal
 mise run slab -- org list                        # the organization domain's endpoints, one subcommand per route
 mise run slab -- docs dirs list <org-id> root    # the document domain's endpoints, grouped by dirs and files
 mise run slab -- admin database schema status    # the admin mount's endpoints, under their own domain word
+mise run slab -- events watch                    # each event the service publishes, live, until Ctrl-C
 mise run slab -- version                         # slab's version
 ```
 
 Everything but `scenario sqlate` needs the compose stack and the service (`scenario storage`
 reads no traces, so it needs no Grafana, but `mise run serve` streams its logs to the
-collector):
+collector; `events watch` needs only NATS and the stream the service creates when it starts):
 
 ```sh
 mise run db:up && mise run otel:up
@@ -95,6 +97,22 @@ request and returns its result, unlike a scenario's narrated tour.
 - **admin storage** — the object store's admin endpoints: `diagnostics` (whether a live probe
   succeeds, the container, and the key length bound) and `container` (creates the configured
   container, succeeding when it exists). Neither takes input.
+- **events** — `events watch` prints each event the service publishes to its NATS JetStream
+  stream as it arrives, until interrupted: the type, then the id, subject, and time as a table,
+  then the data, as indented JSON when it is JSON, and a blank line. It starts by naming on stderr
+  the stream and subjects it watches, so stdout carries the events alone. By default it shows
+  only the events published after it starts; `--from-start` replays every event the stream holds
+  first, then follows. It connects through go-messaging's NATS broker as a non-owner, binding the
+  stream the service provisioned and writing nothing to it, and reads it with JetStream's ordered
+  consumer, ephemeral and unacknowledged and filtered on `<prefix>.>`, which it deletes when it
+  ends, so it settles nothing and leaves no consumer behind. Ctrl-C is its clean end: exit code
+  0. A message that does not decode as a CloudEvent, or an error the consumer survives such as
+  missed heartbeats while NATS is away, is reported on stderr and the watch goes on; the client
+  reconnects on its own. With nothing answering it exits 1 naming `mise run db:up`, as in
+  `slab events watch: startup: broker: nothing answers at nats://127.0.0.1:4222 (start the stack
+  with: mise run db:up): ...`; with NATS up but no stream, as before the service's first start,
+  it names `mise run serve`. The `--nats*` root flags under [Configuration](#configuration) name
+  the server, the stream, and the prefix.
 - **scenario** — `scenario <name>` runs one of the [scenarios](#scenarios) below on go-cli-sdk's
   scenario runner, narrating each step to stdout. `scenario` alone prints its help, which ends
   with the scenario listing, as the root's help does under `Scenarios:`. Neither reads any
@@ -157,13 +175,17 @@ not the one it expects stops the run the same way, naming the step by its number
 Each setting has a default, an environment variable that overrides it, and, but for the shutdown
 budget, a root flag that overrides the variable. A root flag is accepted at any depth — before the
 command word, between a parent and its subcommand, or after the leaf — and overrides its variable
-whenever it is given, even at its default value.
+whenever it is given, even at its default value. The `--nats*` defaults are the service's base
+configuration, `config.json`'s `nats` block, which a test holds them to.
 
 | Flag | Variable | Default | What it sets |
 |---|---|---|---|
 | `--base` | `SLAB_BASE` | `http://127.0.0.1:8080` | the service's base URL |
 | `--grafana` | `SLAB_GRAFANA` | `http://127.0.0.1:3000` | Grafana's base URL |
 | `--repo` | `SLAB_REPO` | found from the working directory | the repository root, when `slab` is not run from inside it |
+| `--nats` | `SLAB_NATS` | `nats://127.0.0.1:4222` | the NATS server the service publishes its events to |
+| `--nats-stream` | `SLAB_NATS_STREAM` | `WEB_SERVICE` | the stream the service publishes its events to |
+| `--nats-prefix` | `SLAB_NATS_PREFIX` | `web-service` | the prefix of the service's event types, which `events watch` filters on as `<prefix>.>` |
 | `--no-color` | `SLAB_NO_COLOR` | `false` | print without ANSI color even on a terminal |
 | — | `SLAB_SHUTDOWN_TIMEOUT` | `10s` | the budget for shutting down what a command built |
 
@@ -180,8 +202,8 @@ variable named.
 
 | Code | Meaning |
 |---|---|
-| 0 | the command succeeded |
-| 1 | the command failed: a request that could not be sent, a problem response or another unexpected status, a scenario step or need that failed, or unreadable configuration |
+| 0 | the command succeeded, or `events watch` was interrupted |
+| 1 | the command failed: a request that could not be sent, a problem response or another unexpected status, a scenario step or need that failed, NATS or its stream not there for `events watch`, or unreadable configuration |
 | 2 | a usage error — an unknown command or scenario, an unknown flag, a missing or extra argument, a missing required flag, exclusive flags given together, or input a command refuses before it sends — reported on stderr with the command's usage; or help, printed on `-h`, `--help`, or a parent such as `slab scenario` run alone |
 
 ## Conventions
@@ -199,7 +221,10 @@ that are its own.
   of a service domain package, and `admin/<name>` of an admin service; the two trees are
   siblings, never nested, as in the service. Each package holds the same four files: `doc.go`,
   `entities.go`, `client.go`, and `commands.go`. An admin package's `entities.go` restates
-  request bodies only, because its responses print as raw JSON and nothing decodes them.
+  request bodies only, because its responses print as raw JSON and nothing decodes them. `events`
+  watches the stream the service publishes to rather than calling an endpoint, so it is neither:
+  a top-level family over the broker node, as the domain and admin families are over the client
+  node.
 - **Shared packages.** `output` renders every direct command's result, `input` resolves every
   request body, `style` holds all ANSI styling, and `httpx` holds everything about HTTP that is
   not specific to the service.

@@ -6,16 +6,19 @@
 //   - app.go: [App], [New], and [Nodes], which call the layer files'
 //     define and mount functions in layer order, lowest first;
 //   - infrastructure.go: defineInfrastructure, the lifecycle configuration
-//     node, one node per run setting (base, grafana, repo, and no color),
-//     each read in its constructor from its default and its SLAB_*
-//     variable with its root flag (--base, --grafana, --repo, --no-color)
-//     overriding them, and the client node, the HTTP client to the service
-//     bound to the base node's URL; the root flags, accepted at any depth;
-//     and the output source the families on the tree render through, over
-//     the no color node;
+//     node, one node per run setting (base, grafana, repo, no color, nats,
+//     nats stream, and nats prefix), each read in its constructor from its
+//     default and its SLAB_* variable with its root flag (--base,
+//     --grafana, --repo, --no-color, --nats, --nats-stream, --nats-prefix)
+//     overriding them, the client node, the HTTP client to the service
+//     bound to the base node's URL, and the broker node, the NATS broker
+//     bound as a non-owner to the service's stream, a lifecycle Starter;
+//     the root flags, accepted at any depth; and the output source the
+//     families on the tree render through, over the no color node;
 //   - domain.go and admin.go: mountDomain, one root.Add(pkg.Commands(...)...)
 //     per domain (org and docs), and mountAdmin, the admin command over the
 //     database and storage families;
+//   - events.go: mountEvents, the events command over the broker node;
 //   - scenario.go: defineScenarioNodes, the need nodes the scenarios
 //     declare (service and grafana up, each a lifecycle Starter that probes
 //     what it names before a scenario's first step), and mountScenarios,

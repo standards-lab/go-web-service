@@ -45,8 +45,9 @@ func (b *syncBuffer) String() string {
 // New and Run's Build perform no I/O — they succeed with nothing
 // listening — and Run then fails startup at the connections' layer,
 // draining to exit 1 with the failure named in the log, never flipping
-// readiness. The database and the object store start together, and the
-// first to fail cancels the other, so the log names whichever failed first.
+// readiness. The database, the object store, and the broker start
+// together, and the first to fail cancels the others, so the log names
+// whichever failed first.
 func TestRun_FailsStartupWithoutInfrastructure(t *testing.T) {
 	buf := &syncBuffer{}
 	a := app.New(configtest.Config(t), buf)
@@ -64,8 +65,8 @@ func TestRun_FailsStartupWithoutInfrastructure(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "startup: database") && !strings.Contains(out, "startup: storage") {
-		t.Errorf("failure log names neither connection: %q", out)
+	if !strings.Contains(out, "startup: database") && !strings.Contains(out, "startup: storage") && !strings.Contains(out, "startup: broker") {
+		t.Errorf("failure log names no connection: %q", out)
 	}
 	if strings.Contains(out, "server ready") {
 		t.Error("log carries a ready record despite the failed startup")

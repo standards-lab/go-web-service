@@ -4,20 +4,33 @@ import (
 	"time"
 
 	bfdata "github.com/standards-lab/blobfs/data"
+	"github.com/standards-lab/go-core/event"
 	"github.com/standards-lab/go-core/graph"
 	"github.com/standards-lab/go-core/reactor"
+	"github.com/standards-lab/go-messaging"
+	msgpg "github.com/standards-lab/go-messaging/postgres"
 )
 
 // defineReactors defines the reactors on g into n: the entry points that
 // run for the process lifetime, driven by an occurrence rather than a
-// caller. The sweep is the only one: its wake, and the sweeper that
-// receives from it. No node Uses a reactor, so the sweeper is listed in
-// n.Reactors, which Run builds as roots and the server orders itself
-// after. It constructs nothing.
+// caller. The sweep is one: its wake, and the sweeper that receives from
+// it. The messaging is the other: the runtime, and the relay it builds,
+// which publishes the outbox's committed events. No node Uses a reactor,
+// so each is listed in n.Reactors, which Run builds as roots and the
+// server orders itself after. It constructs nothing.
+//
+// The relay's last pass publishes what was committed while the producers
+// drained, so every producer must drain before it. A node that commits
+// events outside a request, such as a consumer's reactor, Uses the relay's
+// node, which orders it above the relay. A request-driven producer, as
+// every domain service is, needs no edge: its commands run in the server's
+// requests, and the server, ordered after every reactor, drains first.
 func defineReactors(g *graph.Graph, n *Nodes) {
 	n.Wake = g.Define("wake", newWake(n))
 	n.Sweeper = g.Define("sweeper", newSweeper(n))
-	n.Reactors = []graph.Ref{n.Sweeper}
+	n.Runtime = g.Define("runtime", newRuntime(n))
+	n.Relay = g.Define("relay", newRelay(n))
+	n.Reactors = []graph.Ref{n.Sweeper, n.Relay}
 }
 
 // Wake is the wake node's value, where the sweep's two halves meet: the
@@ -66,5 +79,36 @@ func newSweeper(n *Nodes) func(*graph.Scope) (*reactor.Reactor[time.Time], error
 		)
 		return reactor.New(s.Use(n.Wake).source, sweep,
 			reactor.CancelWithin(cfg.ShutdownTimeout.Duration())), nil
+	}
+}
+
+// newRuntime constructs the service's messaging from the config node's
+// messaging block, over the broker node and go-messaging's Postgres engine
+// statements, logging failures through the logger node. Its reactors drain
+// within the shutdown timeout and hold the gate shared, so a schema verb,
+// which holds it exclusively, runs with them paused: the relay opens no
+// transaction and claims no row until the verb releases it. The runtime
+// holds no resource and registers nothing, so it is no lifecycle
+// participant; the broker beneath it and the reactors it builds are.
+func newRuntime(n *Nodes) func(*graph.Scope) (*messaging.Runtime, error) {
+	return func(s *graph.Scope) (*messaging.Runtime, error) {
+		cfg := s.Use(n.Config)
+		return messaging.New(cfg.Messaging, s.Use(n.Broker), msgpg.Outbox(), msgpg.Inbox(),
+			cfg.ShutdownTimeout.Duration(), s.Use(n.Logger), messaging.Gated(s.Use(n.Gate)))
+	}
+}
+
+// newRelay constructs the relay over the sql node's session. Its value is a
+// lifecycle Subsystem, ReadinessChecker, and Monitored, as the sweeper's
+// is. It orders itself after the schema, so its first pass finds the
+// messaging set migrated and verified. The runtime gives it go-messaging's
+// drain: a last pass bounded at a quarter of the shutdown timeout, and the
+// reactor's cancellation of a publish still running at half of it. It drains
+// before the broker beneath it, which it Uses through the runtime, so the
+// last pass publishes before the connection closes.
+func newRelay(n *Nodes) func(*graph.Scope) (*reactor.Reactor[event.Event], error) {
+	return func(s *graph.Scope) (*reactor.Reactor[event.Event], error) {
+		s.After(n.Schema)
+		return s.Use(n.Runtime).Relay(s.Use(n.SQL).DB), nil
 	}
 }

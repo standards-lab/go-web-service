@@ -45,7 +45,8 @@ func idRow(id string) sqltest.Response {
 // at a time, ensures the root under the tree's id with its owner row, then
 // each entry under its own id: the directory on the pool, the file by the
 // write protocol's retry-safe form, its content put and the row completed.
-// The count is the entries created, the root not among them.
+// The count is the entries created, the root not among them. A seeded file
+// is no upload, so it emits nothing.
 func TestSeed_WritesTheTreeUnderItsIDs(t *testing.T) {
 	ctx := context.Background()
 	s, rec, fake := serviceOver(t,
@@ -83,6 +84,7 @@ func TestSeed_WritesTheTreeUnderItsIDs(t *testing.T) {
 		q, q,
 		begin, q, q, commit, q,
 	)
+	noEvent(t, rec)
 }
 
 // A seeded tree seeds nothing again: the root, the directory, and the file

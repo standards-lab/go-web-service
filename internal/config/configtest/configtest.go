@@ -17,6 +17,9 @@ func Minimal() *config.Config {
 	cfg.Database.Name = "app"
 	cfg.Storage.Container = "go-web-service"
 	cfg.Observability.Endpoint = "127.0.0.1:4317"
+	cfg.Messaging.Source = "web-service"
+	cfg.NATS.Stream = "WEB_SERVICE"
+	cfg.NATS.Prefix = "web-service"
 	return cfg
 }
 
@@ -42,6 +45,7 @@ func Config(t *testing.T) *config.Config {
 	// against the closed port its dial is refused on.
 	cfg.Storage.Options = map[string]string{"max_retries": "0"}
 	cfg.Observability.Endpoint = fmt.Sprintf("127.0.0.1:%d", ClosedPort(t))
+	cfg.NATS.URL = fmt.Sprintf("nats://127.0.0.1:%d", ClosedPort(t))
 	if err := cfg.Finalize(""); err != nil {
 		t.Fatalf("finalize hermetic config: %v", err)
 	}

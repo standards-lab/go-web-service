@@ -25,7 +25,8 @@ import (
 // owns: the server alone in the top layer, the readiness checks the
 // lifecycle infers from the node values and their order, telemetry beneath
 // every other participant, the schema between the connections and the
-// sweeper, and each participant held by one node. It builds the
+// reactors, the relay held off by the gate, and each participant held by
+// one node. It builds the
 // graph without starting it, so it needs no live engine. Unlike
 // app_test.go, these tests name nodes: they reach the graph through
 // App.Graph and App.Nodes, as does the Build-failure case, which
@@ -129,9 +130,11 @@ func TestGraph_ServerAloneInTopLayer(t *testing.T) {
 
 // The readiness checks the lifecycle infers from the node values, each one
 // that both starts and reports Ready, are the database, the object store,
-// the schema, and the sweeper, in that order; /readyz reports them after
-// "lifecycle". No other value is both: not the sweep's wake, whose source's
-// readiness the sweeper reports, and not the readiness node itself.
+// the broker, the schema, the sweeper, and the relay, in that order;
+// /readyz reports them after "lifecycle". No other value is both: not the
+// sweep's wake, whose source's readiness the sweeper reports, not the
+// messaging runtime, which starts nothing, and not the readiness node
+// itself.
 func TestGraph_ReadinessChecks(t *testing.T) {
 	cfg := configtest.Config(t)
 	a := app.New(cfg, io.Discard)
@@ -141,7 +144,7 @@ func TestGraph_ReadinessChecks(t *testing.T) {
 	for _, c := range lifecycle.New(sys, cfg.Config).Checks() {
 		got = append(got, c.Name)
 	}
-	want := []string{"database", "storage", "schema", "sweeper"}
+	want := []string{"database", "storage", "broker", "schema", "sweeper", "relay"}
 	if !slices.Equal(got, want) {
 		t.Errorf("checks = %v, want %v", got, want)
 	}
@@ -228,6 +231,78 @@ func TestGraph_SchemaBetweenConnectionsAndSweeper(t *testing.T) {
 	}
 	if sweeper <= schema {
 		t.Errorf("sweeper in layer %d, schema in layer %d, want the sweeper above", sweeper, schema)
+	}
+}
+
+// The broker shares the connections' layer, and the relay sits above both
+// it and the schema: the relay starts once the messaging set is migrated
+// and verified and the broker is connected, and it drains, its last pass
+// included, before the schema, the broker, and the database stop. The
+// document node does not Use the relay, so the schema, which Uses the
+// document node for its seed, can sit beneath it.
+func TestGraph_RelayAboveSchemaAndBroker(t *testing.T) {
+	a := app.New(configtest.Config(t), io.Discard)
+	sys := buildAsRun(t, a)
+	n := a.Nodes()
+
+	db, broker := layerOf(sys, n.Database.Name()), layerOf(sys, n.Broker.Name())
+	schema, relay := layerOf(sys, n.Schema.Name()), layerOf(sys, n.Relay.Name())
+	if db < 0 || broker < 0 || schema < 0 || relay < 0 {
+		t.Fatalf("layers: database %d, broker %d, schema %d, relay %d; want each built", db, broker, schema, relay)
+	}
+	if broker != db {
+		t.Errorf("broker in layer %d, database in layer %d, want the same layer", broker, db)
+	}
+	if relay <= schema {
+		t.Errorf("relay in layer %d, schema in layer %d, want the relay above", relay, schema)
+	}
+}
+
+// The relay holds the gate shared for each row, so while a schema verb
+// holds it exclusively the relay opens no transaction: against a database
+// that refuses every connection, it reports no failure until the gate is
+// released, and then reports the refused connection. No live engine is
+// needed: the failure the release lets through is the refusal itself.
+func TestGraph_RelayHeldOffByTheGate(t *testing.T) {
+	cfg := configtest.Config(t)
+	cfg.Messaging.RelayPoll = libconfig.Duration(5 * time.Millisecond)
+	var log syncBuffer
+	a := app.New(cfg, &log)
+	n := a.Nodes()
+	sys, err := a.Graph().Build(n.Relay)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	failed := func() bool { return strings.Contains(log.String(), `msg="messaging failure"`) }
+
+	release, err := sys.Get(n.Gate).Exclusive(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay := sys.Get(n.Relay)
+	if err := relay.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// Many polls' worth: a relay that ignored the gate would have dialled
+	// the closed port and reported the refusal by now.
+	time.Sleep(100 * time.Millisecond)
+	if failed() {
+		t.Fatalf("the relay reported a failure while the gate was held exclusively:\n%s", log.String())
+	}
+
+	release()
+	deadline := time.Now().Add(5 * time.Second)
+	for !failed() {
+		if time.Now().After(deadline) {
+			t.Fatalf("no relay failure after the gate's release; want the refused connection reported:\n%s", log.String())
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := relay.Shutdown(ctx); err != nil {
+		t.Errorf("Shutdown = %v, want nil", err)
 	}
 }
 

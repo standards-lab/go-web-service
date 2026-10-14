@@ -166,6 +166,23 @@ func TestSeeder_VerifyReportsARegisteredStoresFailure(t *testing.T) {
 	}
 }
 
+// A verifier Record adds, a library's store with no registry entry such as
+// go-messaging's, is run by Verify and its failure reported, and it adds no
+// registry entry.
+func TestSeeder_VerifyRunsARecordedVerifier(t *testing.T) {
+	db, _ := newDatabase(t)
+	entries := len(db.Registry())
+	store := &verifier{err: errBoom}
+	db.Record(store)
+
+	if err := data.NewSeeder(db).Verify(context.Background()); !store.ran || !errors.Is(err, errBoom) {
+		t.Fatalf("Verify = %v, store ran %t; want the recorded store's failure", err, store.ran)
+	}
+	if n := len(db.Registry()); n != entries {
+		t.Errorf("registry holds %d entries after Record, want %d", n, entries)
+	}
+}
+
 // Two contributions under one key are a wiring defect.
 func TestNewSeeder_PanicsOnADuplicateKey(t *testing.T) {
 	db, _ := newDatabase(t)

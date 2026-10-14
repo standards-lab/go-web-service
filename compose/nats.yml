@@ -1,0 +1,13 @@
+services:
+  nats:
+    build:
+      context: nats
+    ports:
+      # The monitoring port stays unpublished: only the health check, inside
+      # the container, reads it.
+      - "127.0.0.1:${NATS_PORT:-4222}:4222"
+    volumes:
+      - go-web-service-nats:/data
+
+volumes:
+  go-web-service-nats:

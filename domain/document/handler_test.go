@@ -175,7 +175,7 @@ func TestUploadFile_RefusesBeforeAnyIO(t *testing.T) {
 func TestUploadFile_AnswersCreatedWithLocation(t *testing.T) {
 	h := module(t,
 		root(rootID), within(true), datatest.FileRows(file(fileID, dirID, blobfs.StatusPending, 1)),
-		datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)),
+		datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), exec(1),
 	)
 	rec := upload(t, h, base+"/directories/"+dirID+"/files?name=page.html", "text/html", "<p>hi</p>", 9)
 	if rec.Code != 201 || rec.Header().Get("Location") != base+"/files/"+fileID || !strings.Contains(rec.Body.String(), `"id":"`+fileID+`","version":2`) {

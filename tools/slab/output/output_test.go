@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -61,6 +62,21 @@ func TestStatus_WritesTheStatusLineThenEachLine(t *testing.T) {
 	o.Status(http.StatusAccepted, "Location: /x/1", "being deleted")
 	if want := "202 Accepted\nLocation: /x/1\nbeing deleted\n"; out.String() != want {
 		t.Errorf("Status wrote %q, want %q", out.String(), want)
+	}
+}
+
+// Block writes the Render to stdout and returns its error.
+func TestBlock_WritesTheRenderToStdout(t *testing.T) {
+	o, out := plain()
+	if err := o.Block(output.Table(style.New(false), [][2]string{{"id", "e1"}})); err != nil {
+		t.Fatalf("Block: %v", err)
+	}
+	if want := "id  e1\n"; out.String() != want {
+		t.Errorf("Block wrote %q, want %q", out.String(), want)
+	}
+	failed := errors.New("failed")
+	if err := o.Block(func(io.Writer) error { return failed }); !errors.Is(err, failed) {
+		t.Errorf("Block = %v, want the Render's error", err)
 	}
 }
 

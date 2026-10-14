@@ -148,6 +148,21 @@ type Identity struct {
 	Version int64  `json:"version"`
 }
 
+// FileUploadedData is the data of a FileUploaded event: the file's
+// metadata as its upload's completion left it, available, never its
+// content. Its field names are the API's, as File's are; ETag is the
+// entity tag a download of the file answers with.
+type FileUploadedData struct {
+	FileID         string `json:"file_id"`
+	OrganizationID string `json:"organization_id"`
+	DirectoryID    string `json:"directory_id"`
+	Name           string `json:"name"`
+	ContentType    string `json:"content_type"`
+	Size           int64  `json:"size"`
+	ETag           string `json:"etag"`
+	Version        int64  `json:"version"`
+}
+
 // seedTree is one organization's hierarchy in a named state: the
 // organization, by path, the id its document root takes when the seed
 // creates it, and the entries beneath the root.

@@ -98,10 +98,10 @@ run = "go test -race ./... && cd tools/slab && go test -race ./..."
 description = "Start an isolated compose stack, run the integration tier against it, and tear it down"
 run = '''
 set -e
-export COMPOSE_PROJECT_NAME=go-web-service-integration POSTGRES_PORT=5433 AZURITE_BLOB_PORT=10001
+export COMPOSE_PROJECT_NAME=go-web-service-integration POSTGRES_PORT=5433 AZURITE_BLOB_PORT=10001 NATS_PORT=4223
 trap 'rc=$?; [ $rc -eq 0 ] || docker compose logs; docker compose down -v; exit $rc' EXIT
 docker compose up -d --wait --build
-APP_DATABASE_PORT=5433 APP_STORAGE_ENDPOINT=http://127.0.0.1:10001/devstoreaccount1 go test -race -count=1 -tags integration ./integration/
+APP_DATABASE_PORT=5433 APP_STORAGE_ENDPOINT=http://127.0.0.1:10001/devstoreaccount1 APP_NATS_URL=nats://127.0.0.1:4223 go test -race -count=1 -tags integration ./integration/
 '''
 
 [tasks.fmt]
@@ -125,23 +125,23 @@ description = "Run slab, the narrated-scenario runner (`mise run slab -- scenari
 dir = "tools/slab"
 run = "go run ./cmd/slab"
 
-# The development stacks: compose.yml's PostgreSQL and Azurite (db:) and its
+# The development stacks: compose.yml's PostgreSQL, Azurite, and NATS (db:) and its
 # observability profile (otel:), whose data lives in named volumes that each
 # group's down keeps and its reset drops.
 [tasks."db:up"]
-description = "Build and start the compose PostgreSQL and Azurite and wait until they are healthy"
+description = "Build and start the compose PostgreSQL, Azurite, and NATS and wait until they are healthy"
 run = "docker compose up -d --wait --build"
 
 [tasks."db:down"]
-description = "Stop the compose PostgreSQL and Azurite, keeping their volumes"
+description = "Stop the compose PostgreSQL, Azurite, and NATS, keeping their volumes"
 run = "docker compose down"
 
 [tasks."db:reset"]
-description = "Stop the compose PostgreSQL and Azurite and drop their volumes"
+description = "Stop the compose PostgreSQL, Azurite, and NATS and drop their volumes"
 run = "docker compose down -v"
 
 # `up` always starts the unprofiled services alongside an activated profile,
-# so naming the five services here keeps it from also starting postgres.
+# so naming the five services here keeps it from also starting the db: group.
 # Mimir's HTTP endpoint answers ready before its querier ring finishes joining
 # (compose/README.md), and its image has no shell for a HEALTHCHECK, so
 # --wait alone does not cover it. Poll a synthetic query (no series to read,
@@ -160,7 +160,7 @@ exit 1
 '''
 
 # `down` is project-wide by default; naming the five services here keeps it
-# from also stopping the postgres db:up started.
+# from also stopping the services db:up started.
 [tasks."otel:down"]
 description = "Stop the observability profile (keep data)"
 run = "docker compose --profile observability down otel-collector loki tempo mimir grafana"
@@ -169,18 +169,19 @@ run = "docker compose --profile observability down otel-collector loki tempo mim
 description = "Stop the observability profile and drop its data"
 run = "docker compose --profile observability down -v otel-collector loki tempo mimir grafana"
 
-# The whole local stack, PostgreSQL and Azurite and the observability profile together.
+# The whole local stack, PostgreSQL, Azurite, and NATS and the observability
+# profile together.
 # Neither half depends on the other, so mise runs each pair in parallel.
 [tasks."stack:up"]
-description = "Build and start PostgreSQL and Azurite and the observability profile and wait for health"
+description = "Build and start PostgreSQL, Azurite, and NATS and the observability profile and wait for health"
 depends = ["db:up", "otel:up"]
 
 [tasks."stack:down"]
-description = "Stop PostgreSQL and Azurite and the observability profile (keep data)"
+description = "Stop PostgreSQL, Azurite, and NATS and the observability profile (keep data)"
 depends = ["db:down", "otel:down"]
 
 [tasks."stack:reset"]
-description = "Stop PostgreSQL and Azurite and the observability profile and drop their data"
+description = "Stop PostgreSQL, Azurite, and NATS and the observability profile and drop their data"
 depends = ["db:reset", "otel:reset"]
 
 # The running service does the work through its admin mount, confirmed as it

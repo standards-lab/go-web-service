@@ -8,14 +8,19 @@
 // processtest builds cmd/server once per suite run ([Main]), runs it as a
 // [Service], a subprocess configured by APP_* environment variables on a
 // reserved port ([Start], [Launch], shaped by [Options]), reads its exit
-// code ([Service.Stop]), and relays the database or the object store
-// through a loopback forwarder, at [DatabaseAddr] or [StorageAddr], that a
-// test severs to prove the outage path and the sweep's refusals.
-// go-web-sdk's webtest drives the service through its HTTP surface and
-// observes its liveness probe ([Service.Ready]). [Objects] reads the object
-// store beneath the API, so a test can assert an object is gone. A failing
-// test logs each process's output, so a 500 comes with the service's own
-// record of it.
+// code ([Service.Stop]), and relays the database, the object store, or the
+// broker through a loopback forwarder, at [DatabaseAddr], [StorageAddr], or
+// [NATSAddr], that a test severs to prove the outage path and the sweep's
+// refusals. go-web-sdk's webtest drives the service through its HTTP
+// surface and observes its liveness probe ([Service.Ready]). [Objects]
+// reads the object store beneath the API, so a test can assert an object is
+// gone, and [Database] opens a session on the database beneath it, for what
+// no route reaches yet, such as the messaging outbox. [Subscribe] binds
+// the service's stream as a consumer, never its owner, through
+// go-messaging's NATS broker, so a test reads the events the service
+// publishes as a [Stream] and awaits one by its subject. A failing test logs
+// each process's output, so a 500 comes with the service's own record of
+// it.
 //
 // State control goes through the admin mount, so nothing in the runtime
 // exists for the tests' sake: [Reset] to a state such as [Default],

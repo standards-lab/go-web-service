@@ -74,6 +74,13 @@ func (o *Output) Status(status int, lines ...string) {
 	}
 }
 
+// Block writes one [Render] to stdout, for a command that prints a stream of
+// blocks rather than one response, such as each event a watch receives. It
+// returns the Render's error.
+func (o *Output) Block(r Render) error {
+	return r(o.stdout)
+}
+
 // objectHeaders are the headers an object response carries that Object
 // shows, in the order it shows them. Content-Disposition is the name a
 // document download is served under.

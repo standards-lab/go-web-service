@@ -50,6 +50,7 @@ func sameOps(t *testing.T, rec *sqltest.Recorder, want ...sqltest.Op) {
 const (
 	q, x          = sqltest.OpQuery, sqltest.OpExec
 	begin, commit = sqltest.OpBegin, sqltest.OpCommit
+	rollback      = sqltest.OpRollback
 )
 
 // The file protocols end to end over the scripted driver and the fake
@@ -60,9 +61,9 @@ func TestStore_FileProtocols(t *testing.T) {
 	ctx := context.Background()
 	s, rec, fake := serviceOver(t,
 		// UploadFile: the pending row with its scope in one transaction, the
-		// put, the completion on the pool.
+		// put, the completion and its event in another.
 		root(rootID), within(true), datatest.FileRows(file(fileID, dirID, blobfs.StatusPending, 1)),
-		datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)),
+		datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), exec(1),
 		// Content: the owner row, the file, its directory's scope.
 		root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), within(true),
 		// MoveFile to the root by its alias.
@@ -110,7 +111,7 @@ func TestStore_FileProtocols(t *testing.T) {
 		t.Error("the file's object outlived its delete")
 	}
 	sameOps(t, rec,
-		begin, q, q, q, commit, q,
+		begin, q, q, q, commit, begin, q, x, commit,
 		q, q, q,
 		begin, q, q, q, q, commit,
 		begin, q, q, q, commit, x,
@@ -123,14 +124,14 @@ func TestStore_UploadFileEnsuresTheRoot(t *testing.T) {
 	s, rec, _ := serviceOver(t,
 		root(), organization(), datatest.DirectoryRows(), datatest.DirectoryRows(directory(rootID, blobfs.RootID, orgID, 1)), exec(1),
 		root(rootID), datatest.FileRows(file(fileID, rootID, blobfs.StatusPending, 1)),
-		datatest.FileRows(file(fileID, rootID, blobfs.StatusAvailable, 2)),
+		datatest.FileRows(file(fileID, rootID, blobfs.StatusAvailable, 2)), exec(1),
 	)
 	if _, err := s.UploadFile(context.Background(), orgID, document.RootAlias, "report.txt", textUpload(t)); err != nil {
 		t.Fatalf("UploadFile = %v", err)
 	}
 	sameOps(t, rec,
 		q, begin, q, q, q, x, commit,
-		begin, q, q, commit, q,
+		begin, q, q, commit, begin, q, x, commit,
 	)
 }
 
@@ -146,7 +147,7 @@ func TestStore_EnsureRootForAMissingOrganizationIsNoRows(t *testing.T) {
 }
 
 // A put that fails retires the pending row, so the name is free for a
-// retry.
+// retry, and emits nothing: the completion never runs.
 func TestStore_AFailedPutRetiresThePendingRow(t *testing.T) {
 	s, rec, fake := serviceOver(t,
 		root(rootID), within(true), datatest.FileRows(file(fileID, dirID, blobfs.StatusPending, 1)),
@@ -157,6 +158,7 @@ func TestStore_AFailedPutRetiresThePendingRow(t *testing.T) {
 		t.Fatal("UploadFile succeeded over a failed put")
 	}
 	sameOps(t, rec, begin, q, q, q, commit, begin, q, commit, x)
+	noEvent(t, rec)
 }
 
 // The directory reads: the metadata with its path relative to the root
@@ -497,11 +499,12 @@ func TestStore_ACompletionTheSweepRefusedDeletesTheObject(t *testing.T) {
 			if _, err := fake.Get(context.Background(), fileID+"/report.txt", storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
 				t.Errorf("the object outlived the refused completion: %v", err)
 			}
-			want := []sqltest.Op{begin, q, q, q, commit, q}
+			want := []sqltest.Op{begin, q, q, q, commit, begin, q}
 			for range c.reads {
 				want = append(want, q)
 			}
-			sameOps(t, rec, want...)
+			sameOps(t, rec, append(want, rollback)...)
+			noEvent(t, rec)
 		})
 	}
 }

@@ -31,10 +31,11 @@ type Sweeper interface {
 }
 
 // New constructs the service over the database and the object storage the
-// domains share, nudging sweep after each branch it marks. Construction
-// compiles and binds the statements and performs no I/O.
-func New(db *data.Database, st *data.Storage, sweep Sweeper) *Service {
-	return &Service{store: newStore(db, st), sweep: sweep}
+// domains share, nudging sweep after each branch it marks and emitting its
+// events through events. Construction compiles and binds the statements
+// and performs no I/O.
+func New(db *data.Database, st *data.Storage, sweep Sweeper, events *Recorder) *Service {
+	return &Service{store: newStore(db, st, events), sweep: sweep}
 }
 
 // Seed is the layer's seed contribution, a file seed, to the named states
@@ -117,7 +118,9 @@ func (s *Service) MoveDirectory(ctx context.Context, organizationID, id string, 
 // UploadFile stores the upload as a new file named name in the directory,
 // ensuring the root when the directory is its alias, and returns the
 // file's identity. A name blobfs would refuse is refused before any I/O; a
-// taken name is a conflict.
+// taken name is a conflict. The upload that completes emits FileUploaded
+// in the transaction that makes the file available; one that fails emits
+// nothing.
 func (s *Service) UploadFile(ctx context.Context, organizationID, directoryID, name string, u web.Upload) (Identity, error) {
 	if err := validName(name); err != nil {
 		return Identity{}, err

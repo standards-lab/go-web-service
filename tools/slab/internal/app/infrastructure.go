@@ -12,6 +12,7 @@ import (
 	"github.com/standards-lab/go-core/graph"
 	"github.com/standards-lab/go-core/lifecycle"
 
+	"github.com/standards-lab/go-web-service/tools/slab/events"
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 	"github.com/standards-lab/go-web-service/tools/slab/output"
 	"github.com/standards-lab/go-web-service/tools/slab/style"
@@ -29,11 +30,22 @@ const (
 	defaultGrafana = "http://127.0.0.1:3000"
 )
 
+// The defaults the NATS settings read when neither their variable nor their
+// root flag is given: the service's base configuration, config.json's nats
+// block, which names the compose stack's NATS, the stream the service owns,
+// and the prefix its event types are under.
+const (
+	defaultNATS       = "nats://127.0.0.1:4222"
+	defaultNATSStream = "WEB_SERVICE"
+	defaultNATSPrefix = "web-service"
+)
+
 // defineInfrastructure defines the infrastructure nodes on g into n: the
 // lifecycle configuration; one node per run setting, each named for its
 // root flag and read from its default, its SLAB_* variable, and that flag
-// given on the command line; and the HTTP client to the service, bound to
-// the base node's URL. It constructs nothing: each value is read in its
+// given on the command line; the HTTP client to the service, bound to the
+// base node's URL; and the NATS broker on the service's stream, bound to
+// the nats settings. It constructs nothing: each value is read in its
 // node's constructor, which runs only when a Build reaches the node, so a
 // setting is read only for a command that declares it, or a node that
 // depends on it, never in [New] and never for a run that builds nothing.
@@ -43,7 +55,11 @@ func defineInfrastructure(g *graph.Graph, n *Nodes, flags *rootFlags) {
 	n.Grafana = g.Define("grafana", newSetting(flags, "grafana", defaultGrafana, parseString))
 	n.Repo = g.Define("repo", newSetting(flags, "repo", "", parseString))
 	n.NoColor = g.Define("no color", newSetting(flags, "no-color", false, strconv.ParseBool))
+	n.NATS = g.Define("nats", newSetting(flags, "nats", defaultNATS, parseString))
+	n.NATSStream = g.Define("nats stream", newSetting(flags, "nats-stream", defaultNATSStream, parseString))
+	n.NATSPrefix = g.Define("nats prefix", newSetting(flags, "nats-prefix", defaultNATSPrefix, parseString))
 	n.Client = g.Define("client", newClient(n.Base))
+	n.Broker = g.Define("broker", newBroker(n.NATS, n.NATSStream, n.NATSPrefix))
 }
 
 // newLifecycleConfig reads the lifecycle configuration, the shutdown
@@ -101,6 +117,9 @@ func bindRootFlags(fs *flag.FlagSet) *rootFlags {
 	fs.String("base", defaultBase, "the service's base URL"+env("base"))
 	fs.String("grafana", defaultGrafana, "Grafana's base URL"+env("grafana"))
 	fs.String("repo", "", "the repository root, when slab is not run from inside it"+env("repo"))
+	fs.String("nats", defaultNATS, "the NATS server the service publishes its events to"+env("nats"))
+	fs.String("nats-stream", defaultNATSStream, "the stream the service publishes its events to"+env("nats-stream"))
+	fs.String("nats-prefix", defaultNATSPrefix, "the prefix of the service's event types"+env("nats-prefix"))
 	fs.Bool("no-color", false, "print without ANSI color even on a terminal"+env("no-color"))
 	return &rootFlags{fs: fs}
 }
@@ -131,6 +150,18 @@ func (f *rootFlags) value(name string) (any, bool) {
 func newClient(base *graph.Node[string]) func(*graph.Scope) (*httpx.Client, error) {
 	return func(s *graph.Scope) (*httpx.Client, error) {
 		return httpx.NewClient(s.Use(base)), nil
+	}
+}
+
+// newBroker returns the broker node's constructor: the NATS broker on the
+// server the nats node names, bound as a non-owner to the stream and prefix
+// the nats stream and nats prefix nodes name. It does no I/O; the
+// dispatcher starts it, connecting and binding the stream, before the
+// command runs, and drains it when the command returns. A setting nats.New
+// refuses, such as a stream name that is not a token, fails the Build.
+func newBroker(url, stream, prefix *graph.Node[string]) func(*graph.Scope) (*events.Broker, error) {
+	return func(s *graph.Scope) (*events.Broker, error) {
+		return events.NewBroker(s.Use(url), s.Use(stream), s.Use(prefix))
 	}
 }
 

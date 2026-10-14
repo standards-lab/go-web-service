@@ -60,9 +60,13 @@ func Subscribe(t testing.TB, types ...string) *Stream {
 
 	s := &Stream{}
 	rctx, stop := context.WithCancel(context.Background())
-	done := make(chan error, 1)
+	// done closes once Receive returns, its error in rerr, so the wait
+	// below and the cleanup can each observe the end.
+	var rerr error
+	done := make(chan struct{})
 	go func() {
-		done <- src.Receive(rctx, func(_ context.Context, e event.Event) error {
+		defer close(done)
+		rerr = src.Receive(rctx, func(_ context.Context, e event.Event) error {
 			s.mu.Lock()
 			s.got = append(s.got, e)
 			s.mu.Unlock()
@@ -71,25 +75,22 @@ func Subscribe(t testing.TB, types ...string) *Stream {
 	}()
 	t.Cleanup(func() {
 		stop()
-		if err := <-done; err != nil {
-			t.Errorf("the harness's subscriber: %v", err)
+		<-done
+		if rerr != nil {
+			t.Errorf("the harness's subscriber: %v", rerr)
 		}
 		sctx, cancel := context.WithTimeout(context.Background(), processtest.Failsafe)
 		defer cancel()
 		_ = b.Shutdown(sctx)
 	})
-	deadline := time.Now().Add(processtest.Failsafe)
-	for !src.Ready() {
+	processtest.WaitFor(t, "the harness's subscriber ready", func() bool {
 		select {
-		case err := <-done:
-			t.Fatalf("the harness's subscriber ended before it was ready: %v", err)
+		case <-done:
+			t.Fatalf("the harness's subscriber ended before it was ready: %v", rerr)
 		default:
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the harness's subscriber was not ready within %v", processtest.Failsafe)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+		return src.Ready()
+	})
 	return s
 }
 

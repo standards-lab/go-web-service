@@ -245,7 +245,7 @@ func TestMessaging_EventCommittedDuringTheDrainIsPublished(t *testing.T) {
 	c := s.Client()
 	integration.Reset(t, c, integration.Default)
 	db := integration.Database(t)
-	held := holdUpload(t, s, "/api/documents/"+tree(t, c)[docsOrg].ID+"/directories/root/files?name=held.txt")
+	held := hold(t, s, "/api/documents/"+tree(t, c)[docsOrg].ID+"/directories/root/files?name=held.txt")
 
 	exit := make(chan int, 1)
 	go func() { exit <- s.Stop(t) }()
@@ -262,7 +262,7 @@ func TestMessaging_EventCommittedDuringTheDrainIsPublished(t *testing.T) {
 	processtest.WaitFor(t, "the probe event published during the drain", func() bool {
 		return len(eventRecords(s.Output(), "event published", id)) == 1
 	})
-	_ = held.Close()
+	held.release()
 
 	if code := <-exit; code != 0 {
 		t.Fatalf("exit = %d:\n%s", code, s.Output())

@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -185,38 +186,80 @@ const (
 	shutdownMargin  = 3 * time.Second
 )
 
-// holdUpload opens a raw connection to s and sends an upload whose
-// declared body is only partly sent, so the request stays in flight. It
-// waits for the server's 100 Continue, the handler's first read of the
-// body, so the request is in its handler when it returns. The connection
-// is closed at cleanup, or earlier by the caller, which releases the
-// request.
-func holdUpload(t *testing.T, s *integration.Service, path string) net.Conn {
+// heldUpload is an upload in flight on a raw connection, its declared body
+// partly sent, held after the server's 100 Continue: the handler's first
+// read of the body, so the request is in its handler, and the write's
+// first transaction has committed the pending row.
+type heldUpload struct {
+	conn net.Conn
+	r    *bufio.Reader
+}
+
+// heldSize is the body a held upload declares, and heldPart what it sends
+// before it is held.
+const (
+	heldSize = 1024
+	heldPart = "partial"
+)
+
+// hold sends the upload to path on s and holds it as heldUpload says. The
+// connection is closed at cleanup, unless finish or release ends the
+// request first.
+func hold(t *testing.T, s *integration.Service, path string) *heldUpload {
 	t.Helper()
 	conn, err := net.DialTimeout("tcp", s.Addr(), processtest.Failsafe)
 	if err != nil {
 		t.Fatalf("dial %s: %v", s.Addr(), err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	if err := conn.SetDeadline(time.Now().Add(processtest.Failsafe)); err != nil {
+	if err := conn.SetDeadline(time.Now().Add(4 * processtest.Failsafe)); err != nil {
 		t.Fatal(err)
 	}
-	head := fmt.Sprintf("POST %s HTTP/1.1\r\nHost: %s\r\nContent-Type: text/plain\r\nContent-Length: 1024\r\nExpect: 100-continue\r\n\r\n", path, s.Addr())
+	head := fmt.Sprintf("POST %s HTTP/1.1\r\nHost: %s\r\nContent-Type: text/plain\r\nContent-Length: %d\r\nExpect: 100-continue\r\n\r\n", path, s.Addr(), heldSize)
 	if _, err := conn.Write([]byte(head)); err != nil {
 		t.Fatalf("send the upload's head: %v", err)
 	}
-	status, err := bufio.NewReader(conn).ReadString('\n')
-	if err != nil {
-		t.Fatalf("read the interim status: %v", err)
+	r := bufio.NewReader(conn)
+	status, err := r.ReadString('\n')
+	if err != nil || !strings.HasPrefix(status, "HTTP/1.1 100 ") {
+		t.Fatalf("upload answered %q, %v; want 100 Continue", strings.TrimSpace(status), err)
 	}
-	if !strings.HasPrefix(status, "HTTP/1.1 100 ") {
-		t.Fatalf("upload answered %q, want 100 Continue", strings.TrimSpace(status))
+	// The interim response ends at its blank line.
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read the interim response: %v", err)
+		}
+		if line == "\r\n" {
+			break
+		}
 	}
-	if _, err := conn.Write([]byte("partial")); err != nil {
+	if _, err := conn.Write([]byte(heldPart)); err != nil {
 		t.Fatalf("send part of the body: %v", err)
 	}
-	return conn
+	return &heldUpload{conn: conn, r: r}
 }
+
+// finish sends the rest of the held upload's body and returns the status
+// and the body of its response.
+func (h *heldUpload) finish(t *testing.T) (int, []byte) {
+	t.Helper()
+	if _, err := h.conn.Write(bytes.Repeat([]byte("x"), heldSize-len(heldPart))); err != nil {
+		t.Fatalf("send the rest of the body: %v", err)
+	}
+	resp, err := http.ReadResponse(h.r, nil)
+	if err != nil {
+		t.Fatalf("read the upload's response: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var b bytes.Buffer
+	_, _ = b.ReadFrom(resp.Body)
+	return resp.StatusCode, b.Bytes()
+}
+
+// release closes the held upload's connection, ending its request without
+// the rest of its body.
+func (h *heldUpload) release() { _ = h.conn.Close() }
 
 // The drain is bounded by shutdown_timeout: an upload held in flight past
 // the interrupt keeps the server from draining cleanly, and the process
@@ -228,7 +271,7 @@ func TestShutdown_BoundedByTimeout(t *testing.T) {
 	})
 	c := s.Client()
 	integration.Reset(t, c, integration.Default)
-	holdUpload(t, s, "/api/documents/"+tree(t, c)[docsOrg].ID+"/directories/root/files?name=held.txt")
+	hold(t, s, "/api/documents/"+tree(t, c)[docsOrg].ID+"/directories/root/files?name=held.txt")
 
 	start := time.Now()
 	code := s.Stop(t)

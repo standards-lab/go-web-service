@@ -3,13 +3,10 @@
 package integration_test
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
@@ -129,76 +126,6 @@ func TestEvents_AnUploadEmitsFileUploaded(t *testing.T) {
 	}
 }
 
-// heldUpload is an upload in flight on a raw connection, its declared body
-// partly sent, held after the server's 100 Continue: the handler's first
-// read of the body, by which the write's first transaction has committed
-// the pending row.
-type heldUpload struct {
-	conn net.Conn
-	r    *bufio.Reader
-}
-
-// heldSize is the body a held upload declares, and heldPart what it sends
-// before it is held.
-const (
-	heldSize = 1024
-	heldPart = "partial"
-)
-
-// hold sends the upload to path on s and holds it as heldUpload says. The
-// connection is closed at cleanup.
-func hold(t *testing.T, s *integration.Service, path string) *heldUpload {
-	t.Helper()
-	conn, err := net.DialTimeout("tcp", s.Addr(), processtest.Failsafe)
-	if err != nil {
-		t.Fatalf("dial %s: %v", s.Addr(), err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-	if err := conn.SetDeadline(time.Now().Add(4 * processtest.Failsafe)); err != nil {
-		t.Fatal(err)
-	}
-	head := fmt.Sprintf("POST %s HTTP/1.1\r\nHost: %s\r\nContent-Type: text/plain\r\nContent-Length: %d\r\nExpect: 100-continue\r\n\r\n", path, s.Addr(), heldSize)
-	if _, err := conn.Write([]byte(head)); err != nil {
-		t.Fatalf("send the upload's head: %v", err)
-	}
-	r := bufio.NewReader(conn)
-	status, err := r.ReadString('\n')
-	if err != nil || !strings.HasPrefix(status, "HTTP/1.1 100 ") {
-		t.Fatalf("upload answered %q, %v; want 100 Continue", strings.TrimSpace(status), err)
-	}
-	// The interim response ends at its blank line.
-	for {
-		line, err := r.ReadString('\n')
-		if err != nil {
-			t.Fatalf("read the interim response: %v", err)
-		}
-		if line == "\r\n" {
-			break
-		}
-	}
-	if _, err := conn.Write([]byte(heldPart)); err != nil {
-		t.Fatalf("send part of the body: %v", err)
-	}
-	return &heldUpload{conn: conn, r: r}
-}
-
-// finish sends the rest of the held upload's body and returns the status
-// and the body of its response.
-func (h *heldUpload) finish(t *testing.T) (int, []byte) {
-	t.Helper()
-	if _, err := h.conn.Write(bytes.Repeat([]byte("x"), heldSize-len(heldPart))); err != nil {
-		t.Fatalf("send the rest of the body: %v", err)
-	}
-	resp, err := http.ReadResponse(h.r, nil)
-	if err != nil {
-		t.Fatalf("read the upload's response: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	var b bytes.Buffer
-	_, _ = b.ReadFrom(resp.Body)
-	return resp.StatusCode, b.Bytes()
-}
-
 // An upload that fails emits nothing, however it fails: a put the severed
 // object store refuses, a completion the severed database refuses after
 // the put, and a completion refused because the delete of the upload's
@@ -305,8 +232,9 @@ func TestEvents_ALogoEmitsNothing(t *testing.T) {
 // The drain runs the server before the relay, so a request-driven
 // producer needs no edge to it: an upload in flight when the interrupt
 // arrives completes, commits its event in its completion's transaction,
-// and the relay's last pass publishes the event before the process exits
-// cleanly, leaving nothing pending.
+// and the relay, still running while the server drains and its last pass
+// at the latest, publishes the event before the process exits cleanly,
+// leaving nothing pending.
 func TestEvents_AnUploadInFlightAtTheInterruptIsPublished(t *testing.T) {
 	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	c := s.Client()

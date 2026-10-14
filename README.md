@@ -42,12 +42,17 @@ point of choosing Postgres is to use it, and it is contained: each file declares
 `sqlint` fails a standard file that uses a native form, and the admin mount reports each
 statement's tier.
 
-Only the composition root, `internal/app/infrastructure.go`, imports a provider: it builds the
+Only the composition root (`internal/app`) imports a provider. `infrastructure.go` builds the
 pool through go-database's provider, takes the dialect from sqlate's, builds the object store's
-client through go-storage's `azureblob`, and installs blobfs's `postgres` engine with its
-migration set. Every other package is provider-free, and native use stays in SQL files. The one
-exception is the integration harness, which builds its own `azureblob` client to read the store
-beneath the API. The boundary is a convention; no linter enforces it.
+client through go-storage's `azureblob` and the broker through go-messaging's `nats`, and
+installs blobfs's `postgres` engine; `admin.go` declares blobfs's and go-messaging's `postgres`
+migration sets, and `reactors.go` gives the messaging runtime go-messaging's `postgres` outbox
+and inbox. Every other package is provider-free, and native use stays in SQL files. There are
+two exceptions, both outside the service's process: the integration harness, which builds its
+own clients (go-database's `postgres` pool, `azureblob`, and go-messaging's `nats` broker) to
+reach the database, the store, and the stream beneath the API; and the tool module's
+`tools/slab/events`, which imports go-messaging's `nats` and nats.go to watch the stream. The
+boundary is a convention; no linter enforces it.
 
 ### What a provider swap changes
 
@@ -119,10 +124,11 @@ order. Telemetry starts first, so its providers are installed before anything th
 database, the object store, and the NATS broker connect next, together in one layer. The schema
 starts after them: it applies any pending migration, checks every statement against the schema,
 and seeds the configured state (the `local` overlay names `default`). The [sweep](#sweep) and
-the messaging relay start after the schema, and the server starts last, alone in the top layer.
-The drain runs in reverse: the server drains first, so in-flight requests complete before what
-they run on closes; the relay then makes its last pass, publishing what those requests
-committed, before the broker and the database close; and telemetry flushes last. The service then logs `server ready` on `localhost:8080` (the `local` overlay binds
+the [messaging](#messaging) relay start after the schema, and the server starts last, alone in
+the top layer. The drain runs in reverse: the server drains first, so in-flight requests
+complete before what they run on closes; the relay then makes its last pass, publishing what
+those requests committed, before the broker and the database close; and telemetry flushes
+last. The service then logs `server ready` on `localhost:8080` (the `local` overlay binds
 loopback and runs debug logging). From a second shell:
 
 ```sh
@@ -349,6 +355,72 @@ hour), and handles at most `sweep.batch` (100) records. A pass the store or the 
 refuses is logged at warn and retried on the next wake; it never fails the service. `/readyz`
 reports the reactor as the `sweeper` check.
 
+## Messaging
+
+The service publishes events through [go-messaging](https://github.com/standards-lab/go-messaging)'s
+runtime: a command writes its event into the Postgres outbox in its own transaction, and the
+relay publishes the outbox's committed rows to NATS JetStream. In the graph (`internal/app`)
+the broker is a node in the connections' layer, the runtime a node the domains Use for its
+recorder, and the relay a reactor after the schema; `/readyz` reports the `broker` and
+`relay` checks. With NATS away the service is unready and keeps running, its events waiting in
+the outbox. The `messaging` and `nats` blocks under [Configuration](#configuration) set it up.
+
+The service owns the `WEB_SERVICE` stream: its broker creates or updates it at start, capturing
+every subject under the prefix `web-service`. Every other client, slab and the integration
+harness among them, binds the stream as it finds it and writes nothing. An event's NATS subject
+is its type, unchanged, so the prefix is the namespace of every type the service emits and a
+consumer subscribes by type; the CloudEvents `subject` attribute is the entity the event is
+about, such as the file's id. An event's type and data are public API, as a route's path and
+body are: a consumer in another service binds both.
+
+The relay holds the quiesce gate shared for each row, as the sweep does for a pass, so a schema
+verb runs with it paused ([Admin](#admin)). The drain runs the server before the relay, whose
+last pass publishes what was committed while the server drained; [Adding a
+service](#adding-a-service) gives the rule a new producer follows.
+
+### The event convention
+
+- Every public command that changes state emits exactly one event, in the transaction that
+  makes that state true, so the event commits exactly when the state does. A read emits
+  nothing, and neither does a command that fails.
+- The admin layer emits nothing: its verbs, the state reset, and the seeds, startup's
+  included, write beneath the domains' commands, not through them.
+- A type is `<service>.<domain>.<entity>.<past-tense verb>`, as
+  `web-service.document.file.uploaded` is, with no version suffix before v1.
+
+Only the document upload emits so far; the task `event-coverage` brings the other commands to
+the convention.
+
+### Adding an event
+
+1. **Define the kind** in the domain's `messaging.go` with go-core's `event.Define`, its doc
+   comment stating when it commits and what its subject is (`document.FileUploaded`). Its data
+   type sits in `entities.go` beside the read shapes, under the API's field names, and carries
+   the entity's metadata, never its content (`document.FileUploadedData`). List both in the
+   package doc.
+2. **Emit it in the committing transaction.** The domain's store holds the `Recorder` the
+   composition root injects (the runtime's, `domain.go`); the command calls the recorder's `Emit`
+   on the transaction that changes the state and raises the kind there with its subject
+   (`emitUploaded`). The write is one more statement on that transaction, so an event that fails
+   to write fails the command. The upload's state becomes true in blobfs's two-phase write's
+   completion, so it runs that write as `sdk.WriteFile` stages it, with a hook in the
+   completion's transaction; the staging is bound for blobfs. A domain service runs in the
+   server's requests and needs no graph edge to the relay; a producer outside a request Uses the
+   relay's node ([Adding a service](#adding-a-service)).
+3. **Test it.** In the unit tier the domain's service is built over sqlate's scripted driver
+   with go-messaging's recorder over its Postgres outbox, its id and time fixed (`recorder` in
+   `domain/document/database_test.go`). The outbox insert is one recorded statement, so a test
+   asserts it runs once, between the completion and its commit, decodes it to check the type,
+   subject, and data, and scripts a refused insert to prove the command rolls back
+   (`domain/document/messaging_test.go`). In the integration tier, `integration.Subscribe`
+   binds the stream for the kind's type before the command runs and returns a `Stream`, and
+   `Stream.Await` waits for the event about a subject. Absence cannot be awaited, so a test
+   proves a command emits nothing with a marker: after the command it runs one that does emit,
+   awaits the marker's event, and asserts it arrived alone, since the relay publishes in commit
+   order (`marker` and `onlyMarkers` in `integration/events_test.go`).
+4. **Watch it** with `mise run slab -- events watch`, which prints each event as it arrives;
+   `--from-start` replays the stream first. See [`tools/slab/README.md`](tools/slab/README.md).
+
 ## Tasks
 
 Each task wraps a plain command, so the repository works without mise, with two caveats:
@@ -399,10 +471,12 @@ named for the surface it asserts (`organization_test.go`, `document_test.go`, `l
 `sweep_test.go`, `outage_test.go`, and the rest), and each test's comment states what it proves.
 Its harness is the toolkit the SDKs ship beside what it exercises: go-core's
 `process/processtest` builds `cmd/server` once, runs it as a subprocess configured by `APP_*`
-variables on a reserved port, and relays the database or the object store through a loopback
-forwarder (`Options.Database`, `Options.Storage`) that a test severs for an outage. go-web-sdk's
-`webtest` drives the service through its API, and `integration.Objects` reads the container
-beneath it. A failing test prints each service process's output, so a 500 comes with the
+variables on a reserved port, and relays the database, the object store, or the broker through
+a loopback forwarder (`Options.Database`, `Options.Storage`, `Options.NATS`) that a test severs
+for an outage. go-web-sdk's `webtest` drives the service through its API; beneath it,
+`integration.Objects` reads the container, `integration.Database` opens a session on the
+database, and `integration.Subscribe` reads the service's stream ([Adding an
+event](#adding-an-event)). A failing test prints each service process's output, so a 500 comes with the
 service's own record of it. The service adds only its configuration and state control through
 the admin mount; nothing in the service exists for the tests' sake.
 

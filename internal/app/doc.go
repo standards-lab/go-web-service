@@ -57,10 +57,9 @@
 // Routes and reactors are the two ways work enters the running process: a
 // caller drives a route, and an occurrence drives a reactor. A reactor
 // commonly dispatches to a domain service; the sweep's dispatches to none
-// (the README's Sweep section), and the relay's publishes to the broker. A
-// node that commits events outside a request Uses the relay's node, so it
-// drains before the relay's last pass; a request-driven producer, as
-// every domain service is, relies on the server draining first. Extending the service means defining a node
-// in its layer's define function, and appending a reactor's node to
-// Nodes.Reactors; the signatures, cmd/server, and [App.Run] stay untouched.
+// (the README's Sweep section), and the relay's publishes to the broker.
+// What a producer of events must order itself after is defineReactors'
+// drain rule. Extending the service means defining a node in its layer's
+// define function, and appending a reactor's node to Nodes.Reactors; the
+// signatures, cmd/server, and [App.Run] stay untouched.
 package app

@@ -42,10 +42,12 @@ import (
 //
 // It constructs nothing, and no constructor opens a connection:
 // connectivity belongs to each participant's Start, so a failed Build leaks
-// none. This file is the one place a provider is named: the database's,
-// the object store's, the broker's, and blobfs's engine. The schema
-// (admin.go) declares the engines' migration sets, and the runtime
-// (reactors.go) takes go-messaging's engine statements.
+// none. This file names the providers the connections are built on: the
+// database's, the object store's, the broker's, and blobfs's engine. The
+// engines are named in two other layer files, the schema (admin.go), which
+// declares their migration sets, and the runtime (reactors.go), which takes
+// go-messaging's outbox and inbox, so the package is the one place a
+// provider is named.
 func defineInfrastructure(g *graph.Graph, n *Nodes, cfg *config.Config, w io.Writer) {
 	n.Config = g.Define("config", func(*graph.Scope) (*config.Config, error) {
 		return cfg, nil

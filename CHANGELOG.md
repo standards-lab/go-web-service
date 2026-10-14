@@ -9,6 +9,36 @@ accumulate under [Unreleased] until the first cut.
 
 ### Added
 
+- Messaging: go-messaging's runtime over its NATS JetStream broker and its Postgres outbox and
+  inbox. The `messaging` block (`APP_MESSAGING_*`: `source`, `relay_poll`, `relay_timeout`) and
+  the `nats` block (`APP_NATS_*`: `url`, `name`, `stream`, `prefix`, `owner`, `duplicates`,
+  `max_age`) configure it; `config.json` sets the source `web-service`, the owned stream
+  `WEB_SERVICE` under the prefix `web-service`, and a local NATS URL, and an invalid block fails
+  startup naming it. The service owns the stream and creates or updates it at start, and an
+  event's NATS subject is its type. The messaging migration set (`messaging`) runs first,
+  beneath blobfs's and the service's own, its statements verified at startup with the other
+  stores', and the database admin's listings and state reset cover it. The broker starts in the
+  pool's layer and the relay, the reactor that publishes the outbox's committed events, after
+  the schema; `/readyz` lists the `broker` and `relay` checks. With NATS down the service is
+  unready and keeps running, ready again when NATS returns. The relay holds the quiesce gate
+  for each row, so a schema verb runs with it paused, and it drains after the server,
+  publishing in a last pass what was committed during the drain.
+- The service's first event, `web-service.document.file.uploaded`: a document upload
+  (`POST /api/documents/{org}/directories/{id}/files`) emits it through the messaging runtime's
+  recorder in the transaction that makes the file available, so it commits exactly when the
+  upload completes and never for one whose put or completion fails. Its subject is the file's
+  id and its data the file's metadata (`file_id`, `organization_id`, `directory_id`, `name`,
+  `content_type`, `size`, `etag`, `version`), never its content; its type and data are public
+  API. The upload runs blobfs's two-phase write as `sdk.WriteFile` stages it, bound for blobfs:
+  the same steps, with a hook in the completion's transaction. The upload's responses are
+  unchanged; logo writes, seeds, and every other command emit nothing.
+- The event convention, in the README's Messaging section: every public command that changes
+  state emits exactly one event, in the transaction that makes that state true; the admin
+  layer, seeds included, emits none; types are `<service>.<domain>.<entity>.<past-tense verb>`,
+  with no version suffix before v1. The section is the guide to adding an event: where its kind
+  and data are defined, how a command emits it, how the unit and integration tiers test it
+  (the outbox recorder, `integration.Subscribe` and `Stream.Await`, and a marker for absence),
+  and how to watch it with slab.
 - `slab events watch`, which prints each event the service publishes as it arrives, until
   interrupted (exit 0): its type, id, subject, time, and data, in slab's output style. It binds
   the `WEB_SERVICE` stream through go-messaging's NATS broker as a non-owner and reads it with
@@ -17,32 +47,10 @@ accumulate under [Unreleased] until the first cut.
   With nothing answering it exits 1 naming `mise run db:up`, and with no stream `mise run serve`.
   The root flags `--nats`, `--nats-stream`, and `--nats-prefix` (`SLAB_NATS`,
   `SLAB_NATS_STREAM`, `SLAB_NATS_PREFIX`) default to `config.json`'s `nats` block.
-- The service's first event, `web-service.document.file.uploaded`: a document upload
-  (`POST /api/documents/{org}/directories/{id}/files`) emits it through the messaging runtime's
-  recorder in the transaction that makes the file available, so it commits exactly when the
-  upload completes and never for one whose put or completion fails. Its subject is the file's
-  id and its data the file's metadata (`file_id`, `organization_id`, `directory_id`, `name`,
-  `content_type`, `size`, `etag`, `version`), never its content. The upload runs blobfs's
-  two-phase write as `sdk.WriteFile` stages it, bound for blobfs: the same steps, with a hook in
-  the completion's transaction. The upload's responses are unchanged; logo writes, seeds, and
-  every other command emit nothing.
-- Messaging, with no event kind yet: go-messaging's runtime over its NATS JetStream broker and
-  its Postgres outbox and inbox. The `messaging` block (`APP_MESSAGING_*`: `source`,
-  `relay_poll`, `relay_timeout`) and the `nats` block (`APP_NATS_*`: `url`, `name`, `stream`,
-  `prefix`, `owner`, `duplicates`, `max_age`) configure it; `config.json` sets the source
-  `web-service`, the owned stream `WEB_SERVICE` under the prefix `web-service`, and a local NATS
-  URL, and an invalid block fails startup naming it. The messaging migration set (`messaging`)
-  runs first, beneath blobfs's and the service's own, its statements verified at startup with
-  the other stores', and the database admin's listings and state reset cover it. The broker
-  starts in the pool's layer and the relay, the reactor that publishes the outbox's committed
-  events, after the schema; `/readyz` lists the `broker` and `relay` checks. With NATS down the
-  service is unready and keeps running, ready again when NATS returns. The relay holds the
-  quiesce gate for each row, so a schema verb runs with it paused, and it drains after the
-  server, publishing in a last pass what was committed during the drain.
 - NATS 2.15 with JetStream in the compose file (`compose/nats/`, on 4222, `NATS_PORT` to move
   it), started and stopped with the `db:` and `stack:` tasks; the integration task runs it on
-  4223 in its own project.
-
+  4223 in its own project, and its harness reaches the stream (`integration.Subscribe`), the
+  database (`integration.Database`), and a severable broker (`Options.NATS`) beneath the API.
 - Object storage: the `storage` configuration block (`APP_STORAGE_*`, go-storage's), an Azure
   Blob Storage provider through `go-storage/azureblob`, Azurite in the compose file, and blobfs
   with `blobfs/postgres` for the file tree's rows, its migration set (`blobfs`) run beneath the
@@ -175,10 +183,11 @@ accumulate under [Unreleased] until the first cut.
   dims `--` and `--|` comment lines, and colors sqlate's `{{…}}` markers. SQL, JSON, and table
   blocks are set off by a blank line before and after. `style.JSON` returns JSON that breaks
   partway unchanged and uncolored.
-- Pins: go-core v0.10.0 and go-web-sdk v0.15.2, in both modules; their own changes are in their
-  CHANGELOGs.
-- Pins: go-messaging v0.2.0, go-messaging/postgres v0.1.0, and go-messaging/nats v0.2.0, which
-  brings nats.go v1.54.0, in the base module.
+- Pins: go-core v0.10.0, from v0.9.0, and go-web-sdk v0.15.2, in both modules; their own
+  changes are in their CHANGELOGs.
+- Pins: go-messaging v0.2.0, go-messaging/postgres v0.1.0, and go-messaging/nats v0.2.0 in the
+  base module, and go-messaging/nats v0.2.0 with nats.go v1.54.0 in slab's; they bring nats.go
+  v1.54.0 to the base module and move its klauspost/compress to v1.20.0.
 - The sweep runs on go-core's `reactor` package: the sweeper, its wake, and the sweep worker use
   `reactor.Reactor`, `reactor.Wake`, and `reactor.Draining`, and the quiesce gate is
   `reactor.Gate`. The sweeper's cancel-after period is `reactor.CancelWithin` of the shutdown

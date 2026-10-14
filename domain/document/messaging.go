@@ -14,7 +14,8 @@ import (
 // completes the upload, so it is published exactly when the file can be
 // downloaded, and never for an upload that fails. Only the upload raises
 // it: a seed's file writes, which run blobfs's retry-safe write, emit
-// nothing.
+// nothing. Its type and its data are public API: a consumer in another
+// service binds both.
 var FileUploaded = event.Define[FileUploadedData]("web-service.document.file.uploaded")
 
 // Recorder is the recorder the layer emits its events through, in the

@@ -25,7 +25,8 @@ aggregating its role for the layer:
   domain's name with the store as its verifier, binds each statement to a typed handle (a
   projection for the read model, rows for a scan, a guard for a version-checked command), and
   exposes each operation as a store method that reads as what it does. Both domains also
-  hold `storage.go`, the blobfs translation file; `messaging.go` and `ai.go` are planned.
+  hold `storage.go`, the blobfs translation file. The document domain holds `messaging.go`,
+  which defines the events the layer emits (the README's "Adding an event"); `ai.go` is planned.
 - `service.go`: the single domain service, a concrete type constructed from the `data` package.
   Its methods map endpoints to operations one to one, and each operation delegates whole to the
   store after the command's own validation. A domain service is no lifecycle participant and
@@ -94,9 +95,8 @@ domain's store with its statements, and `data.NewStorage(db, …)` records blobf
 `Seeder.Verify` checks every recorded store, including one that seeds nothing, and no list in the
 composition root can leave a store out. The admin service runs `Verify` in its startup, before
 it seeds. The composition root's graph sets the startup order: each node starts after the nodes
-it uses, and three `After` edges, which order two nodes without passing a value, complete it: the
-pool and the object store after telemetry, the sweeper after the schema, and the server after the
-sweeper and the schema, alone in the top layer. The order stays in the composition root, never in
+it uses, and `After` edges, which order two nodes without passing a value, complete it, leaving
+the server alone in the top layer; `internal/app`'s package doc lists the edges. The order stays in the composition root, never in
 a library or a domain. The base layers (`data`,
 `domain/<layer>`, `admin/<service>`) are root-level packages because the domain packages import
 `data` and the topology-and-naming principle forbids a root-level package importing `internal/*`. A
@@ -119,9 +119,11 @@ construction sites.
 
 Library promotion candidates stage in the base `sdk` package: flat, a package meant to empty out
 accumulates no sub-packages, with each file named for the library its contents are bound for.
-Staging is cheap and deliberate; the `v1.data.evaluation` task rules on every tenant. The one
-tenant is `Command`, the guarded-command read composing the SDK's `PathUUID` (promoted from here
-in go-web-sdk v0.13.0), `IfMatch`, and `DecodeJSON`, bound for go-web-sdk.
+Staging is cheap and deliberate; the `v1.data.evaluation` task rules on every tenant. There are
+two tenants. `Command`, bound for go-web-sdk, is the guarded-command read composing the SDK's
+`PathUUID` (promoted from here in go-web-sdk v0.13.0), `IfMatch`, and `DecodeJSON`. `WriteFile`,
+bound for blobfs, is blobfs's two-phase write with a hook in the completion's transaction, which
+the task `blobfs-write-protocol` promotes.
 
 ## The operation-shape principle
 

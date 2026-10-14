@@ -1,7 +1,7 @@
 # go-web-service context
 
 The reference web service of the Standards Lab reference architecture: a single cohesive service
-that composes go-core, go-web-sdk, go-database, sqlate, go-storage, blobfs, and go-observability,
+that composes go-core, go-web-sdk, go-database, sqlate, go-storage, blobfs, go-observability, and go-messaging,
 and demonstrates each capability in place. It grows in documented layers on the go-web-sdk-template baseline it was generated from,
 consuming the SDKs at pinned releases. This is the service level: patterns are proven here, in a
 running composition, before they promote outward into the SDKs, the template, and the standard.
@@ -27,8 +27,10 @@ with its admin service (startup migration, the configured seed set, the named st
 admin mount), observability (a telemetry node beneath every lifecycle participant, tracing and
 metrics over OTLP, and structured logs correlated to them by trace id), and object storage (an
 organization's logo and its document hierarchy on blobfs over go-storage, proxied through the
-service, with the sweep that finishes a recursive delete), all wired over the SDKs,
-go-observability, go-storage, blobfs, and sqlate at pinned releases; the root `integration`
+service, with the sweep that finishes a recursive delete), and messaging (NATS JetStream through
+go-messaging, with the document upload emitting `web-service.document.file.uploaded` through the
+outbox and relay), all wired over the SDKs, go-observability, go-storage, blobfs, go-messaging,
+and sqlate at pinned releases; the root `integration`
 package is the integration tier that asserts the running service through its API. The remaining layers are the
 `v1` goals in the workspace roadmap, which sequences them; each is named here with the note
 that carries its direction:
@@ -40,8 +42,10 @@ that carries its direction:
   strategy.
 - **The management listener** — the admin mount on its own listener, a composition-root
   reshape here and in the template; the coordinator's admin-listener note explores it.
-- **Messaging and reactor services** — NATS through go-messaging, and the reactor layer it
-  makes real; go-core's `reactor` package already runs the sweep.
+- **Messaging and reactor services** — the rest of goal `v1.messaging`: task `event-coverage`
+  makes the other public commands emit their events, as the README's "Adding an event"
+  describes, and the reactor layer go-messaging makes real follows; go-core's `reactor` package
+  already runs the sweep and the relay.
 - **AI** — the go-ai capability demonstrated in a documented layer.
 - **Embedded client** — a web client embedded in and served by the service binary.
 - **Deployment** — deployment infrastructure in its own repository, targeting this service.

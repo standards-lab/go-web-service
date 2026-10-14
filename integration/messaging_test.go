@@ -162,17 +162,20 @@ func TestMessaging_BrokerOutage(t *testing.T) {
 // exclusively, so the reset waits out the row in flight and the relay
 // claims nothing while the messaging set is reverted and applied again.
 // The event is held pending by severing NATS, so its publish fails and its
-// row stays in the outbox until the reset reverts it. Afterwards the relay
-// reports no failure, a database error among them, and once NATS returns
-// the service is ready, the relay check with it, with nothing pending.
+// row stays in the outbox until the reset reverts it. From the reset's
+// start the relay reports no failure but the probe's refused publish, a
+// database error among them, and once NATS returns the service is ready,
+// the relay check with it, with nothing pending.
 func TestMessaging_StateResetUnderTheRelay(t *testing.T) {
 	f := processtest.Forward(t, integration.NATSAddr())
 	s := integration.Start(t, integration.Options{
 		Seed: integration.Default,
 		NATS: f.Addr(),
 		// A publish to the severed broker gives up within a second, so the
-		// row in flight releases the gate promptly.
-		Env: []string{"APP_MESSAGING_RELAY_TIMEOUT=1s"},
+		// row in flight releases the gate promptly, and the relay polls
+		// again within milliseconds, so an ungated relay would claim while
+		// the reset runs rather than a poll after it.
+		Env: []string{"APP_MESSAGING_RELAY_TIMEOUT=1s", "APP_MESSAGING_RELAY_POLL=5ms"},
 	})
 	c := s.Client()
 	integration.Reset(t, c, integration.Default)
@@ -193,11 +196,14 @@ func TestMessaging_StateResetUnderTheRelay(t *testing.T) {
 		t.Fatalf("pending = %d before the reset, want the probe's row", n)
 	}
 
+	// The window the gate must cover is the reset itself, while the
+	// messaging set is reverted and applied again, so the failures read
+	// below are every one from here on.
+	before := len(s.Output())
 	tr := integration.Reset(t, c, integration.Default)
 	if m := tr.Schema.Set("messaging"); m.Version != m.Latest || m.Latest < 1 || !tr.Schema.Ready {
 		t.Errorf("schema after the reset = %+v, want the messaging set current and the schema ready", tr.Schema)
 	}
-	after := len(s.Output())
 	if n := pending(t, db); n != 0 {
 		t.Errorf("pending = %d after the reset, want the reverted outbox empty", n)
 	}
@@ -208,12 +214,13 @@ func TestMessaging_StateResetUnderTheRelay(t *testing.T) {
 		return c.Get(t, "/readyz").Status == http.StatusOK
 	})
 	assertReady(t, c)
-	// The row in flight as the reset began may report its refused publish
-	// after the reset returns; any other failure is the relay's, against
-	// the reset schema.
-	for _, r := range withMsg(s.Output()[after:], "messaging failure") {
+	// The probe's row reports its refused publish until the reset reverts
+	// it, the row in flight as the reset began among them; any other
+	// failure, such as a claim against the reverted outbox, is the relay's
+	// running beside the reset.
+	for _, r := range withMsg(s.Output()[before:], "messaging failure") {
 		if r["event"] != id {
-			t.Errorf("the relay reported a failure after the reset: %v", r)
+			t.Errorf("the relay reported a failure during or after the reset: %v", r)
 		}
 	}
 	if code := s.Stop(t); code != 0 {

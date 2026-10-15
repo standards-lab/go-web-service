@@ -407,8 +407,7 @@ service](#adding-a-service) gives the rule a new producer follows.
   events; a consumer that holds a copy of the service's entities discards it there and rebuilds
   from what follows. The revert drops the outbox with every other table, so a reset loses the
   events still unpublished when it runs, and it emits nothing for the entities it drops. The
-  schema verbs (`up`, `down`, `steps`, `force`) emit nothing, and neither does a retry of a
-  seed that finds everything there.
+  schema verbs (`up`, `down`, `steps`, `force`) emit nothing.
 - **Naming.** An operation on the domain itself is `<service>.<domain>.<operation>`, as
   `web-service.organization.created` is; an operation on a sub-element of the domain is
   `<service>.<domain>.<element>.<operation>`, as `web-service.document.file.uploaded` and
@@ -421,7 +420,7 @@ Each event is a CloudEvent whose `source` is the configured `messaging.source` (
 whose `subject` is the id of the entity its type names, and whose data is the JSON below. The
 data carries an entity's stored state after the command, under the API's field names, never a
 file's content, and never the state before: a move or a transfer carries only the new parent.
-It carries neither a composed path, a status, nor the timestamps. The types are defined in each
+It carries no composed path, status, or timestamp. The types are defined in each
 domain's `messaging.go` and their data in its `entities.go`.
 
 | Type | Emitted by | Subject | Data |
@@ -441,8 +440,7 @@ domain's `messaging.go` and their data in its `entities.go`.
 | `web-service.database.reset` | `POST /admin/database/state` | the state's name | the state's name, a JSON string (`"empty"`) |
 
 The document routes sit under `/api/documents/{org}`. A logo `PUT` that replaces a logo commits
-`logo.uploaded` alone, no `logo.deleted` for the logo it replaces, and nothing beneath a marked
-branch emits.
+`logo.uploaded` alone, no `logo.deleted` for the logo it replaces.
 
 ### The staged file protocols
 
@@ -486,8 +484,9 @@ event commits in the activation's transaction that follows.
    one recorded statement, so a test asserts it runs once, between the completion and its
    commit, decodes it to check the type, subject, and data (`outboxtest.Decode` and
    `outboxtest.Want`), and scripts a refused insert to prove the command rolls back with no
-   event committed (`outboxtest.Committed`; `domain/document/messaging_test.go`). In the integration tier, `integration.Subscribe`
-   binds the stream for the kind's type before the command runs and returns a `Stream`, and
+   event committed (`outboxtest.Committed`; `domain/document/messaging_test.go`). In the
+   integration tier, `integration.Subscribe` binds the stream for the kind's type before the
+   command runs and returns a `Stream`, and
    `Stream.Await` waits for the event about a subject. Absence cannot be awaited, so a test
    proves a command emits nothing with a marker: after the command it runs one that does emit,
    awaits the marker's event, and asserts it arrived alone, since the relay publishes in commit

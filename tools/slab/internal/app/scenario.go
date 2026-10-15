@@ -15,8 +15,8 @@ import (
 // declare, over the nodes defineInfrastructure defined: service, the
 // running service at the base node's URL with the client node's client
 // bound to it, and grafana up, the running Grafana at the grafana node's
-// URL with a client bound to it, which the sweeper scenario queries Mimir
-// through. Each value is a lifecycle Starter that probes what it names, so the
+// URL with a Mimir client bound to it, which the sweeper scenario reads
+// metrics through. Each value is a lifecycle Starter that probes what it names, so the
 // dispatcher starts it after the Build and a scenario that declares it
 // runs no step until it answers; a failed probe is reported
 // "startup: <node>: ..." naming the mise task that fixes it.
@@ -39,7 +39,7 @@ func defineScenarioNodes(g *graph.Graph, n *Nodes) {
 	n.GrafanaUp = g.Define("grafana up", func(s *graph.Scope) (scenarios.Grafana, error) {
 		s.After(service)
 		url := s.Use(grafana)
-		return scenarios.Grafana{URL: url, Client: httpx.NewClient(url)}, nil
+		return scenarios.Grafana{URL: url, Mimir: httpx.NewMimir(httpx.NewClient(url))}, nil
 	})
 }
 

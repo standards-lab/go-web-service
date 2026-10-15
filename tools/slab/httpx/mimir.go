@@ -1,39 +1,32 @@
-package metrics
+package httpx
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 	"time"
-
-	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 )
 
-// DatasourceUID is the uid compose/grafana's provisioning gives the Mimir
-// datasource, and proxyRoute the Grafana route that forwards a request to
-// that datasource's URL, Mimir's Prometheus API prefix.
-const (
-	DatasourceUID = "mimir"
-	proxyRoute    = "/api/datasources/proxy/uid/" + DatasourceUID
-)
+// mimirQueryRoute is Grafana's datasource proxy to the Mimir datasource
+// compose/grafana provisions (uid mimir), which forwards to Mimir's
+// Prometheus API prefix, and the instant query under it.
+const mimirQueryRoute = "/api/datasources/proxy/uid/mimir/api/v1/query"
 
-// queryRoute is the Prometheus instant query under the proxy.
-const queryRoute = proxyRoute + "/api/v1/query"
-
-// Client sends instant queries to Mimir through the Grafana its httpx
-// client is bound to.
-type Client struct {
-	grafana *httpx.Client
+// Mimir sends instant queries to Mimir, the observability profile's
+// metrics store, through Grafana's datasource proxy, so a reader of
+// metrics needs only the Grafana it already probes, and no second base
+// URL.
+type Mimir struct {
+	grafana *Client
 }
 
-// NewClient returns a Client over grafana, a client bound to Grafana's
-// base URL.
-func NewClient(grafana *httpx.Client) *Client {
-	return &Client{grafana: grafana}
+// NewMimir returns a Mimir over grafana, a client bound to Grafana's base
+// URL.
+func NewMimir(grafana *Client) *Mimir {
+	return &Mimir{grafana: grafana}
 }
 
 // Sample is one series of an instant query's vector: its labels, the
@@ -49,8 +42,8 @@ type Sample struct {
 // Query evaluates promql as an instant query now and returns its vector.
 // A query that is not a vector (a scalar, a matrix) is an error, as is any
 // status other than 200, whose body is Prometheus's error document.
-func (c *Client) Query(ctx context.Context, promql string) ([]Sample, error) {
-	res, err := c.grafana.Get(ctx, queryRoute+"?"+url.Values{"query": {promql}}.Encode())
+func (m *Mimir) Query(ctx context.Context, promql string) ([]Sample, error) {
+	res, err := m.grafana.Get(ctx, mimirQueryRoute+"?"+url.Values{"query": {promql}}.Encode())
 	if err != nil {
 		return nil, err
 	}
@@ -64,9 +57,9 @@ func (c *Client) Query(ctx context.Context, promql string) ([]Sample, error) {
 	return samples, nil
 }
 
-// response is the Prometheus API's envelope around an instant query's
-// result, with the vector's entries left raw for decodeVector.
-type response struct {
+// vectorResponse is the Prometheus API's envelope around an instant
+// query's result, with each entry's value left as its JSON pair.
+type vectorResponse struct {
 	Status string `json:"status"`
 	Error  string `json:"error"`
 	Data   struct {
@@ -82,7 +75,7 @@ type response struct {
 // is a vector, each entry's value a pair of the evaluation time in
 // fractional Unix seconds and the value as a string.
 func decodeVector(body []byte) ([]Sample, error) {
-	var r response
+	var r vectorResponse
 	if err := json.Unmarshal(body, &r); err != nil {
 		return nil, fmt.Errorf("decode: %w; body: %s", err, body)
 	}
@@ -115,19 +108,15 @@ func decodeVector(body []byte) ([]Sample, error) {
 	return samples, nil
 }
 
-// ErrNotYet is the error Await's limit passing wraps: the query answered
-// throughout, but never as awaited.
-var ErrNotYet = errors.New("not met")
-
 // Await queries promql every interval until until reports true of its
 // samples, and returns those samples. A failed query ends the wait with
-// its error. When limit passes first it returns an error wrapping
-// [ErrNotYet] that names the query and the limit, which the caller wraps
-// with what it waited for; when ctx ends it returns ctx's error.
-func (c *Client) Await(ctx context.Context, promql string, every, limit time.Duration, until func([]Sample) bool) ([]Sample, error) {
+// its error. When limit passes first it returns an error naming the query
+// and the limit, which the caller wraps with what it waited for; when ctx
+// ends it returns ctx's error.
+func (m *Mimir) Await(ctx context.Context, promql string, every, limit time.Duration, until func([]Sample) bool) ([]Sample, error) {
 	deadline := time.Now().Add(limit)
 	for {
-		samples, err := c.Query(ctx, promql)
+		samples, err := m.Query(ctx, promql)
 		if err != nil {
 			return nil, err
 		}
@@ -136,7 +125,7 @@ func (c *Client) Await(ctx context.Context, promql string, every, limit time.Dur
 		}
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
-			return nil, fmt.Errorf("%s: %w within %s", promql, ErrNotYet, limit)
+			return nil, fmt.Errorf("%s: not met within %s", promql, limit)
 		}
 		select {
 		case <-ctx.Done():

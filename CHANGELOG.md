@@ -62,7 +62,7 @@ accumulate under [Unreleased] until the first cut.
   document root recursively and then the organization, so it leaves nothing behind, and its
   names are unique to the run, so it runs twice in a row.
 - `slab scenario sweeper`, a narrated run of the general sweeper through its metrics in Mimir,
-  read through Grafana's proxy to its Mimir datasource (slab's new `metrics` package): the three
+  read through Grafana's proxy to its Mimir datasource (slab's `httpx.Mimir`): the three
   reclaimers' `sweep_passes_total` by outcome and `sweep_backlogged_ratio`, a run-named branch
   deleted recursively, which nudges `files`, then the next export, polled for up to 2m30s,
   showing `files` moved while `outbox` and `inbox` moved only on their interval, the outbox's

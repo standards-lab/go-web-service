@@ -19,14 +19,14 @@
 // terminal; it too names what it creates for the run, and ends by deleting
 // its organization's document root and then the organization. The sweeper
 // scenario reads the general sweeper's three reclaimers through their
-// metrics in Mimir, by way of Grafana's datasource proxy (the metrics
-// package), around a recursive delete that nudges the files reclaimer; it
+// metrics in Mimir, by way of Grafana's datasource proxy (httpx.Mimir),
+// around a recursive delete that nudges the files reclaimer; it
 // names its branch for the run and its delete removes it.
 //
 // The five scenarios against the running service declare the service
 // node, whose value is a [Service]; the two that point at traces and the
 // one that reads metrics declare the grafana up node too, whose value is a
-// [Grafana], carrying a client bound to Grafana. Each value is a
+// [Grafana], carrying a Mimir client bound to Grafana. Each value is a
 // lifecycle Starter that probes what it names, so a run whose stack is down
 // fails before its first step, its report naming the mise task that brings
 // the stack up. A [Service] also carries the client the composition root

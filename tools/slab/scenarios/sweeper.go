@@ -18,7 +18,6 @@ import (
 
 	"github.com/standards-lab/go-web-service/tools/slab/domain/document"
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
-	"github.com/standards-lab/go-web-service/tools/slab/metrics"
 	"github.com/standards-lab/go-web-service/tools/slab/output"
 	"github.com/standards-lab/go-web-service/tools/slab/repo"
 )
@@ -39,11 +38,17 @@ var (
 // step points Grafana's Explore at; exportedQuery is the time the files
 // series' latest sample was written, which is the time of the export that
 // carried it.
-var (
-	jobMatcher     = `job="` + serviceName + `"`
-	passesQuery    = `sum by (sweep_reclaimer, sweep_outcome) (sweep_passes_total{` + jobMatcher + `})`
-	backlogQuery   = `max by (sweep_reclaimer) (sweep_backlogged_ratio{` + jobMatcher + `})`
-	exportedQuery  = `max(timestamp(sweep_passes_total{` + jobMatcher + `,sweep_reclaimer="files"}))`
+const (
+	jobMatcher    = `job="` + serviceName + `"`
+	passesQuery   = `sum by (sweep_reclaimer, sweep_outcome) (sweep_passes_total{` + jobMatcher + `})`
+	backlogQuery  = `max by (sweep_reclaimer) (sweep_backlogged_ratio{` + jobMatcher + `})`
+	exportedQuery = `max(timestamp(sweep_passes_total{` + jobMatcher + `,sweep_reclaimer="files"}))`
+)
+
+// mimirName is the Mimir datasource's name in Grafana, which the closing
+// step tells the reader to pick, and sweeperOrgPath the organization the
+// run's branch is created under.
+const (
 	mimirName      = "Mimir"
 	sweeperOrgPath = "/acme"
 )
@@ -93,7 +98,7 @@ func (c passCounts) total(reclaimer string) int64 {
 type sweeper struct {
 	n        Nodes
 	client   *httpx.Client
-	metrics  *metrics.Client
+	mimir    *httpx.Mimir
 	stamp    string
 	policy   sweepBlock
 	before   passCounts
@@ -133,7 +138,7 @@ func Sweeper(n Nodes) scenario.Scenario {
 
 func (s *sweeper) passCounts(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
 	s.client = inv.Get(s.n.Service).Client
-	s.metrics = metrics.NewClient(inv.Get(s.n.GrafanaUp).Client)
+	s.mimir = inv.Get(s.n.GrafanaUp).Mimir
 	s.stamp = strconv.FormatInt(time.Now().UnixNano(), 36)
 	st := styleOf(s.n, inv)
 	r.Note("The service runs one general sweeper with three reclaimers, in this order: files, blobfs's sweep, which finishes the branches a recursive delete marks and reclaims file rows stuck past stale_age; outbox, which deletes outbox rows the relay published longer ago than outbox_age; and inbox, which deletes handled inbox rows older than inbox_age. Each runs at start and then once per interval, and files also when a recursive delete nudges it. Its sweep block, as the local stack reads it, %s over %s:", localConfig, baseConfig)
@@ -163,7 +168,7 @@ func (s *sweeper) passCounts(ctx context.Context, inv *cli.Invocation, r *scenar
 // service has not exported since it started, or not since Mimir's data
 // was dropped.
 func (s *sweeper) awaitFirstExport(ctx context.Context) error {
-	_, err := s.metrics.Await(ctx, backlogQuery, exportPoll, exportLimit, func(samples []metrics.Sample) bool {
+	_, err := s.mimir.Await(ctx, backlogQuery, exportPoll, exportLimit, func(samples []httpx.Sample) bool {
 		return len(byReclaimer(samples)) == len(reclaimers)
 	})
 	if err != nil {
@@ -180,7 +185,7 @@ func (s *sweeper) read(ctx context.Context) (time.Time, passCounts, error) {
 	if err != nil {
 		return time.Time{}, nil, err
 	}
-	samples, err := s.metrics.Query(ctx, passesQuery)
+	samples, err := s.mimir.Query(ctx, passesQuery)
 	if err != nil {
 		return time.Time{}, nil, err
 	}
@@ -190,7 +195,7 @@ func (s *sweeper) read(ctx context.Context) (time.Time, passCounts, error) {
 // exportedAt returns the time of the latest export of the files series,
 // the zero time when Mimir holds none.
 func (s *sweeper) exportedAt(ctx context.Context) (time.Time, error) {
-	samples, err := s.metrics.Query(ctx, exportedQuery)
+	samples, err := s.mimir.Query(ctx, exportedQuery)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -199,7 +204,7 @@ func (s *sweeper) exportedAt(ctx context.Context) (time.Time, error) {
 
 // backlog returns the backlog gauge by reclaimer.
 func (s *sweeper) backlog(ctx context.Context) (map[string]float64, error) {
-	samples, err := s.metrics.Query(ctx, backlogQuery)
+	samples, err := s.mimir.Query(ctx, backlogQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +270,7 @@ func (s *sweeper) deleteRecursively(ctx context.Context, inv *cli.Invocation, r 
 func (s *sweeper) nextExport(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
 	st := styleOf(s.n, inv)
 	r.Note("The nudged pass counted at once in the service, but Mimir sees it only with the next export, up to %s away. This asks Mimir every %s for the time of the files series' latest sample until it is after the sweep, and gives up after %s.", exportInterval, exportPoll, exportLimit)
-	_, err := s.metrics.Await(ctx, exportedQuery, exportPoll, exportLimit, func(samples []metrics.Sample) bool {
+	_, err := s.mimir.Await(ctx, exportedQuery, exportPoll, exportLimit, func(samples []httpx.Sample) bool {
 		return exportTime(samples).After(s.sweptAt)
 	})
 	if err != nil {
@@ -315,7 +320,7 @@ func (s *sweeper) grafanaView(ctx context.Context, inv *cli.Invocation, r *scena
 }
 
 // countsOf returns the samples of passesQuery as pass counts.
-func countsOf(samples []metrics.Sample) passCounts {
+func countsOf(samples []httpx.Sample) passCounts {
 	c := passCounts{}
 	for _, sm := range samples {
 		rec, out := sm.Labels["sweep_reclaimer"], sm.Labels["sweep_outcome"]
@@ -328,7 +333,7 @@ func countsOf(samples []metrics.Sample) passCounts {
 }
 
 // byReclaimer returns the samples' values by their sweep_reclaimer label.
-func byReclaimer(samples []metrics.Sample) map[string]float64 {
+func byReclaimer(samples []httpx.Sample) map[string]float64 {
 	m := make(map[string]float64, len(samples))
 	for _, sm := range samples {
 		if rec, ok := sm.Labels["sweep_reclaimer"]; ok {
@@ -340,7 +345,7 @@ func byReclaimer(samples []metrics.Sample) map[string]float64 {
 
 // exportTime returns the time exportedQuery's one sample names, a Unix
 // time in fractional seconds, or the zero time when it has none.
-func exportTime(samples []metrics.Sample) time.Time {
+func exportTime(samples []httpx.Sample) time.Time {
 	if len(samples) == 0 {
 		return time.Time{}
 	}

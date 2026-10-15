@@ -722,7 +722,7 @@ func (s *storage) recursiveDelete(ctx context.Context, inv *cli.Invocation, r *s
 
 func (s *storage) sweep(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
 	st := styleOf(s.n, inv)
-	r.Note("This polls the Location, as dirs delete --wait does, until it answers 404: the sweep has removed the branch's rows and objects. It gives up after %s.", sweepLimit)
+	r.Note("The sweep runs as the general sweeper's files reclaimer, blobfs's sweep, which the delete nudged after its commit; the sweeper's other two reclaimers, outbox and inbox, run on its interval alone (scenario sweeper shows the three through their metrics). This polls the Location, as dirs delete --wait does, until it answers 404: the files reclaimer has removed the branch's rows and objects. It gives up after %s.", sweepLimit)
 	took, err := document.AwaitSweep(ctx, document.NewClient(s.client), s.location, sweepLimit)
 	if err != nil {
 		return err

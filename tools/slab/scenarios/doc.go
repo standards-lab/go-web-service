@@ -17,11 +17,16 @@
 // scenario sends one command for each event the service publishes, each
 // step naming the events "slab events watch" prints for it in another
 // terminal; it too names what it creates for the run, and ends by deleting
-// its organization's document root and then the organization.
+// its organization's document root and then the organization. The sweeper
+// scenario reads the general sweeper's three reclaimers through their
+// metrics in Mimir, by way of Grafana's datasource proxy (the metrics
+// package), around a recursive delete that nudges the files reclaimer; it
+// names its branch for the run and its delete removes it.
 //
-// The four scenarios against the running service declare the service
-// node, whose value is a [Service]; the two that point at traces declare
-// the grafana up node too, whose value is a [Grafana]. Each value is a
+// The five scenarios against the running service declare the service
+// node, whose value is a [Service]; the two that point at traces and the
+// one that reads metrics declare the grafana up node too, whose value is a
+// [Grafana], carrying a client bound to Grafana. Each value is a
 // lifecycle Starter that probes what it names, so a run whose stack is down
 // fails before its first step, its report naming the mise task that brings
 // the stack up. A [Service] also carries the client the composition root
@@ -33,7 +38,8 @@
 //   - [Nodes], the graph nodes the scenarios are built over
 //   - [Service] and [Grafana], the values of the need nodes
 //   - [All], the scenarios in presentation order
-//   - [Sqlate], [Domain], [Problems], [Storage], and [Events], the scenarios
+//   - [Sqlate], [Domain], [Problems], [Storage], [Events], and [Sweeper],
+//     the scenarios
 //
 // scenarios.go holds Nodes, All, and the narration helpers every
 // scenario's steps share, and stack.go holds the need nodes' values.
@@ -52,9 +58,9 @@
 //
 // The wire types and routes come from domain/organization, domain/document,
 // and admin/database, which restate the service's contract once for every
-// slab command. The storage and events scenarios wait for the sweep through
-// document.AwaitSweep, the one definition of dirs delete's --wait. A
-// step's method name is its Intent in lowerCamel, with articles and
+// slab command. The storage, events, and sweeper scenarios wait for the
+// sweep through document.AwaitSweep, the one definition of dirs delete's
+// --wait. A step's method name is its Intent in lowerCamel, with articles and
 // prepositions dropped and a nominalized title turned back into its verb
 // ("Catalog registration" becomes registerCatalog).
 package scenarios

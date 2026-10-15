@@ -29,6 +29,6 @@
 //     scenario.Reporter.Show takes it, and the blocks a step shows
 //     through it: [SQL] and [JSON], a statement and a document as
 //     authored; [Table], name/value pairs; [Request] and [Response], the
-//     two sides of an HTTP call; and [Trace], the pointer to a request's
-//     trace in Grafana
+//     two sides of an HTTP call; [Trace], the pointer to a request's
+//     trace in Grafana; and [Metrics], the pointer to a metric query there
 package output

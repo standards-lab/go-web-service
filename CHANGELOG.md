@@ -61,6 +61,15 @@ accumulate under [Unreleased] until the first cut.
   `slab events watch` prints for it in another terminal. It ends by deleting its organization's
   document root recursively and then the organization, so it leaves nothing behind, and its
   names are unique to the run, so it runs twice in a row.
+- `slab scenario sweeper`, a narrated run of the general sweeper through its metrics in Mimir,
+  read through Grafana's proxy to its Mimir datasource (slab's new `metrics` package): the three
+  reclaimers' `sweep_passes_total` by outcome and `sweep_backlogged_ratio`, a run-named branch
+  deleted recursively, which nudges `files`, then the next export, polled for up to 2m30s,
+  showing `files` moved while `outbox` and `inbox` moved only on their interval, the outbox's
+  retention, and the PromQL to run in Grafana's Explore. `config.local.json` sets
+  `sweep.outbox_age` and `sweep.inbox_age` to `2m` for the local stack, so the outbox reclaimer
+  has work there; `config.json` keeps `168h`. `slab scenario storage`'s Sweep step says the
+  sweep runs as the general sweeper's `files` reclaimer.
 - NATS 2.15 with JetStream in the compose file (`compose/nats/`, on 4222, `NATS_PORT` to move
   it), started and stopped with the `db:` and `stack:` tasks; the integration task runs it on
   4223 in its own project, and its harness reaches the stream (`integration.Subscribe`), the

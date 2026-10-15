@@ -41,24 +41,14 @@ const (
 	takenDirPath    = "/engineering"
 )
 
-// fixturesDir is the seeded fixtures' directory under seedsDir.
 // replacementFixture is the seeded fixture the logo step uploads in place
 // of acme's own: another organization's logo, a PNG that passes the
 // upload's sniffed-type rule, under fixturesDir.
-const (
-	fixturesDir        = seedsDir + "/fixtures"
-	replacementFixture = "engineering.png"
-)
+const replacementFixture = "engineering.png"
 
 // cursorPageSize is the page size the cursor walk asks for: one, so acme's
 // three seeded top-level directories take three pages and two cursors.
 const cursorPageSize = 1
-
-// sweepLimit bounds the wait for the sweep, as --wait's duration bounds
-// dirs delete. The delete nudges the sweep, so a small branch is gone well
-// inside it; the sweep's own interval (30 seconds) is the fallback the
-// limit leaves room for.
-const sweepLimit = 45 * time.Second
 
 // detailNameTaken is the curated detail of a taken name's 409:
 // data.DetailNameTaken, restated because slab does not import the service.
@@ -311,11 +301,6 @@ func (s *storage) additiveSeed(ctx context.Context, inv *cli.Invocation, r *scen
 	return err
 }
 
-// logoPath is acme's logo route.
-func (s *storage) logoPath() string {
-	return logoRoute(s.acme.ID)
-}
-
 func (s *storage) readLogo(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
 	r.Note("The logo is served by proxy from the object store. Its ETag is the store's tag for the bytes, and Last-Modified the file's last change; the bytes themselves are summarized below rather than printed.")
 	res, err := s.getLogo(ctx, r, styleOf(s.n, inv))
@@ -335,7 +320,7 @@ func (s *storage) readLogo(ctx context.Context, inv *cli.Invocation, r *scenario
 func (s *storage) revalidateLogo(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
 	r.Note("A conditional read names the ETag it holds in If-None-Match. The bytes have not changed, so the answer is 304 Not Modified with no body, and the object is never opened.")
 	headers := []httpx.Header{{Name: "If-None-Match", Value: s.etag}}
-	res, err := call(ctx, r, styleOf(s.n, inv), s.client, http.MethodGet, s.logoPath(), headers, nil)
+	res, err := call(ctx, r, styleOf(s.n, inv), s.client, http.MethodGet, logoRoute(s.acme.ID), headers, nil)
 	if err != nil {
 		return err
 	}
@@ -355,10 +340,10 @@ func (s *storage) replaceLogo(ctx context.Context, inv *cli.Invocation, r *scena
 	r.Note("The logo is a singleton addressed by its organization, so it takes no version: a PUT replaces whatever is active, the last write winning. It answers 201 with the new file's id and no version, since every PUT creates a new file, and the replaced file is retired. This uploads another organization's seeded logo, %s, as acme's; the read after it shows the new bytes under a new ETag.", replacementFixture)
 	st := styleOf(s.n, inv)
 	headers := []httpx.Header{{Name: "Content-Type", Value: "image/png"}}
-	if err := showApart(r, "", output.Request(st, http.MethodPut, s.logoPath(), headers, fmt.Sprintf("(%d bytes of %s)", len(png), file))); err != nil {
+	if err := showApart(r, "", output.Request(st, http.MethodPut, logoRoute(s.acme.ID), headers, fmt.Sprintf("(%d bytes of %s)", len(png), file))); err != nil {
 		return err
 	}
-	res, err := s.client.Put(ctx, s.logoPath(), png, headers...)
+	res, err := s.client.Put(ctx, logoRoute(s.acme.ID), png, headers...)
 	if err != nil {
 		return err
 	}
@@ -398,14 +383,14 @@ func (s *storage) replaceLogo(ctx context.Context, inv *cli.Invocation, r *scena
 func (s *storage) deleteLogo(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
 	r.Note("A DELETE retires whatever logo is active, again with no version, and the read after it is 404. The seeded logo comes back with the reset at the end of this run, and the additive seed at the start of the next run writes it again if this one stops before then.")
 	st := styleOf(s.n, inv)
-	res, err := call(ctx, r, st, s.client, http.MethodDelete, s.logoPath(), nil, nil)
+	res, err := call(ctx, r, st, s.client, http.MethodDelete, logoRoute(s.acme.ID), nil, nil)
 	if err != nil {
 		return err
 	}
 	if err := res.Expect(http.StatusNoContent); err != nil {
 		return err
 	}
-	res, err = call(ctx, r, st, s.client, http.MethodGet, s.logoPath(), nil, nil)
+	res, err = call(ctx, r, st, s.client, http.MethodGet, logoRoute(s.acme.ID), nil, nil)
 	if err != nil {
 		return err
 	}
@@ -416,10 +401,10 @@ func (s *storage) deleteLogo(ctx context.Context, inv *cli.Invocation, r *scenar
 // getLogo sends a narrated GET of acme's logo, its response shown
 // summarized: the logo's bytes are a PNG, which would print as noise.
 func (s *storage) getLogo(ctx context.Context, r *scenario.Reporter, st style.Style) (*httpx.Response, error) {
-	if err := showApart(r, "", output.Request(st, http.MethodGet, s.logoPath(), nil, nil)); err != nil {
+	if err := showApart(r, "", output.Request(st, http.MethodGet, logoRoute(s.acme.ID), nil, nil)); err != nil {
 		return nil, err
 	}
-	res, err := s.client.Get(ctx, s.logoPath())
+	res, err := s.client.Get(ctx, logoRoute(s.acme.ID))
 	if err != nil {
 		return nil, err
 	}

@@ -185,7 +185,11 @@ func (f *eventsFake) serveOrg(w http.ResponseWriter, r *http.Request, o *eventsO
 		f.emit("organization.deleted")
 		w.WriteHeader(http.StatusNoContent)
 	case len(rest) == 1 && rest[0] == "logo" && r.Method == http.MethodPut:
-		body, _ := io.ReadAll(r.Body)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			f.fail(w, r)
+			return
+		}
 		if !strings.HasPrefix(string(body), "\x89PNG") {
 			writeProblem(w, http.StatusUnsupportedMediaType, "")
 			return
@@ -393,6 +397,24 @@ func runEventsOK(t *testing.T, fake *eventsFake) string {
 	return r.stdout
 }
 
+// commandEventTypes is the event catalog's types a command publishes, as
+// the root README lists them: every type but web-service.database.reset,
+// which only a state reset commits.
+var commandEventTypes = []string{
+	"web-service.organization.created",
+	"web-service.organization.edited",
+	"web-service.organization.transferred",
+	"web-service.organization.deleted",
+	"web-service.organization.logo.uploaded",
+	"web-service.organization.logo.deleted",
+	"web-service.document.directory.created",
+	"web-service.document.directory.moved",
+	"web-service.document.directory.deleted",
+	"web-service.document.file.uploaded",
+	"web-service.document.file.moved",
+	"web-service.document.file.deleted",
+}
+
 // eventsSteps is the scenario's headings in order.
 var eventsSteps = []string{
 	"[1/16] Organization Creation", "[2/16] Organization Edit", "[3/16] Organization Transfer",
@@ -456,15 +478,15 @@ func TestScenario_EventsMakesEveryEventTypeInOrder(t *testing.T) {
 	if !slices.Equal(fake.emitted, want) {
 		t.Errorf("the run made the events\n%s\nwant\n%s", strings.Join(fake.emitted, "\n"), strings.Join(want, "\n"))
 	}
-	if len(want) != 20 {
-		t.Errorf("the steps make %d events, want the twenty the closing note states", len(want))
+	if got := len(fake.emitted); got != 20 {
+		t.Errorf("the run made %d events, want the twenty the closing note states", got)
 	}
-	types := map[string]bool{}
-	for _, k := range want {
-		types[k] = true
-	}
-	if len(types) != 12 {
-		t.Errorf("the run makes %d event types, want all 12 the service publishes", len(types))
+	types := slices.Clone(fake.emitted)
+	slices.Sort(types)
+	types = slices.Compact(types)
+	want = slices.Sorted(slices.Values(commandEventTypes))
+	if !slices.Equal(types, want) {
+		t.Errorf("the run made the event types\n%s\nwant every type a command publishes\n%s", strings.Join(types, "\n"), strings.Join(want, "\n"))
 	}
 }
 

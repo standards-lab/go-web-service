@@ -34,8 +34,9 @@ mise run slab -- version                         # slab's version
 ```
 
 Everything but `scenario sqlate` needs the compose stack and the service (`scenario storage`
-and `scenario events` read no traces, so they need no Grafana, but `mise run serve` streams its logs to the
-collector; `events watch` needs only NATS and the stream the service creates when it starts):
+and `scenario events` read no traces, so they need no Grafana, but `mise run serve` streams its
+logs to the collector; `events watch` needs only NATS and the stream the service creates when it
+starts):
 
 ```sh
 mise run db:up && mise run otel:up

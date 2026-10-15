@@ -101,8 +101,8 @@ github.com/standards-lab/go-web-sdk v0.15.2 h1:5Kha74IY8wT0XPcQEnZ/1bLBkxy13r33c
 github.com/standards-lab/go-web-sdk v0.15.2/go.mod h1:aQyDvkE5cfwL1n1s79X5UnNmSPwtDTqhoFcsHKsdyJQ=
 github.com/standards-lab/go-web-sdk/middleware/rate-limit v0.3.0 h1:bXlTi5E9EF2UXG/wdjcJzdFYXs7reh3IsEQbo1OQeMI=
 github.com/standards-lab/go-web-sdk/middleware/rate-limit v0.3.0/go.mod h1:Pvd6hVC+ecfj2namNmtYKAvjl9hreWcfQrhQmsVRdps=
-github.com/standards-lab/sqlate v0.6.0 h1:QdSuEo7sPamge38X3vocTRc6mvMthJWJhKtDcpyYyLw=
-github.com/standards-lab/sqlate v0.6.0/go.mod h1:pikNmGf/z3x46SBWFXgt/xKIDZuquSgCoXy5OWBFFR4=
+github.com/standards-lab/sqlate v0.6.1 h1:Kgp8freMX9Gs2KweBwG4IPzENgUmSJq8+r4tq02cDNw=
+github.com/standards-lab/sqlate v0.6.1/go.mod h1:pikNmGf/z3x46SBWFXgt/xKIDZuquSgCoXy5OWBFFR4=
 github.com/standards-lab/sqlate/postgres v0.6.0 h1:9ATOJTo8Z+XZBsOguf1942Mz0HlNyHz35b6ImaVE8Zc=
 github.com/standards-lab/sqlate/postgres v0.6.0/go.mod h1:EQnXZubeEG+bV8K5mkRQaOIryKlj5IYBYK6+LwZcXXg=
 github.com/standards-lab/sqlate/sqlint v0.3.0 h1:KdfgDsAGU2Fqku3i9miz0aEs2ZYryrkxdOGkggqh6Ok=

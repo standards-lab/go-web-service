@@ -17,7 +17,7 @@ require (
 	github.com/standards-lab/go-storage/azureblob v0.5.0
 	github.com/standards-lab/go-web-sdk v0.15.2
 	github.com/standards-lab/go-web-sdk/middleware/rate-limit v0.3.0
-	github.com/standards-lab/sqlate v0.6.0
+	github.com/standards-lab/sqlate v0.6.1
 	github.com/standards-lab/sqlate/postgres v0.6.0
 	go.opentelemetry.io/otel/sdk/metric v1.47.0
 )

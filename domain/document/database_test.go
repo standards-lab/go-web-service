@@ -164,12 +164,15 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 		datatest.DirectoryRows(), // ensure: no directory named for it
 		datatest.DirectoryRows(directory(rootID, blobfs.RootID, orgID, 1)), // ensure: the root created
 		exec(1),      // ensure: the owner row
+		exec(1),      // ensure: the root's event
 		root(rootID), // create: the scope check
 		datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)), // create
+		exec(1), // create: its event
 		// DeleteDirectory of the root, empty: its owner row goes with it
 		// through the cascading foreign key, so no statement names the row.
 		root(rootID),
-		exec(1), // the root removed, on the pool
+		exec(1), // the root removed
+		exec(1), // its event
 	)
 	id, err := s.CreateDirectory(ctx, orgID, document.CreateDirectory{ParentID: document.RootAlias, Name: "reports"})
 	if err != nil || id != (document.Identity{ID: dirID, Version: 1}) {
@@ -202,9 +205,9 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 	ops := rec.Ops()
 	want := []sqltest.Op{
 		sqltest.OpQuery,
-		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpExec, sqltest.OpCommit,
-		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpCommit,
-		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpExec, sqltest.OpCommit, // the delete, scoped in its transaction
+		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpExec, sqltest.OpExec, sqltest.OpCommit,
+		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpExec, sqltest.OpCommit,
+		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpExec, sqltest.OpExec, sqltest.OpCommit, // the delete, scoped in its transaction
 	}
 	if len(ops) != len(want) {
 		t.Fatalf("ops = %v\nwant %v", ops, want)

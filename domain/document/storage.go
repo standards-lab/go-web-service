@@ -11,6 +11,7 @@ import (
 
 	"github.com/standards-lab/blobfs"
 	bfdata "github.com/standards-lab/blobfs/data"
+	"github.com/standards-lab/go-core/event"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
 
@@ -94,24 +95,36 @@ func (s *store) writable(ctx context.Context, organizationID, id string) (string
 // organization's first write: the top-level directory named with the
 // organization's id and its owner row, in one transaction after the
 // organization is read, so a nonexistent organization is the missing row.
-// A concurrent first write that bound the root first fails this one's
-// insert, and the root it bound is read on the pool. opts reach blobfs's
-// insert, the seed's fixed id among them.
+// The transaction that creates the root emits DirectoryCreated for it, so
+// the root's event precedes the write's own, which commits after it. A
+// concurrent first write that bound the root first fails this one's
+// insert, rolling back its event with it, and the root it bound is read on
+// the pool. opts reach blobfs's insert, the seed's fixed id among them, so
+// a seed that creates a root emits its event too.
 func (s *store) ensureRoot(ctx context.Context, organizationID string, opts ...bfdata.CreateOption) (string, error) {
 	root, err := s.documentRoot(ctx, s.db, organizationID)
 	if !errors.Is(err, sql.ErrNoRows) {
 		return root, err
 	}
-	root, err = s.db.Transact(ctx, func(tx *sqlate.Tx) (string, error) {
+	root, err = s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (string, error) {
 		if err := s.organizationExists(ctx, tx, organizationID); err != nil {
 			return "", fmt.Errorf("organization %s: %w", organizationID, err)
 		}
-		dir, _, err := s.storage.FS.Directories.Ensure(ctx, tx, blobfs.RootID, organizationID, opts...)
+		dir, created, err := s.storage.FS.Directories.Ensure(ctx, tx, blobfs.RootID, organizationID, opts...)
 		if err != nil {
 			return "", err
 		}
-		return dir.ID, s.bind(ctx, tx, organizationID, dir.ID)
-	})
+		if err := s.bind(ctx, tx, organizationID, dir.ID); err != nil {
+			return "", err
+		}
+		// A directory found rather than created is no root this write
+		// made: a found one either belongs to the write that won the
+		// race, whose bind refuses this one's, or was made before.
+		if created {
+			raiseDirectory(q, DirectoryCreated, organizationID, dir.ID, dir)
+		}
+		return dir.ID, nil
+	}))
 	if errors.Is(err, blobfs.ErrNameTaken) || errors.Is(err, sqlate.ErrUniqueViolation) {
 		return s.documentRoot(ctx, s.db, organizationID)
 	}
@@ -119,19 +132,27 @@ func (s *store) ensureRoot(ctx context.Context, organizationID string, opts ...b
 }
 
 // createDirectory creates a directory under the parent, within the root,
-// ensuring the root when the parent is its alias.
+// ensuring the root when the parent is its alias, and emits
+// DirectoryCreated in the create's transaction, its data the row the
+// insert returned. A refused create, a parent out of scope or a taken
+// name, commits no event.
 func (s *store) createDirectory(ctx context.Context, organizationID string, c CreateDirectory) (Identity, error) {
 	parent, err := s.writable(ctx, organizationID, c.ParentID)
 	if err != nil {
 		return Identity{}, err
 	}
-	dir, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (blobfs.Directory, error) {
-		_, parent, err := s.scope(ctx, tx, organizationID, parent)
+	dir, err := s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (blobfs.Directory, error) {
+		root, parent, err := s.scope(ctx, tx, organizationID, parent)
 		if err != nil {
 			return blobfs.Directory{}, err
 		}
-		return s.storage.FS.Directories.Create(ctx, tx, parent, c.Name)
-	})
+		dir, err := s.storage.FS.Directories.Create(ctx, tx, parent, c.Name)
+		if err != nil {
+			return blobfs.Directory{}, err
+		}
+		raiseDirectory(q, DirectoryCreated, organizationID, root, dir)
+		return dir, nil
+	}))
 	return Identity{ID: dir.ID, Version: dir.Version}, err
 }
 
@@ -216,41 +237,54 @@ func (s *store) listScope(ctx context.Context, organizationID, id string) (root,
 }
 
 // deleteDirectory removes the empty directory at version in one
-// transaction with its scope check. Removing the root removes its owner row
-// with it, through the owner row's cascading foreign key, so the
-// organization has no root until its next write ensures a new one.
+// transaction with its scope check, and DirectoryDeleted, at the version
+// the guarded delete matched, the one the row was removed at. Removing the
+// root removes its owner row with it, through the owner row's cascading
+// foreign key, so the organization has no root until its next write
+// ensures a new one. A refused delete commits no event.
 func (s *store) deleteDirectory(ctx context.Context, organizationID, id string, version int64) error {
-	_, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (struct{}, error) {
+	_, err := s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (struct{}, error) {
 		_, id, err := s.scope(ctx, tx, organizationID, id)
 		if err != nil {
 			return struct{}{}, err
 		}
-		return struct{}{}, s.storage.FS.Directories.Delete(ctx, tx, id, bfdata.AtVersion(version))
-	})
+		if err := s.storage.FS.Directories.Delete(ctx, tx, id, bfdata.AtVersion(version)); err != nil {
+			return struct{}{}, err
+		}
+		DirectoryDeleted.Raise(q, id, DirectoryDeletedData{DirectoryID: id, OrganizationID: organizationID, Version: version})
+		return struct{}{}, nil
+	}))
 	return err
 }
 
 // markBranch begins the delete of the directory with everything beneath
 // it: blobfs's mark, the directory at version, in one transaction with the
-// scope check, and returns the directory's id. The sweep removes the
-// branch after the commit. A directory deleting already is the mark's
-// retry, which converges at any version.
+// scope check and DirectoryDeleted for the directory alone, and returns
+// the directory's id. The sweep removes the branch after the commit and
+// emits nothing. A directory deleting already is the mark's retry, which
+// converges at any version: blobfs's mark counts no directory, so it emits
+// nothing, the first mark having emitted the directory's event.
 func (s *store) markBranch(ctx context.Context, organizationID, id string, version int64) (string, error) {
-	return s.db.Transact(ctx, func(tx *sqlate.Tx) (string, error) {
+	return s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (string, error) {
 		_, id, err := s.scope(ctx, tx, organizationID, id)
 		if err != nil {
 			return "", err
 		}
-		_, err = s.storage.FS.Directories.MarkDeleting(ctx, tx, id, bfdata.AtVersion(version))
-		return id, err
-	})
+		marked, err := s.storage.FS.Directories.MarkDeleting(ctx, tx, id, bfdata.AtVersion(version))
+		if err != nil || marked.Directories == 0 {
+			return id, err
+		}
+		return id, s.raiseMarked(ctx, tx, q, organizationID, id)
+	}))
 }
 
 // moveDirectory moves the directory under a new parent within the same
-// root, under blobfs's tree lock and cycle check and the version guard. The
-// root itself stays where it is.
+// root, under blobfs's tree lock and cycle check and the version guard, and
+// emits DirectoryMoved in the move's transaction, its data the row the
+// update returned. The root itself stays where it is. A refused move, a
+// cycle, a stale version, or a taken name, commits no event.
 func (s *store) moveDirectory(ctx context.Context, organizationID, id string, version int64, m MoveDirectory) (Identity, error) {
-	dir, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (blobfs.Directory, error) {
+	dir, err := s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (blobfs.Directory, error) {
 		root, id, err := s.scope(ctx, tx, organizationID, id)
 		if err != nil {
 			return blobfs.Directory{}, err
@@ -262,8 +296,13 @@ func (s *store) moveDirectory(ctx context.Context, organizationID, id string, ve
 		if err != nil {
 			return blobfs.Directory{}, err
 		}
-		return s.storage.FS.Directories.Move(ctx, tx, id, parent, m.Name, version)
-	})
+		dir, err := s.storage.FS.Directories.Move(ctx, tx, id, parent, m.Name, version)
+		if err != nil {
+			return blobfs.Directory{}, err
+		}
+		raiseDirectory(q, DirectoryMoved, organizationID, root, dir)
+		return dir, nil
+	}))
 	return Identity{ID: dir.ID, Version: dir.Version}, err
 }
 
@@ -383,7 +422,9 @@ func (s seed) Write(ctx context.Context, raw json.RawMessage, _ fs.FS) (int, err
 
 // seedTree ensures the organization's document root under the tree's root
 // id, then its entries beneath it. The root is not counted: it is the
-// hierarchy's anchor, not an entry.
+// hierarchy's anchor, not an entry. A root the seed creates emits its
+// DirectoryCreated, as ensureRoot's every creation does; the entries emit
+// nothing.
 func (s *store) seedTree(ctx context.Context, t seedTree) (int, error) {
 	org, err := s.seedOrganization(ctx, s.db, t.Organization)
 	if err != nil {

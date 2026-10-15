@@ -122,7 +122,7 @@ func TestStore_FileProtocols(t *testing.T) {
 // first, the directory and its owner row in one transaction.
 func TestStore_UploadFileEnsuresTheRoot(t *testing.T) {
 	s, rec, _ := serviceOver(t,
-		root(), organization(), datatest.DirectoryRows(), datatest.DirectoryRows(directory(rootID, blobfs.RootID, orgID, 1)), exec(1),
+		root(), organization(), datatest.DirectoryRows(), datatest.DirectoryRows(directory(rootID, blobfs.RootID, orgID, 1)), exec(1), exec(1),
 		root(rootID), datatest.FileRows(file(fileID, rootID, blobfs.StatusPending, 1)),
 		datatest.FileRows(file(fileID, rootID, blobfs.StatusAvailable, 2)), exec(1),
 	)
@@ -130,7 +130,7 @@ func TestStore_UploadFileEnsuresTheRoot(t *testing.T) {
 		t.Fatalf("UploadFile = %v", err)
 	}
 	sameOps(t, rec,
-		q, begin, q, q, q, x, commit,
+		q, begin, q, q, q, x, x, commit,
 		begin, q, q, commit, begin, q, x, commit,
 	)
 }
@@ -317,12 +317,13 @@ func TestStore_MoveDirectory(t *testing.T) {
 		root(rootID), within(true), within(true), // the directory and its destination in scope
 		within(false), // blobfs's cycle check
 		datatest.DirectoryRows(directory(subID, dirID, "archive", 2)), // the guarded update
+		exec(1), // its event
 	)
 	id, err := s.MoveDirectory(context.Background(), orgID, subID, 1, document.MoveDirectory{ParentID: dirID, Name: "archive"})
 	if err != nil || id != (document.Identity{ID: subID, Version: 2}) {
 		t.Fatalf("MoveDirectory = %+v, %v", id, err)
 	}
-	sameOps(t, rec, begin, q, q, q, q, q, commit)
+	sameOps(t, rec, begin, q, q, q, q, q, x, commit)
 }
 
 // The root is not moved, by its alias before any I/O or by its id once
@@ -385,12 +386,13 @@ func TestStore_DeleteBranchMarksThenNudges(t *testing.T) {
 		root(rootID), within(true),
 		exec(2), // the directory and one beneath it marked
 		exec(3), // their files marked
+		datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), exec(1), // the directory read for its event, written
 	)
 	id, err := s.DeleteBranch(context.Background(), orgID, dirID, 1)
 	if err != nil || id != dirID {
 		t.Fatalf("DeleteBranch = %q, %v", id, err)
 	}
-	sameOps(t, rec, begin, q, q, x, x, commit)
+	sameOps(t, rec, begin, q, q, x, x, q, x, commit)
 	mark := rec.Calls()[3]
 	if !strings.HasPrefix(mark.SQL, "UPDATE blobfs_directory") || fmt.Sprint(mark.Args) != fmt.Sprint([]any{dirID, int64(1)}) {
 		t.Errorf("mark = %q %v; want the directory at the If-Match version", mark.SQL, mark.Args)
@@ -424,7 +426,7 @@ func TestStore_DeleteBranchRetryConverges(t *testing.T) {
 func TestStore_DeleteBranchAtAStaleVersion(t *testing.T) {
 	s, rec, _, sweep := serviceNudged(t,
 		root(rootID), within(true), exec(0), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2)),
-		root(rootID), exec(1), exec(0),
+		root(rootID), exec(1), exec(0), datatest.DirectoryRows(deleting(directory(rootID, blobfs.RootID, orgID, 1))), exec(1),
 	)
 	ctx := context.Background()
 	if _, err := s.DeleteBranch(ctx, orgID, dirID, 1); !errors.Is(err, query.ErrVersionMismatch) {
@@ -436,7 +438,7 @@ func TestStore_DeleteBranchAtAStaleVersion(t *testing.T) {
 	if id, err := s.DeleteBranch(ctx, orgID, document.RootAlias, 1); err != nil || id != rootID {
 		t.Fatalf("DeleteBranch(root) = %q, %v; want the root marked", id, err)
 	}
-	sameOps(t, rec, begin, q, q, x, q, sqltest.OpRollback, begin, q, x, x, commit)
+	sameOps(t, rec, begin, q, q, x, q, sqltest.OpRollback, begin, q, x, x, q, x, commit)
 }
 
 // The deletes guard on the If-Match version: a file or an empty directory

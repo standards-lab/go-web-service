@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/standards-lab/go-web-sdk/webtest"
 	"github.com/standards-lab/sqlate"
 
+	"github.com/standards-lab/go-web-service/domain/document"
 	"github.com/standards-lab/go-web-service/integration"
 )
 
@@ -62,6 +64,22 @@ func pending(t *testing.T, db *sqlate.DB) int {
 		t.Fatalf("count the pending outbox rows: %v", err)
 	}
 	return n
+}
+
+// outboxHolds reports whether the outbox holds the row of the event with
+// id, published or not.
+func outboxHolds(t *testing.T, db *sqlate.DB, id string) bool {
+	t.Helper()
+	rows, err := db.QueryContext(context.Background(), "SELECT 1 FROM messaging_outbox WHERE id = $1", id)
+	if err != nil {
+		t.Fatalf("read the outbox row %s: %v", id, err)
+	}
+	defer func() { _ = rows.Close() }()
+	held := rows.Next()
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read the outbox row %s: %v", id, err)
+	}
+	return held
 }
 
 // eventRecords is out's records with msg msg naming the event id.
@@ -162,10 +180,12 @@ func TestMessaging_BrokerOutage(t *testing.T) {
 // exclusively, so the reset waits out the row in flight and the relay
 // claims nothing while the messaging set is reverted and applied again.
 // The event is held pending by severing NATS, so its publish fails and its
-// row stays in the outbox until the reset reverts it. From the reset's
-// start the relay reports no failure but the probe's refused publish, a
-// database error among them, and once NATS returns the service is ready,
-// the relay check with it, with nothing pending.
+// row stays in the outbox until the reset reverts it. The reset's seed
+// commits the seeded document roots' directory.created to the outbox
+// applied again, and their publishes fail too while NATS is severed. From
+// the reset's start the relay reports no failure but those refused
+// publishes, a database error among them, and once NATS returns the
+// service is ready, the relay check with it, with nothing pending.
 func TestMessaging_StateResetUnderTheRelay(t *testing.T) {
 	f := processtest.Forward(t, integration.NATSAddr())
 	s := integration.Start(t, integration.Options{
@@ -180,6 +200,9 @@ func TestMessaging_StateResetUnderTheRelay(t *testing.T) {
 	c := s.Client()
 	integration.Reset(t, c, integration.Default)
 	db := integration.Database(t)
+	// The reset's seed committed the seeded roots' events; the probe's row
+	// is to be the only one pending once NATS is severed.
+	processtest.WaitFor(t, "the reset's seeded events published", func() bool { return pending(t, db) == 0 })
 
 	f.Sever()
 	restored := false
@@ -204,8 +227,8 @@ func TestMessaging_StateResetUnderTheRelay(t *testing.T) {
 	if m := tr.Schema.Set("messaging"); m.Version != m.Latest || m.Latest < 1 || !tr.Schema.Ready {
 		t.Errorf("schema after the reset = %+v, want the messaging set current and the schema ready", tr.Schema)
 	}
-	if n := pending(t, db); n != 0 {
-		t.Errorf("pending = %d after the reset, want the reverted outbox empty", n)
+	if outboxHolds(t, db, id) {
+		t.Errorf("the outbox holds the probe's row after the reset; want it reverted")
 	}
 
 	f.Restore(t)
@@ -214,12 +237,15 @@ func TestMessaging_StateResetUnderTheRelay(t *testing.T) {
 		return c.Get(t, "/readyz").Status == http.StatusOK
 	})
 	assertReady(t, c)
+	processtest.WaitFor(t, "the seeded roots' events published", func() bool { return pending(t, db) == 0 })
 	// The probe's row reports its refused publish until the reset reverts
-	// it, the row in flight as the reset began among them; any other
+	// it, the row in flight as the reset began among them, and a seeded
+	// root's event its refused publish until NATS returns; any other
 	// failure, such as a claim against the reverted outbox, is the relay's
 	// running beside the reset.
 	for _, r := range withMsg(s.Output()[before:], "messaging failure") {
-		if r["event"] != id {
+		seeded := r["type"] == document.DirectoryCreated.Type() && strings.Contains(fmt.Sprint(r["error"]), "nats: publish")
+		if r["event"] != id && !seeded {
 			t.Errorf("the relay reported a failure during or after the reset: %v", r)
 		}
 	}

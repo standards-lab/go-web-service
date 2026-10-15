@@ -17,6 +17,11 @@
 //   - [Service], built by [New]: the layer's operations, one per endpoint.
 //   - [Sweeper]: the nudge the layer gives the sweep after marking a branch.
 //   - [Recorder]: the recorder the layer emits its events through.
+//   - [DirectoryCreated] and [DirectoryMoved], with [DirectoryData], and
+//     [DirectoryDeleted], with [DirectoryDeletedData]: the events the
+//     directory commands emit, each in the transaction that makes its
+//     change true; the document root's DirectoryCreated commits in the
+//     transaction that creates the root on the organization's first write.
 //   - [FileUploaded], with [FileUploadedData]: the event an upload emits
 //     in the transaction that makes its file available.
 //   - [Routes]: the route group the composition root mounts.

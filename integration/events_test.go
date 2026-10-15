@@ -199,9 +199,10 @@ func TestEvents_AFailedUploadEmitsNothing(t *testing.T) {
 	})
 }
 
-// Seeding emits nothing: neither the seed a startup applies to an empty
+// Seeding emits no upload: neither the seed a startup applies to an empty
 // schema, which writes every seeded file and logo, nor a state reset's.
-// The subscriber binds while a first process runs, which reverts the
+// (A seeded document root emits its directory.created, as every root's
+// creation does; the case does not subscribe to it.) The subscriber binds while a first process runs, which reverts the
 // schema and stops; a second starts over the empty schema and seeds it.
 func TestEvents_SeedsEmitNothing(t *testing.T) {
 	first := integration.Start(t, integration.Options{Seed: integration.Default})
@@ -250,13 +251,23 @@ var commandTypes = []string{
 	orgdomain.OrganizationCreated.Type(), orgdomain.OrganizationEdited.Type(),
 	orgdomain.OrganizationTransferred.Type(), orgdomain.OrganizationDeleted.Type(),
 	logoUploaded, logoDeleted,
+	document.DirectoryCreated.Type(), document.DirectoryMoved.Type(), document.DirectoryDeleted.Type(),
 }
 
-// commandFixture is what a command case runs against: the client, and the
-// default state's organizations by code, as the case found them.
+// commandFixture is what a command case runs against: the client, the
+// default state's organizations by code, as the case found them, and the
+// document API of the documents' organization.
 type commandFixture struct {
 	c    *webtest.Client
 	orgs map[string]organization
+	docs string
+}
+
+// mkdir creates a directory named name under parent, the root alias or a
+// directory id, in the fixture's documents.
+func (f commandFixture) mkdir(t *testing.T, parent, name string) identity {
+	t.Helper()
+	return webtest.Decode[identity](t, f.c.Post(t, f.docs+"/directories", map[string]string{"parent_id": parent, "name": name}), http.StatusCreated)
 }
 
 // commandCase is one command and the event it commits: run performs it,
@@ -300,6 +311,26 @@ var commandCases = []commandCase{
 		f.c.Delete(t, logo).Expect(t, http.StatusNoContent)
 		return logoDeleted, id.ID
 	}},
+	{"directory create", func(t *testing.T, f commandFixture) (string, string) {
+		return document.DirectoryCreated.Type(), f.mkdir(t, "root", "events-created").ID
+	}},
+	{"directory delete", func(t *testing.T, f commandFixture) (string, string) {
+		id := f.mkdir(t, "root", "events-deleted")
+		f.c.Delete(t, f.docs+"/directories/"+id.ID, webtest.IfMatch(id.Version)).Expect(t, http.StatusNoContent)
+		return document.DirectoryDeleted.Type(), id.ID
+	}},
+	{"directory delete branch", func(t *testing.T, f commandFixture) (string, string) {
+		id := f.mkdir(t, "root", "events-branch")
+		f.mkdir(t, id.ID, "beneath")
+		f.c.Delete(t, f.docs+"/directories/"+id.ID+"?recursive=true", webtest.IfMatch(id.Version)).Expect(t, http.StatusAccepted)
+		return document.DirectoryDeleted.Type(), id.ID
+	}},
+	{"directory move", func(t *testing.T, f commandFixture) (string, string) {
+		to := f.mkdir(t, "root", "events-destination")
+		id := f.mkdir(t, "root", "events-moved")
+		webtest.Decode[identity](t, f.c.Post(t, f.docs+"/directories/"+id.ID+"/move", map[string]string{"parent_id": to.ID, "name": "events-moved"}, webtest.IfMatch(id.Version)), http.StatusOK)
+		return document.DirectoryMoved.Type(), id.ID
+	}},
 }
 
 // Each command commits exactly one event of its type about the entity the
@@ -312,12 +343,12 @@ func TestEvents_EachCommandEmitsItsEvent(t *testing.T) {
 	c := s.Client()
 	integration.Reset(t, c, integration.Default)
 	events := integration.Subscribe(t, append([]string{uploaded}, commandTypes...)...)
-	f := commandFixture{c: c, orgs: tree(t, c)}
-	docs := "/api/documents/" + f.orgs[docsOrg].ID
+	orgs := tree(t, c)
+	f := commandFixture{c: c, orgs: orgs, docs: "/api/documents/" + orgs[docsOrg].ID}
 	for i, cc := range commandCases {
 		t.Run(cc.name, func(t *testing.T) {
 			typ, subject := cc.run(t, f)
-			_, got := marker(t, c, events, docs, fmt.Sprintf("after-command-%d.txt", i))
+			_, got := marker(t, c, events, f.docs, fmt.Sprintf("after-command-%d.txt", i))
 			var match []event.Event
 			for _, e := range about(got, subject) {
 				if e.Type == typ {
@@ -331,6 +362,51 @@ func TestEvents_EachCommandEmitsItsEvent(t *testing.T) {
 				t.Errorf("event = %+v; want it from web-service, stamped", e)
 			}
 		})
+	}
+}
+
+// An organization's first write under the root alias creates its document
+// root, and the root's web-service.document.directory.created is delivered
+// before the write's own: the root's commits in the transaction that
+// creates it, the write's in its own after it. The root's data shows it
+// as the API does, with no parent and named "/". A second write, which
+// finds the root, commits no root event.
+func TestEvents_AFirstWriteUnderTheRootEmitsTheRootsCreateFirst(t *testing.T) {
+	s := integration.Start(t, integration.Options{Seed: integration.Default})
+	c := s.Client()
+	integration.Reset(t, c, integration.Default)
+	created := document.DirectoryCreated.Type()
+	events := integration.Subscribe(t, created)
+	org := webtest.Decode[identity](t, c.Post(t, organizations, map[string]any{"parent_id": tree(t, c)["acme"].ID, "code": "events-rootless", "name": "Rootless"}), http.StatusCreated)
+	docs := "/api/documents/" + org.ID
+
+	first := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "first"}), http.StatusCreated)
+	second := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "second"}), http.StatusCreated)
+	root := webtest.Decode[directory](t, c.Get(t, docs+"/directories/root"), http.StatusOK)
+
+	// The reset's seed may still be relaying the seeded roots' events, so
+	// the case reads only those about its own directories.
+	var got []event.Event
+	for _, e := range events.Await(t, second.ID) {
+		if e.Subject == root.ID || e.Subject == first.ID || e.Subject == second.ID {
+			got = append(got, e)
+		}
+	}
+	if want := []string{created + " " + root.ID, created + " " + first.ID, created + " " + second.ID}; fmt.Sprint(subjects(got)) != fmt.Sprint(want) {
+		t.Fatalf("events = %v; want the root's, then the first write's, then the second's", subjects(got))
+	}
+	var data map[string]any
+	if err := json.Unmarshal(got[0].Data, &data); err != nil {
+		t.Fatalf("decode the root's data %s: %v", got[0].Data, err)
+	}
+	want := map[string]any{"directory_id": root.ID, "organization_id": org.ID, "parent_id": nil, "name": "/", "version": float64(root.Version)}
+	if len(data) != len(want) {
+		t.Errorf("data = %v; want exactly %v", data, want)
+	}
+	for k, v := range want {
+		if w, ok := data[k]; !ok || w != v {
+			t.Errorf("data[%q] = %v; want %v", k, data[k], v)
+		}
 	}
 }
 

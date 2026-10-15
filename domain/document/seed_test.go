@@ -13,6 +13,8 @@ import (
 	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/sqltest"
+
+	"github.com/standards-lab/go-web-service/domain/document"
 )
 
 // A tree a state names: engineering's, by path, under a fixed root id,
@@ -45,14 +47,16 @@ func idRow(id string) sqltest.Response {
 // at a time, ensures the root under the tree's id with its owner row, then
 // each entry under its own id: the directory on the pool, the file by the
 // write protocol's retry-safe form, its content put and the row completed.
-// The count is the entries created, the root not among them. A seeded file
-// is no upload, so it emits nothing.
+// The count is the entries created, the root not among them. The root is
+// created through the path a request's first write takes, so its
+// transaction commits the root's DirectoryCreated; the seeded directory
+// and file emit nothing (a seeded file is no upload).
 func TestSeed_WritesTheTreeUnderItsIDs(t *testing.T) {
 	ctx := context.Background()
 	s, rec, fake := serviceOver(t,
 		idRow(parentOrgID), organization(), // the path: acme, then engineering
 		root(), // no root yet
-		organization(), datatest.DirectoryRows(), datatest.DirectoryRows(directory(seedRootID, blobfs.RootID, orgID, 1)), exec(1),
+		organization(), datatest.DirectoryRows(), datatest.DirectoryRows(directory(seedRootID, blobfs.RootID, orgID, 1)), exec(1), exec(1),
 		datatest.DirectoryRows(), datatest.DirectoryRows(directory(seedDirID, seedRootID, "reports", 1)),
 		datatest.FileRows(), datatest.FileRows(seedFile(blobfs.StatusPending, 1)),
 		datatest.FileRows(seedFile(blobfs.StatusAvailable, 2)),
@@ -65,7 +69,7 @@ func TestSeed_WritesTheTreeUnderItsIDs(t *testing.T) {
 	if calls[0].Args[0] != nil || calls[0].Args[1] != "acme" || calls[1].Args[0] != parentOrgID || calls[1].Args[1] != "engineering" {
 		t.Errorf("path walk bound %v then %v; want acme under no parent, then engineering under acme", calls[0].Args, calls[1].Args)
 	}
-	for i, id := range map[int]string{6: seedRootID, 10: seedDirID, 13: seedFileID} {
+	for i, id := range map[int]string{6: seedRootID, 11: seedDirID, 14: seedFileID} {
 		if !strings.HasPrefix(calls[i].SQL, "INSERT INTO blobfs_") || calls[i].Args[0] != id {
 			t.Errorf("call %d = %q %v; want the insert under %s", i, calls[i].SQL, calls[i].Args, id)
 		}
@@ -80,11 +84,17 @@ func TestSeed_WritesTheTreeUnderItsIDs(t *testing.T) {
 	}
 	sameOps(t, rec,
 		q, q,
-		q, begin, q, q, q, x, commit,
+		q, begin, q, q, q, x, x, commit,
 		q, q,
 		begin, q, q, commit, q,
 	)
-	noEvent(t, rec)
+	writes := outboxWrites(rec)
+	if len(writes) != 1 {
+		t.Fatalf("events written = %d; want the root's alone", len(writes))
+	}
+	if e := writtenEvent(t, writes[0]); e.Type != document.DirectoryCreated.Type() || e.Subject != seedRootID {
+		t.Errorf("event = %s about %s; want the root's DirectoryCreated", e.Type, e.Subject)
+	}
 }
 
 // A seeded tree seeds nothing again: the root, the directory, and the file

@@ -11,6 +11,8 @@ import (
 	"github.com/standards-lab/blobfs/data/datatest"
 	"github.com/standards-lab/go-core/event"
 	"github.com/standards-lab/go-storage"
+	"github.com/standards-lab/sqlate"
+	"github.com/standards-lab/sqlate/query"
 	"github.com/standards-lab/sqlate/sqltest"
 
 	"github.com/standards-lab/go-web-service/domain/document"
@@ -132,5 +134,347 @@ func TestUploadFile_AFailedEmitRollsBackTheCompletion(t *testing.T) {
 	}
 	if _, err := fake.Get(context.Background(), fileID+"/report.txt", storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
 		t.Errorf("the abandoned upload's object is still stored: %v", err)
+	}
+}
+
+// committedEvents is every event a committed transaction wrote, in commit
+// order: an outbox insert counts once its transaction commits, and one a
+// rollback undid never does.
+func committedEvents(t *testing.T, rec *sqltest.Recorder) []event.Event {
+	t.Helper()
+	var out, open []event.Event
+	for _, c := range rec.Calls() {
+		switch {
+		case c.Op == sqltest.OpExec && strings.Contains(c.SQL, "messaging_outbox"):
+			open = append(open, writtenEvent(t, c))
+		case c.Op == rollback:
+			open = nil
+		case c.Op == commit:
+			out, open = append(out, open...), nil
+		}
+	}
+	return out
+}
+
+// wantEvent fails the test unless e is typ about subject, stamped by the
+// recorder, its data exactly want: every field, and no other.
+func wantEvent(t *testing.T, e event.Event, typ, subject string, want map[string]any) {
+	t.Helper()
+	if e.Type != typ || e.Subject != subject || e.Source != "web-service" || e.ID != eventID ||
+		!e.Time.Equal(eventTime) || e.DataContentType != "application/json" {
+		t.Errorf("event = %+v; want %s about %s, stamped by the recorder", e, typ, subject)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(e.Data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(want) {
+		t.Errorf("data = %v; want exactly %v", got, want)
+	}
+	for k, v := range want {
+		if w, ok := got[k]; !ok || w != v {
+			t.Errorf("data[%q] = %v; want %v", k, got[k], v)
+		}
+	}
+}
+
+// written scripts the outbox insert of one event.
+func written() sqltest.Response { return sqltest.Response{Affected: 1} }
+
+// Each directory command writes exactly one event, its kind's, in the
+// transaction that makes its change true: the outbox insert is the last
+// statement before that transaction's commit. Its subject is the
+// directory's id, and its data the directory's stored state after the
+// command, under the API's field names, every field checked: no path, no
+// status, no timestamps, no earlier state. A create under the alias that
+// finds the root emits no root event, and a branch's delete emits for the
+// marked directory alone, at the version the mark left it at.
+func TestCommands_EmitTheirEventInTheirTransaction(t *testing.T) {
+	ctx := context.Background()
+	cases := map[string]struct {
+		responses []sqltest.Response
+		run       func(*document.Service) error
+		ops       []sqltest.Op
+		typ       string
+		subject   string
+		data      map[string]any
+	}{
+		"create": {
+			[]sqltest.Response{root(rootID), within(true), datatest.DirectoryRows(directory(subID, dirID, "drafts", 1)), written()},
+			func(s *document.Service) error {
+				_, err := s.CreateDirectory(ctx, orgID, document.CreateDirectory{ParentID: dirID, Name: "drafts"})
+				return err
+			},
+			[]sqltest.Op{begin, q, q, q, x, commit},
+			document.DirectoryCreated.Type(), subID,
+			map[string]any{"directory_id": subID, "organization_id": orgID, "parent_id": dirID, "name": "drafts", "version": float64(1)},
+		},
+		"create under the alias, the root found": {
+			[]sqltest.Response{root(rootID), root(rootID), datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)), written()},
+			func(s *document.Service) error {
+				_, err := s.CreateDirectory(ctx, orgID, document.CreateDirectory{ParentID: document.RootAlias, Name: "reports"})
+				return err
+			},
+			[]sqltest.Op{q, begin, q, q, x, commit},
+			document.DirectoryCreated.Type(), dirID,
+			map[string]any{"directory_id": dirID, "organization_id": orgID, "parent_id": rootID, "name": "reports", "version": float64(1)},
+		},
+		"move": {
+			[]sqltest.Response{
+				root(rootID), within(true), within(true), within(false),
+				datatest.DirectoryRows(directory(subID, dirID, "archive", 3)), written(),
+			},
+			func(s *document.Service) error {
+				_, err := s.MoveDirectory(ctx, orgID, subID, 2, document.MoveDirectory{ParentID: dirID, Name: "archive"})
+				return err
+			},
+			[]sqltest.Op{begin, q, q, q, q, q, x, commit},
+			document.DirectoryMoved.Type(), subID,
+			map[string]any{"directory_id": subID, "organization_id": orgID, "parent_id": dirID, "name": "archive", "version": float64(3)},
+		},
+		"move into the root": {
+			[]sqltest.Response{
+				root(rootID), within(true), within(false),
+				datatest.DirectoryRows(directory(subID, rootID, "archive", 3)), written(),
+			},
+			func(s *document.Service) error {
+				_, err := s.MoveDirectory(ctx, orgID, subID, 2, document.MoveDirectory{ParentID: document.RootAlias, Name: "archive"})
+				return err
+			},
+			[]sqltest.Op{begin, q, q, q, q, x, commit},
+			document.DirectoryMoved.Type(), subID,
+			map[string]any{"directory_id": subID, "organization_id": orgID, "parent_id": rootID, "name": "archive", "version": float64(3)},
+		},
+		"delete": {
+			[]sqltest.Response{root(rootID), within(true), exec(1), written()},
+			func(s *document.Service) error { return s.DeleteDirectory(ctx, orgID, dirID, 4) },
+			[]sqltest.Op{begin, q, q, x, x, commit},
+			document.DirectoryDeleted.Type(), dirID,
+			map[string]any{"directory_id": dirID, "organization_id": orgID, "version": float64(4)},
+		},
+		"delete the root": {
+			[]sqltest.Response{root(rootID), exec(1), written()},
+			func(s *document.Service) error { return s.DeleteDirectory(ctx, orgID, document.RootAlias, 2) },
+			[]sqltest.Op{begin, q, x, x, commit},
+			document.DirectoryDeleted.Type(), rootID,
+			map[string]any{"directory_id": rootID, "organization_id": orgID, "version": float64(2)},
+		},
+		"delete branch": {
+			[]sqltest.Response{
+				root(rootID), within(true),
+				exec(3), exec(5), // the directory and two beneath it marked, and their files
+				datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), written(),
+			},
+			func(s *document.Service) error {
+				_, err := s.DeleteBranch(ctx, orgID, dirID, 1)
+				return err
+			},
+			[]sqltest.Op{begin, q, q, x, x, q, x, commit},
+			document.DirectoryDeleted.Type(), dirID,
+			map[string]any{"directory_id": dirID, "organization_id": orgID, "version": float64(2)},
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, rec, _ := serviceOver(t, c.responses...)
+			if err := c.run(s); err != nil {
+				t.Fatalf("= %v", err)
+			}
+			sameOps(t, rec, c.ops...)
+			writes := outboxWrites(rec)
+			if len(writes) != 1 {
+				t.Fatalf("events written = %d; want one", len(writes))
+			}
+			calls := rec.Calls()
+			for i, call := range calls {
+				if call.SQL == writes[0].SQL && i+1 < len(calls) && calls[i+1].Op != commit {
+					t.Errorf("the event's write is followed by %v; want the change's commit", calls[i+1].Op)
+				}
+			}
+			wantEvent(t, writtenEvent(t, writes[0]), c.typ, c.subject, c.data)
+		})
+	}
+}
+
+// The organization's first write under the alias creates its document
+// root, and the transaction that creates it commits the root's
+// DirectoryCreated, the root as the API shows it: no parent, named "/".
+// The write's own event follows in its own transaction. A write that
+// loses the race to a concurrent first write, its insert refused or the
+// winner's directory found and its bind refused, rolls back with no root
+// event and reads the winner's root; the write's own event is all it
+// commits. A root that stands commits its event even when the write that
+// made it is refused after.
+func TestEnsureRoot_TheTransactionThatCreatesTheRootEmitsIt(t *testing.T) {
+	ctx := context.Background()
+	rootRow := directory(rootID, blobfs.RootID, orgID, 1)
+	created := []sqltest.Response{root(), organization(), datatest.DirectoryRows(), datatest.DirectoryRows(rootRow), exec(1), written()}
+	nameTaken := sqltest.Response{Err: &sqlate.ConstraintError{Constraint: blobfs.ConstraintUniqueDirectoryParentName, Class: sqlate.ErrUniqueViolation, Err: errors.New("unique")}}
+	bound := sqltest.Response{Err: &sqlate.ConstraintError{Constraint: "uq_organization_directory_organization", Class: sqlate.ErrUniqueViolation, Err: errors.New("unique")}}
+	theWrite := []sqltest.Response{root(rootID), datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)), written()}
+	rootData := map[string]any{"directory_id": rootID, "organization_id": orgID, "parent_id": nil, "name": "/", "version": float64(1)}
+	dirData := map[string]any{"directory_id": dirID, "organization_id": orgID, "parent_id": rootID, "name": "reports", "version": float64(1)}
+	cases := map[string]struct {
+		responses []sqltest.Response
+		ops       []sqltest.Op
+		fails     bool
+		events    []map[string]any // the committed events' data, in order: the root's, then the write's
+	}{
+		"created": {
+			append(created, theWrite...),
+			[]sqltest.Op{q, begin, q, q, q, x, x, commit, begin, q, q, x, commit},
+			false, []map[string]any{rootData, dirData},
+		},
+		"lost the race, the insert refused": {
+			append([]sqltest.Response{root(), organization(), datatest.DirectoryRows(), nameTaken, root(rootID)}, theWrite...),
+			[]sqltest.Op{q, begin, q, q, q, rollback, q, begin, q, q, x, commit},
+			false, []map[string]any{dirData},
+		},
+		"lost the race, the bind refused": {
+			append([]sqltest.Response{root(), organization(), datatest.DirectoryRows(rootRow), bound, root(rootID)}, theWrite...),
+			[]sqltest.Op{q, begin, q, q, x, rollback, q, begin, q, q, x, commit},
+			false, []map[string]any{dirData},
+		},
+		"created, the write refused": {
+			append(created, root(rootID), nameTaken),
+			[]sqltest.Op{q, begin, q, q, q, x, x, commit, begin, q, q, rollback},
+			true, []map[string]any{rootData},
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, rec, _ := serviceOver(t, c.responses...)
+			_, err := s.CreateDirectory(ctx, orgID, document.CreateDirectory{ParentID: document.RootAlias, Name: "reports"})
+			if (err != nil) != c.fails {
+				t.Fatalf("CreateDirectory = %v; want failure %t", err, c.fails)
+			}
+			sameOps(t, rec, c.ops...)
+			events := committedEvents(t, rec)
+			if len(events) != len(c.events) {
+				t.Fatalf("events committed = %d; want %d", len(events), len(c.events))
+			}
+			for i, e := range events {
+				wantEvent(t, e, document.DirectoryCreated.Type(), c.events[i]["directory_id"].(string), c.events[i])
+			}
+		})
+	}
+}
+
+// A mark that finds the directory deleting already, the mark's retry, is
+// accepted as it always was, and commits no event: blobfs's mark counts no
+// directory, and the first mark emitted the directory's.
+func TestDeleteBranch_ARetryOfTheMarkEmitsNothing(t *testing.T) {
+	s, rec, _ := serviceOver(t,
+		root(rootID), within(true),
+		exec(0), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), // nothing marked; deleting already
+		exec(0),
+	)
+	if id, err := s.DeleteBranch(context.Background(), orgID, dirID, 1); err != nil || id != dirID {
+		t.Fatalf("DeleteBranch = %q, %v; want the retry accepted", id, err)
+	}
+	sameOps(t, rec, begin, q, q, x, q, x, commit)
+	noEvent(t, rec)
+}
+
+// A directory command that fails commits no event, however it fails: its
+// transaction rolls back with the change and the event together, and the
+// API's result is the failure it was. That holds for a scope check, a
+// taken name, a cycle, the root's move, the version guard, a non-empty
+// directory, a missing organization, and an event whose own write fails.
+func TestCommands_AFailedCommandCommitsNoEvent(t *testing.T) {
+	ctx := context.Background()
+	stale := datatest.DirectoryRows(directory(dirID, rootID, "reports", 2))
+	taken := sqltest.Response{Err: &sqlate.ConstraintError{Constraint: blobfs.ConstraintUniqueDirectoryParentName, Class: sqlate.ErrUniqueViolation, Err: errors.New("unique")}}
+	refused := sqltest.Response{Err: errors.New("the outbox refused the row")}
+	create := func(parent string) func(*document.Service) error {
+		return func(s *document.Service) error {
+			_, err := s.CreateDirectory(ctx, orgID, document.CreateDirectory{ParentID: parent, Name: "drafts"})
+			return err
+		}
+	}
+	move := func(id string) func(*document.Service) error {
+		return func(s *document.Service) error {
+			_, err := s.MoveDirectory(ctx, orgID, id, 1, document.MoveDirectory{ParentID: dirID, Name: "archive"})
+			return err
+		}
+	}
+	branch := func(s *document.Service) error {
+		_, err := s.DeleteBranch(ctx, orgID, dirID, 1)
+		return err
+	}
+	cases := map[string]struct {
+		responses []sqltest.Response
+		run       func(*document.Service) error
+		ops       []sqltest.Op
+		want      error
+	}{
+		"create, a parent outside the root": {
+			[]sqltest.Response{root(rootID), within(false)}, create(otherID),
+			[]sqltest.Op{begin, q, q, rollback}, blobfs.ErrNotFound,
+		},
+		"create, a taken name": {
+			[]sqltest.Response{root(rootID), within(true), taken}, create(dirID),
+			[]sqltest.Op{begin, q, q, q, rollback}, blobfs.ErrNameTaken,
+		},
+		"create, the event's write refused": {
+			[]sqltest.Response{root(rootID), within(true), datatest.DirectoryRows(directory(subID, dirID, "drafts", 1)), refused}, create(dirID),
+			[]sqltest.Op{begin, q, q, q, x, rollback}, nil,
+		},
+		"create, a missing organization": {
+			[]sqltest.Response{root(), {Columns: []string{"id"}}}, create(document.RootAlias),
+			[]sqltest.Op{q, begin, q, rollback}, nil,
+		},
+		"move, a cycle": {
+			[]sqltest.Response{root(rootID), within(true), within(true), within(true)}, move(subID),
+			[]sqltest.Op{begin, q, q, q, q, rollback}, blobfs.ErrCycle,
+		},
+		"move, the root by its id": {
+			[]sqltest.Response{root(rootID)}, move(rootID),
+			[]sqltest.Op{begin, q, rollback}, document.ErrValidation,
+		},
+		"move, a taken name": {
+			[]sqltest.Response{root(rootID), within(true), within(true), within(false), taken}, move(subID),
+			[]sqltest.Op{begin, q, q, q, q, q, rollback}, blobfs.ErrNameTaken,
+		},
+		"delete, a stale version": {
+			[]sqltest.Response{root(rootID), within(true), exec(0), stale},
+			func(s *document.Service) error { return s.DeleteDirectory(ctx, orgID, dirID, 1) },
+			[]sqltest.Op{begin, q, q, x, q, rollback}, query.ErrVersionMismatch,
+		},
+		"delete, not empty": {
+			[]sqltest.Response{root(rootID), within(true), {Err: notEmpty()}},
+			func(s *document.Service) error { return s.DeleteDirectory(ctx, orgID, dirID, 1) },
+			[]sqltest.Op{begin, q, q, x, rollback}, blobfs.ErrNotEmpty,
+		},
+		"delete, the event's write refused": {
+			[]sqltest.Response{root(rootID), within(true), exec(1), refused},
+			func(s *document.Service) error { return s.DeleteDirectory(ctx, orgID, dirID, 1) },
+			[]sqltest.Op{begin, q, q, x, x, rollback}, nil,
+		},
+		"delete branch, a stale version": {
+			[]sqltest.Response{root(rootID), within(true), exec(0), stale}, branch,
+			[]sqltest.Op{begin, q, q, x, q, rollback}, query.ErrVersionMismatch,
+		},
+		"delete branch, outside the root": {
+			[]sqltest.Response{root(rootID), within(false)}, branch,
+			[]sqltest.Op{begin, q, q, rollback}, blobfs.ErrNotFound,
+		},
+		"delete branch, the event's write refused": {
+			[]sqltest.Response{root(rootID), within(true), exec(1), exec(0), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), refused}, branch,
+			[]sqltest.Op{begin, q, q, x, x, q, x, rollback}, nil,
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, rec, _ := serviceOver(t, c.responses...)
+			err := c.run(s)
+			if err == nil || (c.want != nil && !errors.Is(err, c.want)) {
+				t.Fatalf("= %v; want the command's failure %v", err, c.want)
+			}
+			sameOps(t, rec, c.ops...)
+			if events := committedEvents(t, rec); len(events) != 0 {
+				t.Errorf("events committed = %d; want none", len(events))
+			}
+		})
 	}
 }

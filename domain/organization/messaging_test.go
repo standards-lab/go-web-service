@@ -310,3 +310,44 @@ func noEventCommitted(t *testing.T, rec *sqltest.Recorder) {
 		}
 	}
 }
+
+// committedEvents is every event a committed transaction wrote, in commit
+// order: an outbox insert counts once its transaction commits, and one a
+// rollback undid never does.
+func committedEvents(t *testing.T, rec *sqltest.Recorder) []event.Event {
+	t.Helper()
+	var out, open []event.Event
+	for _, c := range rec.Calls() {
+		switch {
+		case c.Op == sqltest.OpExec && strings.Contains(c.SQL, "messaging_outbox"):
+			open = append(open, writtenEvent(t, c))
+		case c.Op == rollback:
+			open = nil
+		case c.Op == commit:
+			out, open = append(out, open...), nil
+		}
+	}
+	return out
+}
+
+// wantEvent fails the test unless e is typ about subject, stamped by the
+// recorder, its data exactly want: every field, and no other.
+func wantEvent(t *testing.T, e event.Event, typ, subject string, want map[string]any) {
+	t.Helper()
+	if e.Type != typ || e.Subject != subject || e.Source != "web-service" || e.ID != eventID ||
+		!e.Time.Equal(eventTime) || e.DataContentType != "application/json" {
+		t.Errorf("event = %+v; want %s about %s, stamped by the recorder", e, typ, subject)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(e.Data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(want) {
+		t.Errorf("data = %v; want exactly %v", got, want)
+	}
+	for k, v := range want {
+		if w, ok := got[k]; !ok || w != v {
+			t.Errorf("data[%q] = %v; want %v", k, got[k], v)
+		}
+	}
+}

@@ -13,8 +13,11 @@
 //
 // Each command emits one event through the messaging runtime's recorder,
 // in the transaction that makes its change true, so a command that fails
-// commits none; the reads, the seeds, and the purge that finishes a
-// logo's delete emit nothing.
+// commits none. A seed that creates an organization or activates a logo
+// emits OrganizationCreated or LogoUploaded, with the data the command's
+// carries, in the transaction that creates it, and nothing for one it
+// finds already there; the reads and the purge that finishes a logo's
+// delete emit nothing.
 //
 // The package's API:
 //

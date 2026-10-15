@@ -54,8 +54,9 @@ type Seed interface {
 type FileSeed interface {
 	Contribution
 	// Write stores the files rows declare, the state's JSON under Key,
-	// each through blobfs's retry-safe write (Storage.FS.EnsureFile), and
-	// returns how many it stored. A file already there is left as it is,
+	// each through blobfs's retry-safe write (Storage.FS.EnsureFile, or
+	// sdk.EnsureFile, its staging with a completion hook where the file's
+	// event commits), and returns how many it stored. A file already there is left as it is,
 	// and every row carries its id, so a rerun finds each file and a
 	// reset writes it again under the same key. fixtures holds the bytes
 	// a row names by path; rows decode strictly (SeedRows).

@@ -13,8 +13,10 @@ import (
 // the transaction that makes the command's change true, so it is published
 // exactly when the change stands, and never for a command that fails. Each
 // event's subject is the id of the entity its type names: the directory's,
-// or the file's. Reads, the sweep's reclamation of a marked branch, and the
-// purges that finish a delete emit nothing. Their types and their data are
+// or the file's. A seed that creates a root, a directory, or a file emits
+// the event its creation's command emits, with the same data, in the
+// transaction that creates it. Reads, the sweep's reclamation of a marked
+// branch, and the purges that finish a delete emit nothing. Their types and their data are
 // public API: a consumer in another service binds both.
 var (
 	// DirectoryCreated is the event a directory's create emits, its data
@@ -23,7 +25,8 @@ var (
 	// organization's first write under the alias, a seed's among them; a
 	// write that finds the root, or loses the race to create it, emits no
 	// root event. The root's data shows it as the API does: no parent, and
-	// named "/".
+	// named "/". A seed's directory emits it in the transaction that
+	// creates it, and one the seed finds emits nothing.
 	DirectoryCreated = event.Define[DirectoryData]("web-service.document.directory.created")
 	// DirectoryMoved is the event a directory's move emits, its data the
 	// directory as the move left it, under its new parent.
@@ -37,9 +40,10 @@ var (
 	// FileUploaded is the event a document upload emits once its file is
 	// available, its subject the file's id. It commits in the transaction
 	// that completes the upload, so it is published exactly when the file
-	// can be downloaded, and never for an upload that fails. Only the
-	// upload raises it: a seed's file writes, which run blobfs's
-	// retry-safe write, emit nothing.
+	// can be downloaded, and never for an upload that fails. A seed's file
+	// emits it too, in the completion's transaction of blobfs's retry-safe
+	// write when that write completes the file; a file the seed finds
+	// complete emits nothing.
 	FileUploaded = event.Define[FileUploadedData]("web-service.document.file.uploaded")
 	// FileMoved is the event a file's move emits, its data the file as the
 	// move left it, under its new directory and name.

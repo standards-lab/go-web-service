@@ -194,7 +194,8 @@ func (s *store) detach(ctx context.Context, tx *sqlate.Tx, fileID string) error 
 
 // seed is the domain's seed contribution to the data package's named states:
 // the organizations a state carries under "organizations", seeded by the
-// store's own statements in the seed's transaction.
+// store's own statements in the seed's transaction, which commits each
+// inserted organization's OrganizationCreated with it.
 type seed struct{ store *store }
 
 var _ data.Seed = seed{}
@@ -238,18 +239,27 @@ func (s seed) Apply(ctx context.Context, tx *sqlate.Tx, raw json.RawMessage) (in
 
 // seedOne seeds one organization or finds the one already there, returning
 // its id and whether this call inserted it. The seed statement returns no
-// row on conflict; sql.ErrNoRows is that signal.
+// row on conflict; sql.ErrNoRows is that signal. An insert raises
+// OrganizationCreated in tx, the seed's transaction, its data the row read
+// back as a create's is; a row found raises nothing.
 func (s *store) seedOne(ctx context.Context, tx *sqlate.Tx, parent any, o seedRow) (id string, inserted bool, err error) {
-	id, err = s.seedRows.One(ctx, tx, query.Args{"parent": parent, "code": o.Code, "name": o.Name})
-	if err == nil {
-		return id, true, nil
+	type seeded struct {
+		id       string
+		inserted bool
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return "", false, err
-	}
-	id, err = s.findSeededRows.One(ctx, tx, query.Args{"parent": parent, "code": o.Code})
-	if errors.Is(err, sql.ErrNoRows) {
-		err = errors.New("neither inserted nor found")
-	}
-	return id, false, err
+	r, err := s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (seeded, error) {
+		id, err := s.seedRows.One(ctx, tx, query.Args{"parent": parent, "code": o.Code, "name": o.Name})
+		if err == nil {
+			return seeded{id, true}, s.raiseStored(ctx, tx, q, OrganizationCreated, id)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return seeded{}, err
+		}
+		id, err = s.findSeededRows.One(ctx, tx, query.Args{"parent": parent, "code": o.Code})
+		if errors.Is(err, sql.ErrNoRows) {
+			err = errors.New("neither inserted nor found")
+		}
+		return seeded{id, false}, err
+	})(tx)
+	return r.id, r.inserted, err
 }

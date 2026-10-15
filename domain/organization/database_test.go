@@ -363,21 +363,29 @@ func TestStore_ListContinuesByCursor(t *testing.T) {
 // rowCount reads the rows a state carries under key, as a contribution
 // reads them, and inserts nothing.
 type rowCount struct {
-	key string
-	n   int
+	key  string
+	rows []defaultRow
+}
+
+// defaultRow is one organization of the default state, as the state file
+// spells it.
+type defaultRow struct {
+	Parent string `json:"parent"`
+	Code   string `json:"code"`
+	Name   string `json:"name"`
 }
 
 func (c *rowCount) Key() string { return c.key }
 func (c *rowCount) Apply(_ context.Context, _ *sqlate.Tx, raw json.RawMessage) (int, error) {
-	rows, err := data.SeedRows[json.RawMessage](raw)
-	c.n = len(rows)
+	rows, err := data.SeedRows[defaultRow](raw)
+	c.rows = rows
 	return 0, err
 }
 
-// defaultOrganizations is how many organizations the default state seeds,
-// read from the state itself, so no test restates its inventory. The state
+// defaultOrganizations is the organizations the default state seeds, read
+// from the state itself, so no test restates its inventory. The state
 // lists them in dependency order, the root first.
-func defaultOrganizations(t *testing.T) int {
+func defaultOrganizations(t *testing.T) []defaultRow {
 	t.Helper()
 	pool, _ := sqltest.Open(t)
 	db := data.New(sqlate.Wrap(pool, sqltest.Dialect{}), query.MustCatalog(query.Patterns(), data.Patterns()))
@@ -385,83 +393,146 @@ func defaultOrganizations(t *testing.T) int {
 	if _, err := data.NewSeeder(db, c, noFiles("logos"), noFiles("documents")).Seed(context.Background(), "default"); err != nil {
 		t.Fatal(err)
 	}
-	if c.n < 2 {
-		t.Fatalf("the default state seeds %d organizations; the tests need a root and a child", c.n)
+	if len(c.rows) < 2 {
+		t.Fatalf("the default state seeds %d organizations; the tests need a root and a child", len(c.rows))
 	}
-	return c.n
+	return c.rows
 }
 
 func idRow(id string) sqltest.Response {
 	return sqltest.Response{Columns: []string{"id"}, Rows: [][]driver.Value{{id}}}
 }
 
-func TestSeed_InsertsEveryRowOnce(t *testing.T) {
-	seedRows := defaultOrganizations(t)
-	responses := make([]sqltest.Response, 0, seedRows)
-	for i := range seedRows {
-		responses = append(responses, idRow(string(rune('a'+i))))
+// seeded scripts the seed's insert of the default state's rows from the
+// first'th on, each under the id seededID gives it: the insert returning
+// the id, the stored read for its event, and the event's outbox write.
+func seeded(rows []defaultRow, first int) []sqltest.Response {
+	ids := map[string]string{"": ""}
+	for i, o := range rows {
+		ids[o.Code] = seededID(i)
 	}
-	s, rec := seeder(t, responses...)
+	var out []sqltest.Response
+	for i, o := range rows[first:] {
+		id := seededID(first + i)
+		if o.Parent == "" {
+			out = append(out, idRow(id), stored(id, o.Code, o.Name, 1), written())
+			continue
+		}
+		out = append(out, idRow(id), stored(id, o.Code, o.Name, 1, ids[o.Parent]), written())
+	}
+	return out
+}
+
+// seededID is the id the scripted seed gives the default state's i'th row.
+func seededID(i int) string { return fmt.Sprintf("00000000-0000-7000-8000-%012x", 0x500+i) }
+
+// wantCreated fails the test unless events are OrganizationCreated about
+// each of the default state's rows from the first'th on, in file order,
+// each carrying the data a create's carries, the stored row.
+func wantCreated(t *testing.T, events []event.Event, rows []defaultRow, first int) {
+	t.Helper()
+	if len(events) != len(rows)-first {
+		t.Fatalf("events committed = %d; want one per inserted organization, %d", len(events), len(rows)-first)
+	}
+	ids := map[string]any{"": nil}
+	for i, o := range rows {
+		ids[o.Code] = seededID(i)
+	}
+	for i, e := range events {
+		o, id := rows[first+i], seededID(first+i)
+		wantEvent(t, e, organization.OrganizationCreated.Type(), id,
+			map[string]any{"organization_id": id, "parent_id": ids[o.Parent], "code": o.Code, "name": o.Name, "version": float64(1)})
+	}
+}
+
+// The seed inserts every row of the state once, in one transaction, and
+// each insert commits OrganizationCreated with it, its data the row read
+// back as a create's is, its outbox write before the next row's insert.
+func TestSeed_InsertsEveryRowOnce(t *testing.T) {
+	rows := defaultOrganizations(t)
+	s, rec := seeder(t, seeded(rows, 0)...)
 
 	n, err := s.Seed(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("Seed: %v", err)
 	}
-	if n["organizations"] != seedRows {
-		t.Fatalf("Seeded = %v; want %d organizations", n, seedRows)
+	if n["organizations"] != len(rows) {
+		t.Fatalf("Seeded = %v; want %d organizations", n, len(rows))
 	}
-	ops := rec.Ops()
-	if ops[0] != sqltest.OpBegin || ops[len(ops)-1] != sqltest.OpCommit {
-		t.Fatalf("ops = %v; want one transaction", ops)
+	want := []sqltest.Op{begin}
+	for range rows {
+		want = append(want, q, q, x)
 	}
-	if rec.Pending() != 0 || rec.RowsLeaked() != 0 {
-		t.Fatalf("pending %d, leaked %d", rec.Pending(), rec.RowsLeaked())
-	}
+	sameOps(t, rec, append(want, commit)...)
 	calls := rec.Calls()
 	// The root binds a null parent; the second row binds the root's id.
-	if calls[1].Args[0] != nil || calls[2].Args[0] != "a" {
-		t.Fatalf("parents bound as %v and %v; want nil then a", calls[1].Args[0], calls[2].Args[0])
+	if calls[1].Args[0] != nil || calls[4].Args[0] != seededID(0) {
+		t.Fatalf("parents bound as %v and %v; want nil then the root's id", calls[1].Args[0], calls[4].Args[0])
 	}
 	if !strings.Contains(calls[1].SQL, "ON CONFLICT ON CONSTRAINT uq_organization_parent_code DO NOTHING") {
 		t.Fatalf("seed statement: %s", calls[1].SQL)
 	}
+	if calls[2].Args[0] != seededID(0) {
+		t.Errorf("the stored read bound %v; want the inserted row's id", calls[2].Args)
+	}
+	wantCreated(t, committedEvents(t, rec), rows, 0)
 }
 
+// A row already there is found by its parent and code, and commits no
+// event; the rows after it are inserted under it, each with its event.
 func TestSeed_FindsExistingRows(t *testing.T) {
-	seedRows := defaultOrganizations(t)
+	rows := defaultOrganizations(t)
 	// The root already exists: no row from the insert, then the lookup.
-	responses := []sqltest.Response{{Columns: []string{"id"}}, idRow("root")}
-	for i := 1; i < seedRows; i++ {
-		responses = append(responses, idRow(string(rune('a'+i))))
-	}
+	responses := append([]sqltest.Response{{Columns: []string{"id"}}, idRow(seededID(0))}, seeded(rows, 1)...)
 	s, rec := seeder(t, responses...)
 
 	n, err := s.Seed(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("Seed: %v", err)
 	}
-	if n["organizations"] != seedRows-1 {
-		t.Fatalf("inserted %d; want %d", n["organizations"], seedRows-1)
+	if n["organizations"] != len(rows)-1 {
+		t.Fatalf("inserted %d; want %d", n["organizations"], len(rows)-1)
 	}
 	calls := rec.Calls()
-	if !strings.Contains(calls[2].SQL, "IS NOT DISTINCT FROM") || calls[3].Args[0] != "root" {
+	if !strings.Contains(calls[2].SQL, "IS NOT DISTINCT FROM") || calls[3].Args[0] != seededID(0) {
 		t.Fatalf("lookup did not resolve the root: %s %v", calls[2].SQL, calls[3].Args)
 	}
 	if rec.Pending() != 0 {
 		t.Fatalf("pending %d", rec.Pending())
 	}
+	wantCreated(t, committedEvents(t, rec), rows, 1)
 }
 
-func TestSeed_RollsBackOnFailure(t *testing.T) {
-	s, rec := seeder(t, idRow("a"), sqltest.Response{Err: errors.New("boom")})
+// A seed over a seeded state finds every row and commits no event.
+func TestSeed_ASeededStateCommitsNoEvent(t *testing.T) {
+	rows := defaultOrganizations(t)
+	var responses []sqltest.Response
+	for i := range rows {
+		responses = append(responses, sqltest.Response{Columns: []string{"id"}}, idRow(seededID(i)))
+	}
+	s, rec := seeder(t, responses...)
+	if n, err := s.Seed(context.Background(), "default"); err != nil || n["organizations"] != 0 {
+		t.Fatalf("Seed = %v, %v; want nothing inserted", n, err)
+	}
+	if w := outboxWrites(rec); len(w) != 0 {
+		t.Errorf("events written = %d; want none", len(w))
+	}
+}
 
-	if _, err := s.Seed(context.Background(), "default"); err == nil || !strings.Contains(err.Error(), "seed organization engineering") {
+// A failure rolls the transaction back, and with it the events of the
+// rows inserted before it: no event commits.
+func TestSeed_RollsBackOnFailure(t *testing.T) {
+	rows := defaultOrganizations(t)
+	s, rec := seeder(t, append(seeded(rows, 0)[:3], sqltest.Response{Err: errors.New("boom")})...)
+
+	if _, err := s.Seed(context.Background(), "default"); err == nil || !strings.Contains(err.Error(), "seed organization "+rows[1].Code) {
 		t.Fatalf("err = %v; want the failing row named", err)
 	}
-	ops := rec.Ops()
-	if ops[len(ops)-1] != sqltest.OpRollback {
-		t.Fatalf("ops = %v; want a rollback last", ops)
+	sameOps(t, rec, begin, q, q, x, q, rollback)
+	if len(outboxWrites(rec)) != 1 {
+		t.Errorf("events written = %d; want the first row's, rolled back", len(outboxWrites(rec)))
 	}
+	noEventCommitted(t, rec)
 }
 
 // The layer's verifier covers its statements, the seed's among them, when

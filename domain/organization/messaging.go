@@ -14,13 +14,17 @@ import (
 // the transaction that makes the command's change true, so it is published
 // exactly when the change stands, and never for a command that fails. Each
 // event's subject is the id of the entity its type names: the
-// organization's, or for a logo event the logo's file id. Reads, the
-// seeds, and the purge that finishes a logo's delete emit nothing. Their
-// types and their data are public API: a consumer in another service binds
-// both.
+// organization's, or for a logo event the logo's file id. A seed that
+// creates an organization emits OrganizationCreated in the seed's row
+// transaction, and one that activates a logo LogoUploaded in the
+// activation's, each with the data its command's carries; an organization
+// or a logo the seed finds already there emits nothing. Reads and the
+// purge that finishes a logo's delete emit nothing. Their types and their
+// data are public API: a consumer in another service binds both.
 var (
 	// OrganizationCreated is the event a create emits, its data the
-	// organization as the insert stored it.
+	// organization as the insert stored it. A seed's insert emits it too,
+	// and a seeded organization found already there emits nothing.
 	OrganizationCreated = event.Define[OrganizationData]("web-service.organization.created")
 	// OrganizationEdited is the event an edit emits, its data the
 	// organization as the edit left it.
@@ -33,7 +37,9 @@ var (
 	OrganizationDeleted = event.Define[OrganizationDeletedData]("web-service.organization.deleted")
 	// LogoUploaded is the event a logo PUT emits once its logo is the
 	// active one, in the transaction that activates it and releases the
-	// logo it replaces; the replaced logo emits no LogoDeleted.
+	// logo it replaces; the replaced logo emits no LogoDeleted. A seed's
+	// logo emits it in the transaction that activates it, and an
+	// organization the seed finds with an active logo emits nothing.
 	LogoUploaded = event.Define[LogoUploadedData]("web-service.organization.logo.uploaded")
 	// LogoDeleted is the event a logo DELETE emits, in the transaction that
 	// releases the logo.

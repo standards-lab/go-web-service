@@ -22,6 +22,8 @@
 //     directory commands emit, each in the transaction that makes its
 //     change true; the document root's DirectoryCreated commits in the
 //     transaction that creates the root on the organization's first write.
+//     A seed's root, directory, or file commits its creation's event, with
+//     the same data, in the transaction that creates it.
 //   - [FileUploaded] and [FileMoved], with [FileUploadedData], and
 //     [FileDeleted], with [FileDeletedData]: the events the file commands
 //     emit: an upload's in the transaction that makes its file available,

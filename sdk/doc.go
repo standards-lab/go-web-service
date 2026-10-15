@@ -10,6 +10,9 @@
 //   - [WriteFile] (blobfs.go, for blobfs): blobfs's two-phase write with a
 //     hook in the completion's transaction, where a domain emits the event
 //     that reports the write.
+//   - [EnsureFile] (blobfs.go, for blobfs): blobfs's retry-safe write with
+//     WriteFile's hook, run only when the call completes the file; a file
+//     found complete runs none.
 //   - [RemoveFile] (blobfs.go, for blobfs): blobfs's two-phase delete with a
 //     hook in the delete's first transaction, where a domain emits the
 //     event that reports the delete; a retry of a delete begun already

@@ -435,9 +435,11 @@ func (s seed) Write(ctx context.Context, raw json.RawMessage, _ fs.FS) (int, err
 
 // seedTree ensures the organization's document root under the tree's root
 // id, then its entries beneath it. The root is not counted: it is the
-// hierarchy's anchor, not an entry. A root the seed creates emits its
-// DirectoryCreated, as ensureRoot's every creation does; the entries emit
-// nothing.
+// hierarchy's anchor, not an entry. Each entry the seed creates commits the
+// event its command's creation commits, with the same data, in the
+// transaction that creates it: the root's DirectoryCreated, as ensureRoot's
+// every creation does, each directory's DirectoryCreated, and each file's
+// FileUploaded. An entry found already there commits none.
 func (s *store) seedTree(ctx context.Context, t seedTree) (int, error) {
 	org, err := s.seedOrganization(ctx, s.db, t.Organization)
 	if err != nil {
@@ -447,15 +449,16 @@ func (s *store) seedTree(ctx context.Context, t seedTree) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return s.seedEntries(ctx, root, t.Entries)
+	return s.seedEntries(ctx, org, root, root, t.Entries)
 }
 
 // seedEntries ensures each entry under the directory with id parent, in
-// file order, and returns how many it created, the subtrees' included.
-func (s *store) seedEntries(ctx context.Context, parent string, entries []seedEntry) (int, error) {
+// the organization's hierarchy under root, in file order, and returns how
+// many it created, the subtrees' included.
+func (s *store) seedEntries(ctx context.Context, organizationID, root, parent string, entries []seedEntry) (int, error) {
 	created := 0
 	for _, e := range entries {
-		n, err := s.seedEntry(ctx, parent, e)
+		n, err := s.seedEntry(ctx, organizationID, root, parent, e)
 		created += n
 		if err != nil {
 			return created, fmt.Errorf("%s: %w", e.Name, err)
@@ -464,37 +467,42 @@ func (s *store) seedEntries(ctx context.Context, parent string, entries []seedEn
 	return created, nil
 }
 
-// seedEntry ensures one entry under the entry's id: a directory by blobfs's
-// insert-or-find, then its entries, and a file by blobfs's Store.EnsureFile.
-// An entry the seed does not own is left as it stands and counts nothing:
-// one there by name under another id (its directory's contents are still
-// ensured), one whose id a row carries under another name, and one whose
-// delete is under way.
-func (s *store) seedEntry(ctx context.Context, parent string, e seedEntry) (int, error) {
+// seedEntry ensures one entry under the entry's id: a directory by
+// seedDirectory, then its entries, and a file by blobfs's retry-safe write
+// as the sdk package stages it, sdk.EnsureFile, whose completion's
+// transaction emits FileUploaded when this call completes the file, as an
+// upload's does. An entry the seed does not own is left as it stands and
+// counts nothing: one there by name under another id (its directory's
+// contents are still ensured), one whose id a row carries under another
+// name, and one whose delete is under way.
+func (s *store) seedEntry(ctx context.Context, organizationID, root, parent string, e seedEntry) (int, error) {
 	st := s.storage
 	isDir, err := e.directory()
 	if err != nil {
 		return 0, err
 	}
 	if isDir {
-		dir, created, err := st.FS.Directories.Ensure(ctx, s.db, parent, e.Name, bfdata.WithID(e.ID))
-		// blobfs recovers a concurrent seed's insert under the same id on
-		// the pool, so ErrIDTaken here is an id a moved directory holds.
+		dir, created, err := s.seedDirectory(ctx, organizationID, root, parent, e)
+		// ErrIDTaken here is an id a moved directory holds: the rerun after
+		// a concurrent seed's insert finds that seed's directory by name.
 		if errors.Is(err, blobfs.ErrIDTaken) || errors.Is(err, blobfs.ErrDeleting) {
 			return 0, nil
 		}
 		if err != nil {
 			return 0, err
 		}
-		n, err := s.seedEntries(ctx, dir.ID, e.Entries)
+		n, err := s.seedEntries(ctx, organizationID, root, dir.ID, e.Entries)
 		if created {
 			n++
 		}
 		return n, err
 	}
-	_, stored, err := st.FS.EnsureFile(ctx, s.db.DB, st.Objects, e.ID, strings.NewReader(e.Content), int64(len(e.Content)), func(tx *sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
-		return st.FS.Files.Ensure(ctx, tx, st.Objects, parent, e.Name, e.ContentType, bfdata.WithID(e.ID))
-	})
+	_, stored, err := sdk.EnsureFile(ctx, st.FS, s.db.DB, st.Objects, e.ID, strings.NewReader(e.Content), int64(len(e.Content)),
+		func(tx *sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
+			return st.FS.Files.Ensure(ctx, tx, st.Objects, parent, e.Name, e.ContentType, bfdata.WithID(e.ID))
+		}, func(tx *sqlate.Tx, f blobfs.File) error {
+			return s.emitUploaded(ctx, tx, organizationID, f)
+		})
 	switch {
 	case errors.Is(err, blobfs.ErrIDTaken), errors.Is(err, blobfs.ErrNameTaken), errors.Is(err, blobfs.ErrDeleting):
 		return 0, nil
@@ -504,6 +512,35 @@ func (s *store) seedEntry(ctx context.Context, parent string, e seedEntry) (int,
 		return 1, nil
 	}
 	return 0, nil
+}
+
+// seedDirectory ensures the entry's directory under parent by blobfs's
+// insert-or-find in one transaction, which emits DirectoryCreated with the
+// data a create's carries when the insert created the directory, and
+// nothing when it found one. A concurrent seed's insert under the name or
+// the id aborts the transaction, which blobfs cannot recover inside it, so
+// the violation reruns it once in a fresh one, which finds that seed's
+// directory and emits nothing; an id a moved directory holds fails again.
+func (s *store) seedDirectory(ctx context.Context, organizationID, root, parent string, e seedEntry) (blobfs.Directory, bool, error) {
+	type ensured struct {
+		dir     blobfs.Directory
+		created bool
+	}
+	ensure := s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (ensured, error) {
+		dir, created, err := s.storage.FS.Directories.Ensure(ctx, tx, parent, e.Name, bfdata.WithID(e.ID))
+		if err != nil {
+			return ensured{}, err
+		}
+		if created {
+			raiseDirectory(q, DirectoryCreated, organizationID, root, dir)
+		}
+		return ensured{dir, created}, nil
+	})
+	r, err := s.db.Transact(ctx, ensure)
+	if errors.Is(err, blobfs.ErrNameTaken) || errors.Is(err, blobfs.ErrIDTaken) {
+		r, err = s.db.Transact(ctx, ensure)
+	}
+	return r.dir, r.created, err
 }
 
 // directoryOf presents a blobfs directory; the document root has no parent

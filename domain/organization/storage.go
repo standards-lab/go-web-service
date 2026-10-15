@@ -194,7 +194,10 @@ func (s logoSeed) Write(ctx context.Context, raw json.RawMessage, fixtures fs.FS
 // one, and reports whether it did. The fixture passes the upload's rules
 // before any I/O. The file is written under the row's id by blobfs's
 // Store.EnsureFile, which finds or resumes an interrupted run's file, and
-// is activated only if no logo became active meanwhile.
+// is activated only if no logo became active meanwhile. The activation's
+// transaction emits LogoUploaded, as a logo PUT's does, its data the file
+// the write completed or found; an organization with an active logo, the
+// seed's or a client's, emits nothing.
 //
 // What the seed does not own it leaves as it stands, with no error: a file
 // under the id that another organization's image binds, a row holding the
@@ -243,7 +246,7 @@ func (s *store) seedLogo(ctx context.Context, l logoSeedRow, fixtures fs.FS) (bo
 	// active is the organization's active logo once the activation
 	// commits, the seeded file when this run attached it.
 	var attached bool
-	active, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (string, error) {
+	active, err := s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (string, error) {
 		if err := st.FS.Files.Hold(ctx, tx, file.ID); err != nil {
 			return "", err
 		}
@@ -255,8 +258,11 @@ func (s *store) seedLogo(ctx context.Context, l logoSeedRow, fixtures fs.FS) (bo
 			return "", err
 		}
 		attached = true
-		return file.ID, s.attach(ctx, tx, org.ID, file.ID)
-	})
+		if err := s.attach(ctx, tx, org.ID, file.ID); err != nil {
+			return "", err
+		}
+		return file.ID, raiseUploaded(q, org.ID, file)
+	}))
 	var ce *sqlate.ConstraintError
 	switch {
 	case err == nil && active == file.ID:

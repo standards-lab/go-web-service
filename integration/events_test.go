@@ -6,8 +6,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -52,6 +56,17 @@ func about(got []event.Event, subject string) []event.Event {
 	return out
 }
 
+// resetDrained resets the database to the default state and waits until
+// the outbox holds nothing pending: the events the reset's seed committed
+// have reached the stream, so a subscriber that binds after it receives
+// none of them.
+func resetDrained(t *testing.T, c *webtest.Client) integration.Transition {
+	t.Helper()
+	tr := integration.Reset(t, c, integration.Default)
+	drained(t, integration.Database(t))
+	return tr
+}
+
 // marker uploads a file named name into the root of docs and waits for its
 // event, returning the identity and every event received by then. The
 // relay publishes in commit order, so an event any earlier command
@@ -92,7 +107,7 @@ func subjects(es []event.Event) []string {
 func TestEvents_AnUploadEmitsFileUploaded(t *testing.T) {
 	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	c := s.Client()
-	integration.Reset(t, c, integration.Default)
+	resetDrained(t, c)
 	events := integration.Subscribe(t, uploaded)
 	org := tree(t, c)[docsOrg].ID
 	docs := "/api/documents/" + org
@@ -144,7 +159,7 @@ func TestEvents_AFailedUploadEmitsNothing(t *testing.T) {
 	db := processtest.Forward(t, integration.DatabaseAddr())
 	s := integration.Start(t, integration.Options{Seed: integration.Default, Storage: store.Addr(), Database: db.Addr()})
 	c := s.Client()
-	integration.Reset(t, c, integration.Default)
+	resetDrained(t, c)
 	events := integration.Subscribe(t, uploaded)
 	docs := "/api/documents/" + tree(t, c)[docsOrg].ID
 	var markers []string
@@ -199,14 +214,102 @@ func TestEvents_AFailedUploadEmitsNothing(t *testing.T) {
 	})
 }
 
-// Seeding emits no upload: neither the seed a startup applies to an empty
-// schema, which writes every seeded file and logo, nor a state reset's.
-// (A seeded document root emits its directory.created, as every root's
-// creation does; the case does not subscribe to it.) The subscriber binds while a first process runs, which reverts the
-// schema and stops; a second starts over the empty schema and seeds it.
-func TestEvents_SeedsEmitNothing(t *testing.T) {
+// seedTypes is every type a seed's creation commits: an organization's,
+// a document root's or directory's, a document's, and a logo's.
+var seedTypes = []string{
+	orgdomain.OrganizationCreated.Type(), document.DirectoryCreated.Type(), uploaded, logoUploaded,
+}
+
+// declaredSeed is what the default state declares, read from the state
+// file itself so no case restates its inventory: its organizations' codes,
+// its logos' file ids, and its document roots', directories', and files'
+// ids, each the subject of the event its creation commits.
+type declaredSeed struct {
+	organizations []string
+	logos         []string
+	directories   []string
+	files         []string
+}
+
+// seedEntry is one directory or file of a state's document tree.
+type seedEntry struct {
+	ID      string      `json:"id"`
+	Entries []seedEntry `json:"entries"`
+	Content *string     `json:"content"`
+}
+
+// defaultSeed reads data/seeds/default.json.
+func defaultSeed(t *testing.T) declaredSeed {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "data", "seeds", "default.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st struct {
+		Organizations []struct {
+			Code string `json:"code"`
+		} `json:"organizations"`
+		Logos []struct {
+			ID string `json:"id"`
+		} `json:"logos"`
+		Documents []struct {
+			Root    string      `json:"root"`
+			Entries []seedEntry `json:"entries"`
+		} `json:"documents"`
+	}
+	if err := json.Unmarshal(raw, &st); err != nil {
+		t.Fatalf("decode the default state: %v", err)
+	}
+	var d declaredSeed
+	for _, o := range st.Organizations {
+		d.organizations = append(d.organizations, o.Code)
+	}
+	for _, l := range st.Logos {
+		d.logos = append(d.logos, l.ID)
+	}
+	var walk func([]seedEntry)
+	walk = func(es []seedEntry) {
+		for _, e := range es {
+			if e.Content != nil {
+				d.files = append(d.files, e.ID)
+				continue
+			}
+			d.directories = append(d.directories, e.ID)
+			walk(e.Entries)
+		}
+	}
+	for _, tr := range st.Documents {
+		d.directories = append(d.directories, tr.Root)
+		walk(tr.Entries)
+	}
+	return d
+}
+
+// bySubject is the subjects of got's events of each type, sorted.
+func bySubject(got []event.Event) map[string][]string {
+	out := map[string][]string{}
+	for _, e := range got {
+		out[e.Type] = append(out[e.Type], e.Subject)
+	}
+	for _, subjects := range out {
+		slices.Sort(subjects)
+	}
+	return out
+}
+
+// The seed a startup applies to an empty schema commits the event of each
+// creation it makes, as the command that creates the entity does: one
+// web-service.organization.created per organization the default state
+// declares, one web-service.document.directory.created per document root
+// and directory, one web-service.document.file.uploaded per file, and one
+// web-service.organization.logo.uploaded per logo, each about the entity
+// it created, and nothing else. The subscriber binds while a first process
+// runs, which reverts the schema and stops; a second starts over the empty
+// schema and seeds it. A marker upload into acme's seeded root follows, so
+// every event the seed committed has arrived by the marker's.
+func TestEvents_TheStartupSeedEmitsItsEvents(t *testing.T) {
 	first := integration.Start(t, integration.Options{Seed: integration.Default})
-	events := integration.Subscribe(t, uploaded)
+	events := integration.Subscribe(t, seedTypes...)
 	integration.Revert(t, first.Client())
 	if code := first.Stop(t); code != 0 {
 		t.Fatalf("exit = %d:\n%s", code, first.Output())
@@ -214,16 +317,46 @@ func TestEvents_SeedsEmitNothing(t *testing.T) {
 
 	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	c := s.Client()
-	docs := "/api/documents/" + tree(t, c)[docsOrg].ID
-	started, got := marker(t, c, events, docs, "after-startup.txt")
-	onlyMarkers(t, got, started.ID)
+	orgs := tree(t, c)
+	m, got := marker(t, c, events, "/api/documents/"+orgs["acme"].ID, "after-startup.txt")
+	got = slices.DeleteFunc(got, func(e event.Event) bool { return e.Subject == m.ID })
 
-	if tr := integration.Reset(t, c, integration.Default); tr.Seeded["documents"] == 0 || tr.Seeded["logos"] == 0 {
-		t.Fatalf("the reset seeded %v; want documents and logos written", tr.Seeded)
+	declared := defaultSeed(t)
+	var orgIDs []string
+	for _, code := range declared.organizations {
+		orgIDs = append(orgIDs, orgs[code].ID)
 	}
-	// The reset seeds the organizations again under new ids.
-	reset, got := marker(t, c, events, "/api/documents/"+tree(t, c)[docsOrg].ID, "after-reset.txt")
-	onlyMarkers(t, got, started.ID, reset.ID)
+	want := map[string][]string{
+		orgdomain.OrganizationCreated.Type(): orgIDs,
+		document.DirectoryCreated.Type():     declared.directories,
+		uploaded:                             declared.files,
+		logoUploaded:                         declared.logos,
+	}
+	have := bySubject(got)
+	for typ, subjects := range want {
+		slices.Sort(subjects)
+		if !slices.Equal(have[typ], subjects) {
+			t.Errorf("%s events = %d about %v; want %d, one about each of %v", typ, len(have[typ]), have[typ], len(subjects), subjects)
+		}
+	}
+	if len(have) != len(want) {
+		t.Errorf("event types = %v; want the seed's alone", slices.Sorted(maps.Keys(have)))
+	}
+}
+
+// A seed rerun over a seeded schema, the admin API's standalone seed verb,
+// finds every entity the state declares and delivers nothing: a marker
+// upload that follows it arrives alone.
+func TestEvents_ASeedOverASeededSchemaDeliversNothing(t *testing.T) {
+	s := integration.Start(t, integration.Options{Seed: integration.Default})
+	c := s.Client()
+	resetDrained(t, c)
+	events := integration.Subscribe(t, seedTypes...)
+	if n := integration.Seed(t, c, integration.Default); !maps.Equal(n, integration.Seeded{"organizations": 0, "logos": 0, "documents": 0}) {
+		t.Fatalf("seed over default = %v; want every contribution at zero", n)
+	}
+	m, got := marker(t, c, events, "/api/documents/"+tree(t, c)["acme"].ID, "after-rerun.txt")
+	onlyMarkers(t, got, m.ID)
 }
 
 // A logo's upload is no document upload: it emits exactly one
@@ -232,7 +365,7 @@ func TestEvents_SeedsEmitNothing(t *testing.T) {
 func TestEvents_ALogoEmitsLogoUploaded(t *testing.T) {
 	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	c := s.Client()
-	integration.Reset(t, c, integration.Default)
+	resetDrained(t, c)
 	events := integration.Subscribe(t, uploaded, logoUploaded, logoDeleted)
 	all := tree(t, c)
 	logo := webtest.Decode[identity](t, c.Put(t, organizations+"/"+all["logistics"].ID+"/logo", webtest.Raw{ContentType: "image/png", Body: []byte("png")}), http.StatusCreated)
@@ -360,7 +493,7 @@ var commandCases = []commandCase{
 func TestEvents_EachCommandEmitsItsEvent(t *testing.T) {
 	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	c := s.Client()
-	integration.Reset(t, c, integration.Default)
+	resetDrained(t, c)
 	events := integration.Subscribe(t, append([]string{uploaded}, commandTypes...)...)
 	orgs := tree(t, c)
 	f := commandFixture{c: c, orgs: orgs, docs: "/api/documents/" + orgs[docsOrg].ID}
@@ -392,7 +525,7 @@ func TestEvents_EachCommandEmitsItsEvent(t *testing.T) {
 func TestEvents_ARepeatedFileDeleteDeliversNothingMore(t *testing.T) {
 	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	c := s.Client()
-	integration.Reset(t, c, integration.Default)
+	resetDrained(t, c)
 	deleted := document.FileDeleted.Type()
 	events := integration.Subscribe(t, uploaded, deleted)
 	docs := "/api/documents/" + tree(t, c)[docsOrg].ID
@@ -427,7 +560,7 @@ func TestEvents_ARepeatedFileDeleteDeliversNothingMore(t *testing.T) {
 func TestEvents_AFirstWriteUnderTheRootEmitsTheRootsCreateFirst(t *testing.T) {
 	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	c := s.Client()
-	integration.Reset(t, c, integration.Default)
+	resetDrained(t, c)
 	created := document.DirectoryCreated.Type()
 	events := integration.Subscribe(t, created)
 	org := webtest.Decode[identity](t, c.Post(t, organizations, map[string]any{"parent_id": tree(t, c)["acme"].ID, "code": "events-rootless", "name": "Rootless"}), http.StatusCreated)
@@ -437,14 +570,7 @@ func TestEvents_AFirstWriteUnderTheRootEmitsTheRootsCreateFirst(t *testing.T) {
 	second := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "second"}), http.StatusCreated)
 	root := webtest.Decode[directory](t, c.Get(t, docs+"/directories/root"), http.StatusOK)
 
-	// The reset's seed may still be relaying the seeded roots' events, so
-	// the case reads only those about its own directories.
-	var got []event.Event
-	for _, e := range events.Await(t, second.ID) {
-		if e.Subject == root.ID || e.Subject == first.ID || e.Subject == second.ID {
-			got = append(got, e)
-		}
-	}
+	got := events.Await(t, second.ID)
 	if want := []string{created + " " + root.ID, created + " " + first.ID, created + " " + second.ID}; fmt.Sprint(subjects(got)) != fmt.Sprint(want) {
 		t.Fatalf("events = %v; want the root's, then the first write's, then the second's", subjects(got))
 	}
@@ -472,7 +598,7 @@ func TestEvents_AFirstWriteUnderTheRootEmitsTheRootsCreateFirst(t *testing.T) {
 func TestEvents_AnUploadInFlightAtTheInterruptIsPublished(t *testing.T) {
 	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	c := s.Client()
-	integration.Reset(t, c, integration.Default)
+	resetDrained(t, c)
 	events := integration.Subscribe(t, uploaded)
 	db := integration.Database(t)
 	held := hold(t, s, "/api/documents/"+tree(t, c)[docsOrg].ID+"/directories/root/files?name=held.txt")

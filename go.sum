@@ -79,8 +79,8 @@ github.com/standards-lab/blobfs/postgres v0.4.0 h1:Z3iZ/Z7xWtHLrKB/3oAuBCNPeLve0
 github.com/standards-lab/blobfs/postgres v0.4.0/go.mod h1:OXQqfiYrWmYTKjLd6MqHVTJOX3DJ0+ziLgutl8GOXnE=
 github.com/standards-lab/go-core v0.10.0 h1:Sb5xuyl/j+7bRwFXegXkEa8CnDUQ4Kz7/vWDogjDptg=
 github.com/standards-lab/go-core v0.10.0/go.mod h1:Yl/R+gM9YWczsePBCKXdPGh3FSdZ/5i8SapLIh3BDHU=
-github.com/standards-lab/go-database v0.8.0 h1:dAY5prMLxGcaeEXE5fTVRFj+VW8JYj1vj9UKYofMEy4=
-github.com/standards-lab/go-database v0.8.0/go.mod h1:zpR4hdn7LbfaeuoJdtNPqGdir3CzZjhcJFXbECy++ck=
+github.com/standards-lab/go-database v0.9.0 h1:Jn5VdzrEkDUJwhPblIKtpZG+5NzuUBhJ4R1ewUFC4e8=
+github.com/standards-lab/go-database v0.9.0/go.mod h1:E3l1vKTuVt1MXt+DxDoW7gKo1UsPDz/nDzLMjc7ch9E=
 github.com/standards-lab/go-database/postgres v0.5.0 h1:LZ8kFErbUxBfD/NUAhN1eyHGDUhw9+c7j7zWNyZ4ZWo=
 github.com/standards-lab/go-database/postgres v0.5.0/go.mod h1:HQyTvXwHuldswDW1yFHyU013xwQmuyEb+b9UA2nRj7A=
 github.com/standards-lab/go-messaging v0.2.0 h1:P7y0S9haIU/pETn7Wos8YZvFwbmEbFWd13AWcuxfZFQ=

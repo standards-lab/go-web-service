@@ -19,6 +19,7 @@ import (
 	"github.com/standards-lab/go-core/process/processtest"
 	"github.com/standards-lab/go-web-sdk/webtest"
 
+	dbadmin "github.com/standards-lab/go-web-service/admin/database"
 	"github.com/standards-lab/go-web-service/domain/document"
 	orgdomain "github.com/standards-lab/go-web-service/domain/organization"
 	"github.com/standards-lab/go-web-service/integration"
@@ -57,9 +58,9 @@ func about(got []event.Event, subject string) []event.Event {
 }
 
 // resetDrained resets the database to the default state and waits until
-// the outbox holds nothing pending: the events the reset's seed committed
-// have reached the stream, so a subscriber that binds after it receives
-// none of them.
+// the outbox holds nothing pending: the reset's own event and the events
+// its seed committed have reached the stream, so a subscriber that binds
+// after it receives none of them.
 func resetDrained(t *testing.T, c *webtest.Client) integration.Transition {
 	t.Helper()
 	tr := integration.Reset(t, c, integration.Default)
@@ -321,6 +322,14 @@ func TestEvents_TheStartupSeedEmitsItsEvents(t *testing.T) {
 	m, got := marker(t, c, events, "/api/documents/"+orgs["acme"].ID, "after-startup.txt")
 	got = slices.DeleteFunc(got, func(e event.Event) bool { return e.Subject == m.ID })
 
+	theDefaultSeeds(t, got, orgs)
+}
+
+// theDefaultSeeds fails the test unless got is the default state's seed
+// events and nothing else, each type's about each entity the state
+// declares once, orgs naming the organizations the seed created by code.
+func theDefaultSeeds(t *testing.T, got []event.Event, orgs map[string]organization) {
+	t.Helper()
 	declared := defaultSeed(t)
 	var orgIDs []string
 	for _, code := range declared.organizations {
@@ -635,4 +644,116 @@ func TestEvents_AnUploadInFlightAtTheInterruptIsPublished(t *testing.T) {
 	if n := pending(t, db); n != 0 {
 		t.Errorf("pending = %d after exit, want 0", n)
 	}
+}
+
+// stateReset is a state reset's event type.
+var stateReset = dbadmin.StateReset.Type()
+
+// everyType is every type the service commits, and the suite's probe's:
+// a subscriber to them all receives whatever an operation delivers.
+func everyType() []string {
+	return slices.Concat([]string{stateReset, probe.Type()}, seedTypes, commandTypes)
+}
+
+// afterProbe commits a probe event beneath the API and waits for it,
+// returning the events received after the first skip, up to the probe's,
+// which is left out. The relay publishes in commit order, so an event
+// committed before the probe's has arrived by then.
+func afterProbe(t *testing.T, events *integration.Stream, skip int) []event.Event {
+	t.Helper()
+	id := emitProbe(t, integration.Database(t))
+	var got []event.Event
+	processtest.WaitFor(t, "the probe "+id, func() bool {
+		got = events.Received()
+		return slices.ContainsFunc(got, func(e event.Event) bool { return e.ID == id })
+	})
+	got = got[skip:]
+	return got[:slices.IndexFunc(got, func(e event.Event) bool { return e.ID == id })]
+}
+
+// A state reset delivers exactly one web-service.database.reset, published
+// on its type, from the service's source, about the state it applied, its
+// data the state's name, and before any event its seed commits. It
+// delivers no event for the entities its revert drops: a reset to the
+// empty state delivers its own event alone, and a reset to the default
+// state its own and then the default state's seed events. A probe follows
+// each reset, so every event the reset committed has arrived by the
+// probe's.
+func TestEvents_AStateResetDeliversItsEventBeforeItsSeed(t *testing.T) {
+	s := integration.Start(t, integration.Options{Seed: integration.Default})
+	c := s.Client()
+	resetDrained(t, c)
+	events := integration.Subscribe(t, everyType()...)
+
+	for _, state := range []string{"empty", integration.Default} {
+		skip := len(events.Received())
+		integration.Reset(t, c, state)
+		got := afterProbe(t, events, skip)
+		if len(got) == 0 {
+			t.Fatalf("reset to %s delivered nothing; want its event", state)
+		}
+		e := got[0]
+		if e.Type != stateReset || e.Subject != state || e.Source != "web-service" {
+			t.Errorf("reset to %s: first event = %s about %q from %q; want %s about the state from web-service", state, e.Type, e.Subject, e.Source, stateReset)
+		}
+		var data map[string]any
+		if err := json.Unmarshal(e.Data, &data); err != nil {
+			t.Fatalf("decode the reset's data %s: %v", e.Data, err)
+		}
+		if len(data) != 1 || data["state"] != state {
+			t.Errorf("reset to %s: data = %v; want the state's name alone", state, data)
+		}
+		seeds := got[1:]
+		if n := len(slices.DeleteFunc(slices.Clone(seeds), func(e event.Event) bool { return e.Type != stateReset })); n != 0 {
+			t.Errorf("reset to %s: %d more %s events; want one", state, n, stateReset)
+		}
+		if state == "empty" {
+			if len(seeds) != 0 {
+				t.Errorf("reset to empty: events after its own = %v; want none", subjects(seeds))
+			}
+			continue
+		}
+		theDefaultSeeds(t, seeds, tree(t, c))
+	}
+}
+
+// The schema verbs deliver nothing: a down, an up, steps back and forth,
+// and a force to the head of the service's set, each answering, are
+// followed by a probe that arrives alone.
+func TestEvents_TheSchemaVerbsDeliverNothing(t *testing.T) {
+	s := integration.Start(t, integration.Options{Seed: integration.Default})
+	c := s.Client()
+	resetDrained(t, c)
+	events := integration.Subscribe(t, everyType()...)
+	head := integration.Schema(t, c).Set(integration.AppSet).Version
+
+	for _, v := range []struct {
+		path string
+		body any
+	}{
+		{"/admin/database/schema/down", map[string]any{"set": integration.AppSet}},
+		{"/admin/database/schema/up", nil},
+		{"/admin/database/schema/steps", map[string]any{"set": integration.AppSet, "steps": -1}},
+		{"/admin/database/schema/steps", map[string]any{"set": integration.AppSet, "steps": 1}},
+		{"/admin/database/schema/force", map[string]any{"set": integration.AppSet, "version": head}},
+	} {
+		webtest.Decode[integration.SchemaStatus](t, c.Post(t, v.path, v.body), http.StatusOK)
+	}
+	if got := afterProbe(t, events, 0); len(got) != 0 {
+		t.Errorf("the schema verbs delivered %v; want nothing", subjects(got))
+	}
+}
+
+// The standalone seed verb delivers its creations' events alone, and no
+// web-service.database.reset: a seed of the default state over the empty
+// one delivers the default state's seed events and nothing else.
+func TestEvents_TheSeedVerbDeliversItsCreationsAlone(t *testing.T) {
+	s := integration.Start(t, integration.Options{Seed: integration.Default})
+	c := s.Client()
+	integration.Reset(t, c, "empty")
+	drained(t, integration.Database(t))
+	events := integration.Subscribe(t, everyType()...)
+
+	integration.Seed(t, c, integration.Default)
+	theDefaultSeeds(t, afterProbe(t, events, 0), tree(t, c))
 }

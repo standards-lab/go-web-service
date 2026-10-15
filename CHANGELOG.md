@@ -38,7 +38,7 @@ accumulate under [Unreleased] until the first cut.
   reclamation, or a purge. The organization's document root emits `directory.created` in the
   transaction of the first write that creates it, a seed's among them. Every seed write that
   creates an entity emits its command's event, and a rerun over a seeded schema emits nothing.
-  A state reset emits one `web-service.database.reset`, its data `{"state"}`, after its apply
+  A state reset emits one `web-service.database.reset`, its data the state's name, after its apply
   and before its seed, through `database.OnReset` on go-database's reset hook; its revert drops
   the outbox, so it loses the events still unpublished. The schema verbs emit nothing. Every
   type and its data are public API, cataloged in the README's Messaging section.

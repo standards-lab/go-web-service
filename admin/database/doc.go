@@ -19,7 +19,8 @@
 //     [SchemaGate] exclusively.
 //   - [Steps], [Force], [State], and [Reset]: the verbs' request bodies.
 //   - [ErrUnconfirmed]: a reset whose body does not confirm it, a 400.
-//   - [StateReset], with [StateResetData]: the event a state reset emits.
+//   - [StateReset]: the event a state reset emits, its data the state's
+//     name.
 //   - [OnReset], over a [Recorder]: the go-database reset hook that
 //     commits StateReset, which the composition root wires.
 package database

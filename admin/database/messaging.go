@@ -8,15 +8,15 @@ import (
 )
 
 // StateReset is the event a state reset emits, once per reset, its subject
-// and its data the name of the state the reset applied. A reset reverts
-// every set, which drops every row and every unpublished outbox row, so it
-// emits no event per entity it removes: a consumer that holds a copy of the
-// service's entities discards them on StateReset, and the seed's own
-// creation events, which follow it on the stream, rebuild them. The schema
-// verbs (up, down, steps, force) emit nothing, nor does the seed verb
-// beyond its creations' events. Its type and its data are public API: a
+// the name of the state the reset applied and its data that name, a JSON
+// string. A reset reverts every set, which drops every row and every
+// unpublished outbox row, so it emits no event per entity it removes: a
+// consumer that holds a copy of the service's entities discards them on
+// StateReset, and the seed's own creation events, which follow it on the
+// stream, rebuild them. The schema verbs (up, down, steps, force) emit
+// nothing, nor does the seed verb beyond its creations' events. Its type and its data are public API: a
 // consumer in another service binds both.
-var StateReset = event.Define[StateResetData]("web-service.database.reset")
+var StateReset = event.Define[string]("web-service.database.reset")
 
 // Recorder is the recorder a reset emits its event through: go-messaging's
 // Runtime.Recorder, which the composition root injects.
@@ -31,7 +31,7 @@ type Recorder = event.Recorder[*sqlate.Tx]
 func OnReset(db *sqlate.DB, events *Recorder) func(ctx context.Context, state string) error {
 	return func(ctx context.Context, state string) error {
 		_, err := db.Transact(ctx, events.Emit(ctx, func(_ *sqlate.Tx, q *event.Queue) (struct{}, error) {
-			StateReset.Raise(q, state, StateResetData{State: state})
+			StateReset.Raise(q, state, state)
 			return struct{}{}, nil
 		}))
 		return err

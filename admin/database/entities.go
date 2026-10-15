@@ -29,9 +29,3 @@ type Reset struct {
 	State   string `json:"state"`
 	Confirm bool   `json:"confirm"`
 }
-
-// StateResetData is the data of StateReset: the name of the state the
-// reset applied.
-type StateResetData struct {
-	State string `json:"state"`
-}

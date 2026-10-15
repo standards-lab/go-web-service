@@ -38,7 +38,7 @@ func recorder(t *testing.T) *database.Recorder {
 
 // The hook commits StateReset in a transaction of its own that holds the
 // outbox write alone: its subject is the state's name, and its data the
-// state's name under "state", the only field.
+// state's name itself, a JSON string.
 func TestOnReset_CommitsStateResetInItsOwnTransaction(t *testing.T) {
 	pool, rec := sqltest.Open(t, sqltest.Response{Affected: 1})
 	hook := database.OnReset(sqlate.Wrap(pool, dialect{}), recorder(t))
@@ -49,7 +49,11 @@ func TestOnReset_CommitsStateResetInItsOwnTransaction(t *testing.T) {
 	if ops := rec.Ops(); !slices.Equal(ops, []sqltest.Op{sqltest.OpBegin, sqltest.OpExec, sqltest.OpCommit}) {
 		t.Fatalf("ops = %v; want the outbox write alone in one transaction", ops)
 	}
-	outboxtest.Want(t, outboxtest.Decode(t, rec.Calls()[1]), "web-service.database.reset", "empty", map[string]any{"state": "empty"})
+	e := outboxtest.Decode(t, rec.Calls()[1])
+	outboxtest.WantEnvelope(t, e, "web-service.database.reset", "empty")
+	if string(e.Data) != `"empty"` {
+		t.Errorf("data = %s; want the state's name, \"empty\"", e.Data)
+	}
 }
 
 // A refused outbox write fails the hook and rolls its transaction back.

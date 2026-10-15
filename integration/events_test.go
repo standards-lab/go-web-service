@@ -696,12 +696,12 @@ func TestEvents_AStateResetDeliversItsEventBeforeItsSeed(t *testing.T) {
 		if e.Type != stateReset || e.Subject != state || e.Source != "web-service" {
 			t.Errorf("reset to %s: first event = %s about %q from %q; want %s about the state from web-service", state, e.Type, e.Subject, e.Source, stateReset)
 		}
-		var data map[string]any
+		var data any
 		if err := json.Unmarshal(e.Data, &data); err != nil {
 			t.Fatalf("decode the reset's data %s: %v", e.Data, err)
 		}
-		if len(data) != 1 || data["state"] != state {
-			t.Errorf("reset to %s: data = %v; want the state's name alone", state, data)
+		if data != state {
+			t.Errorf("reset to %s: data = %s; want the state's name, a JSON string", state, e.Data)
 		}
 		seeds := got[1:]
 		if n := len(slices.DeleteFunc(slices.Clone(seeds), func(e event.Event) bool { return e.Type != stateReset })); n != 0 {

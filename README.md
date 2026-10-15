@@ -437,7 +437,7 @@ domain's `messaging.go` and their data in its `entities.go`.
 | `web-service.document.file.uploaded` | `POST /directories/{id}/files`; a seed's file | file id | `file_id`, `organization_id`, `directory_id`, `name`, `content_type`, `size`, `etag`, `version` |
 | `web-service.document.file.moved` | `POST /files/{id}/move` | file id | as `uploaded`, as the move left it; `size` and `etag` are null for a pending file, whose write has not completed |
 | `web-service.document.file.deleted` | `DELETE /files/{id}` | file id | `file_id`, `organization_id`, `version` (the version the delete left it at, deleting) |
-| `web-service.database.reset` | `POST /admin/database/state` | the state's name | `state` |
+| `web-service.database.reset` | `POST /admin/database/state` | the state's name | the state's name, a JSON string (`"empty"`) |
 
 The document routes sit under `/api/documents/{org}`. A logo `PUT` that replaces a logo commits
 `logo.uploaded` alone, no `logo.deleted` for the logo it replaces, and nothing beneath a marked

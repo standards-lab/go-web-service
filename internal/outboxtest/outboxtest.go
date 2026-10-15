@@ -110,10 +110,7 @@ func NoneCommitted(t testing.TB, rec *sqltest.Recorder) {
 // recorder, with JSON data exactly want: every field, and no other.
 func Want(t testing.TB, e event.Event, typ, subject string, want map[string]any) {
 	t.Helper()
-	if e.Type != typ || e.Subject != subject || e.Source != Source || e.ID != ID ||
-		!e.Time.Equal(Time) || e.DataContentType != "application/json" {
-		t.Errorf("event = %+v; want %s about %s, stamped by the recorder", e, typ, subject)
-	}
+	WantEnvelope(t, e, typ, subject)
 	var got map[string]any
 	if err := json.Unmarshal(e.Data, &got); err != nil {
 		t.Fatalf("decode the data %s: %v", e.Data, err)
@@ -125,5 +122,16 @@ func Want(t testing.TB, e event.Event, typ, subject string, want map[string]any)
 		if w, ok := got[k]; !ok || w != v {
 			t.Errorf("data[%q] = %v; want %v", k, got[k], v)
 		}
+	}
+}
+
+// WantEnvelope fails the test unless e is typ about subject, stamped by a
+// Stamped recorder, with JSON data, whatever its shape: Want's check of
+// the envelope, for data that is not an object.
+func WantEnvelope(t testing.TB, e event.Event, typ, subject string) {
+	t.Helper()
+	if e.Type != typ || e.Subject != subject || e.Source != Source || e.ID != ID ||
+		!e.Time.Equal(Time) || e.DataContentType != "application/json" {
+		t.Errorf("event = %+v; want %s about %s, stamped by the recorder", e, typ, subject)
 	}
 }

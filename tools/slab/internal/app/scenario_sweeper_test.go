@@ -1,7 +1,6 @@
 package app_test
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
@@ -16,9 +15,10 @@ import (
 // Mimir through: the datasource proxy to the provisioned Mimir datasource.
 const mimirProxy = "/api/datasources/proxy/uid/mimir/api/v1/query"
 
-// passes is a fake export's sweep_passes_total, by reclaimer, all of them
-// drained: the scenario reads the other outcomes as 0 when no series has
-// them, as Mimir holds no series for an outcome that never happened.
+// passes is a fake export's sweep_passes_total: a key naming a reclaimer
+// alone counts its drained passes, and "reclaimer/outcome" another
+// outcome's. The scenario reads an outcome with no key as 0, as Mimir
+// holds no series for an outcome that never happened.
 type passes map[string]int
 
 // sweeperFake stands in for the service and for Grafana with Mimir behind
@@ -35,6 +35,9 @@ type sweeperFake struct {
 	before, after passes
 	exports       []fakeExport
 	queries       []string
+	// backlog is sweep_backlogged_ratio by reclaimer; a reclaimer it does
+	// not name reports 0.
+	backlog map[string]int
 }
 
 // fakeExport is one export as Mimir holds it: when it was sampled and the
@@ -102,11 +105,15 @@ func (f *sweeperFake) query(w http.ResponseWriter, r *http.Request) {
 		result = append(result, sample(map[string]string{}, float64(latest.at.UnixMilli())/1000))
 	case strings.Contains(q, "sweep_backlogged_ratio"):
 		for _, rec := range []string{"files", "outbox", "inbox"} {
-			result = append(result, sample(map[string]string{"sweep_reclaimer": rec}, 0))
+			result = append(result, sample(map[string]string{"sweep_reclaimer": rec}, float64(f.backlog[rec])))
 		}
 	case strings.Contains(q, "sweep_passes_total"):
-		for rec, n := range latest.counts {
-			result = append(result, sample(map[string]string{"sweep_reclaimer": rec, "sweep_outcome": "drained"}, float64(n)))
+		for key, n := range latest.counts {
+			rec, out, ok := strings.Cut(key, "/")
+			if !ok {
+				out = "drained"
+			}
+			result = append(result, sample(map[string]string{"sweep_reclaimer": rec, "sweep_outcome": out}, float64(n)))
 		}
 	default:
 		f.err = fmt.Errorf("no answer for the query %q", q)
@@ -163,17 +170,21 @@ func TestScenario_SweeperRunsSixStepsInOrder(t *testing.T) {
 
 // The first step shows the sweep block as config.local.json merges over
 // config.json, each value naming its file, and the counts of the export
-// it read, one row per reclaimer in the sweeper's order.
+// it read, one row per reclaimer in the sweeper's order: each outcome under
+// its own column, and the backlog gauge.
 func TestScenario_SweeperShowsTheSweepBlockAndTheCounts(t *testing.T) {
-	fake := newSweeperFake(passes{"files": 5, "outbox": 4, "inbox": 3}, passes{"files": 6, "outbox": 4, "inbox": 3})
+	fake := newSweeperFake(
+		passes{"files": 5, "outbox": 4, "outbox/more": 2, "inbox": 3, "inbox/error": 1},
+		passes{"files": 6, "outbox": 4, "outbox/more": 2, "inbox": 3, "inbox/error": 1})
+	fake.backlog = map[string]int{"outbox": 1}
 	first := step(t, runSweeperOK(t, fake), sweeperSteps[0])
 	for _, want := range []string{
 		"interval    30s    (config.json)",
 		"outbox_age  2m     (config.local.json)",
 		"inbox_age   2m     (config.local.json)",
 		"files   drained 5      more 0      error 0      backlogged 0",
-		"outbox  drained 4      more 0      error 0      backlogged 0",
-		"inbox   drained 3      more 0      error 0      backlogged 0",
+		"outbox  drained 4      more 2      error 0      backlogged 1",
+		"inbox   drained 3      more 0      error 1      backlogged 0",
 	} {
 		if !strings.Contains(first, want) {
 			t.Errorf("step 1 lacks %q:\n%s", want, first)
@@ -302,8 +313,7 @@ func TestScenario_SweeperPointsAtTheGrafanaQuery(t *testing.T) {
 	if len(fake.queries) == 0 {
 		t.Fatal("the run sent Mimir no query")
 	}
-	raw, _ := json.Marshal(fake.queries)
-	if !strings.Contains(string(raw), "sweep_backlogged_ratio") {
-		t.Errorf("the run never read the backlog gauge: %s", raw)
+	if !slices.ContainsFunc(fake.queries, func(q string) bool { return strings.Contains(q, "sweep_backlogged_ratio") }) {
+		t.Errorf("the run never read the backlog gauge: %q", fake.queries)
 	}
 }

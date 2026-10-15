@@ -25,6 +25,7 @@ import (
 	"github.com/standards-lab/sqlate/sqltest"
 
 	"github.com/standards-lab/go-web-service/domain/organization"
+	"github.com/standards-lab/go-web-service/internal/outboxtest"
 )
 
 const (
@@ -82,15 +83,17 @@ func TestStore_LogoProtocolsBindTheirFilesParameters(t *testing.T) {
 		datatest.FileRows(file(oldFileID, blobfs.StatusAvailable, 2)), // activate: the current logo
 		exec(1), // activate: the replaced image removed
 		datatest.FileRows(file(oldFileID, blobfs.StatusDeleting, 3)), // activate: the replaced file's delete begun
-		exec(1), // activate: the new image, active
-		exec(1), // the replaced file purged, on the pool
+		exec(1),   // activate: the new image, active
+		written(), // activate: the event
+		exec(1),   // the replaced file purged, on the pool
 		// Logo.
 		datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)),
 		// DeleteLogo.
 		datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)), // the active logo
 		exec(1), // its image removed
 		datatest.FileRows(file(newFileID, blobfs.StatusDeleting, 3)), // the delete begun
-		exec(1), // the purge
+		written(), // the event
+		exec(1),   // the purge
 	)
 	old := file(oldFileID, blobfs.StatusAvailable, 2)
 	if _, err := fake.Put(ctx, old.Key, strings.NewReader("old"), storage.PutOptions{}); err != nil {
@@ -137,9 +140,9 @@ func TestStore_LogoProtocolsBindTheirFilesParameters(t *testing.T) {
 		q,
 		begin, q, q, commit,
 		q,
-		begin, x, q, x, q, x, commit, x,
+		begin, x, q, x, q, x, x, commit, x,
 		q,
-		begin, q, x, q, commit, x,
+		begin, q, x, q, x, commit, x,
 	)
 }
 
@@ -395,7 +398,7 @@ func TestPutLogo_AnswersCreatedWithLocation(t *testing.T) {
 	s, db, _ := serviceOver(t, sqltest.ReturningDialect{},
 		datatest.DirectoryRows(imagesDirectory()), exists(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
 		datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)),
-		exec(1), datatest.FileRows(), exec(1), // the hold, no current logo, the new image
+		exec(1), datatest.FileRows(), exec(1), written(), // the hold, no current logo, the new image, the event
 	)
 	r := web.NewRouter()
 	r.Mount(web.NewModule(organization.Routes(s, web.Limits{DefaultSize: 20, MaxSize: 100}, transfer, slog.New(slog.DiscardHandler))))
@@ -404,7 +407,7 @@ func TestPutLogo_AnswersCreatedWithLocation(t *testing.T) {
 	if rec.Code != 201 || rec.Header().Get("Location") != path || strings.TrimSpace(rec.Body.String()) != `{"id":"`+newFileID+`"}` {
 		t.Fatalf("status %d, Location %q, body %s", rec.Code, rec.Header().Get("Location"), rec.Body)
 	}
-	sameOps(t, db, q, begin, q, q, commit, q, begin, x, q, x, commit)
+	sameOps(t, db, q, begin, q, q, commit, q, begin, x, q, x, x, commit)
 }
 
 // seededLogoID is the fixed id a state gives the seeded logo's file.
@@ -426,7 +429,10 @@ var logoRows = json.RawMessage(`[{"organization":"/acme","id":"` + seededLogoID 
 
 // The logo seed writes the fixture under the row's fixed id by the write
 // protocol's retry-safe form, after the organization is resolved by path
-// and found without a logo, then activates it as the organization's logo.
+// and found without a logo, then activates it as the organization's logo,
+// the activation's transaction committing LogoUploaded with the data a
+// logo PUT's carries, its outbox write the last statement before the
+// commit.
 func TestLogoSeed_WritesAndActivatesTheFixture(t *testing.T) {
 	ctx := context.Background()
 	fixtures, body := seedFixtures(t)
@@ -437,7 +443,7 @@ func TestLogoSeed_WritesAndActivatesTheFixture(t *testing.T) {
 		datatest.FileRows(),                                              // write: no file holds the name
 		datatest.FileRows(file(seededLogoID, blobfs.StatusPending, 1)),   // write: the pending file, under the fixed id
 		datatest.FileRows(file(seededLogoID, blobfs.StatusAvailable, 2)), // complete, on the pool
-		exec(1), datatest.FileRows(), exec(1), // activate: the hold, still no logo, the image
+		exec(1), datatest.FileRows(), exec(1), written(), // activate: the hold, still no logo, the image, the event
 	)
 	n, err := s.LogoSeed().Write(ctx, logoRows, fixtures)
 	if err != nil || n != 1 {
@@ -460,7 +466,23 @@ func TestLogoSeed_WritesAndActivatesTheFixture(t *testing.T) {
 	if b, _ := io.ReadAll(blob.Body); !bytes.Equal(b, body) || blob.ContentType != "image/png" {
 		t.Errorf("stored %d bytes as %q; want the fixture as image/png", len(b), blob.ContentType)
 	}
-	sameOps(t, rec, q, q, q, begin, q, q, commit, q, begin, x, q, x, commit)
+	sameOps(t, rec, q, q, q, begin, q, q, commit, q, begin, x, q, x, x, commit)
+	wantLogoUploaded(t, rec)
+}
+
+// wantLogoUploaded fails the test unless the seed committed one event,
+// LogoUploaded about the seeded file for the organization, carrying the
+// file as its write completed it.
+func wantLogoUploaded(t *testing.T, rec *sqltest.Recorder) {
+	t.Helper()
+	events := outboxtest.Committed(t, rec)
+	if len(events) != 1 {
+		t.Fatalf("events committed = %d; want the activation's LogoUploaded", len(events))
+	}
+	outboxtest.Want(t, events[0], organization.LogoUploaded.Type(), seededLogoID, map[string]any{
+		"file_id": seededLogoID, "organization_id": validID, "content_type": "image/png",
+		"size": float64(3), "etag": `"etag-` + seededLogoID + `"`, "version": float64(2),
+	})
 }
 
 // An organization with an active logo, the seed's from an earlier run or a
@@ -477,16 +499,18 @@ func TestLogoSeed_LeavesAnActiveLogoAlone(t *testing.T) {
 		t.Errorf("puts = %d; want none", fake.Puts())
 	}
 	sameOps(t, rec, q, q)
+	outboxtest.NoneCommitted(t, rec)
 }
 
 // A file an interrupted run completed but never activated is found by its
-// name and activated, nothing put again.
+// name and activated, nothing put again; the activation commits its
+// LogoUploaded, the logo becoming active only now.
 func TestLogoSeed_ActivatesAFileAnEarlierRunCompleted(t *testing.T) {
 	fixtures, _ := seedFixtures(t)
 	s, rec, fake := serviceOver(t, sqltest.ReturningDialect{},
 		row(), datatest.FileRows(), datatest.DirectoryRows(imagesDirectory()),
 		datatest.FileRows(file(seededLogoID, blobfs.StatusAvailable, 2)), // write: the file, found
-		exec(1), datatest.FileRows(), exec(1),
+		exec(1), datatest.FileRows(), exec(1), written(),
 	)
 	if n, err := s.LogoSeed().Write(context.Background(), logoRows, fixtures); err != nil || n != 1 {
 		t.Fatalf("Write = %d, %v; want the found file activated", n, err)
@@ -494,7 +518,34 @@ func TestLogoSeed_ActivatesAFileAnEarlierRunCompleted(t *testing.T) {
 	if fake.Puts() != 0 {
 		t.Errorf("puts = %d; want none", fake.Puts())
 	}
-	sameOps(t, rec, q, q, q, begin, q, commit, begin, x, q, x, commit)
+	sameOps(t, rec, q, q, q, begin, q, commit, begin, x, q, x, x, commit)
+	wantLogoUploaded(t, rec)
+}
+
+// An activation whose event's write fails rolls back, the image with the
+// event, so nothing commits, and the file this run stored, which no image
+// references, is retired at the version it completed at.
+func TestLogoSeed_ARolledBackActivationCommitsNoEvent(t *testing.T) {
+	ctx := context.Background()
+	fixtures, _ := seedFixtures(t)
+	s, rec, fake := serviceOver(t, sqltest.ReturningDialect{},
+		row(), datatest.FileRows(), datatest.DirectoryRows(imagesDirectory()),
+		datatest.FileRows(), datatest.FileRows(file(seededLogoID, blobfs.StatusPending, 1)),
+		datatest.FileRows(file(seededLogoID, blobfs.StatusAvailable, 2)),
+		exec(1), datatest.FileRows(), exec(1), sqltest.Response{Err: errors.New("the outbox refused the row")},
+		datatest.FileRows(file(seededLogoID, blobfs.StatusDeleting, 3)), exec(1), // the seeded file retired
+	)
+	if _, err := s.LogoSeed().Write(ctx, logoRows, fixtures); err == nil || !strings.Contains(err.Error(), "the outbox refused the row") {
+		t.Fatalf("Write = %v; want the event's write refused", err)
+	}
+	sameOps(t, rec, q, q, q, begin, q, q, commit, q, begin, x, q, x, x, sqltest.OpRollback, begin, q, commit, x)
+	if retire := rec.Calls()[15]; !strings.Contains(retire.SQL, "status = 'deleting'") || retire.Args[1] != int64(2) {
+		t.Errorf("retire = %q %v; want the delete begun at the completed version", retire.SQL, retire.Args)
+	}
+	if _, err := fake.Get(ctx, file(seededLogoID, blobfs.StatusPending, 1).Key, storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
+		t.Errorf("the retired file's object outlived it: %v", err)
+	}
+	outboxtest.NoneCommitted(t, rec)
 }
 
 // A logo that became active between the check and the activation is left
@@ -669,7 +720,7 @@ func TestStore_AFailedPurgeAfterTheCommitIsLogged(t *testing.T) {
 			datatest.DirectoryRows(imagesDirectory()), exists(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
 			datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)),
 			exec(1), datatest.FileRows(file(oldFileID, blobfs.StatusAvailable, 2)), exec(1),
-			datatest.FileRows(file(oldFileID, blobfs.StatusDeleting, 3)), exec(1),
+			datatest.FileRows(file(oldFileID, blobfs.StatusDeleting, 3)), exec(1), written(),
 			lost, // the replaced file's purge
 		}, func(s *organization.Service) error {
 			_, err := s.PutLogo(ctx, validID, logoUpload(t))
@@ -677,7 +728,7 @@ func TestStore_AFailedPurgeAfterTheCommitIsLogged(t *testing.T) {
 		}},
 		"delete": {[]sqltest.Response{
 			datatest.FileRows(file(oldFileID, blobfs.StatusAvailable, 2)), exec(1),
-			datatest.FileRows(file(oldFileID, blobfs.StatusDeleting, 3)),
+			datatest.FileRows(file(oldFileID, blobfs.StatusDeleting, 3)), written(),
 			lost, // the purge
 		}, func(s *organization.Service) error { return s.DeleteLogo(ctx, validID) }},
 	}

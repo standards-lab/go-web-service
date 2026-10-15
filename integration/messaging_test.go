@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,6 +65,29 @@ func pending(t *testing.T, db *sqlate.DB) int {
 	return n
 }
 
+// drained waits until the outbox holds nothing pending: every event
+// committed so far, a seed's among them, is published.
+func drained(t *testing.T, db *sqlate.DB) {
+	t.Helper()
+	processtest.WaitFor(t, "the outbox drained", func() bool { return pending(t, db) == 0 })
+}
+
+// outboxHolds reports whether the outbox holds the row of the event with
+// id, published or not.
+func outboxHolds(t *testing.T, db *sqlate.DB, id string) bool {
+	t.Helper()
+	rows, err := db.QueryContext(context.Background(), "SELECT 1 FROM messaging_outbox WHERE id = $1", id)
+	if err != nil {
+		t.Fatalf("read the outbox row %s: %v", id, err)
+	}
+	defer func() { _ = rows.Close() }()
+	held := rows.Next()
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read the outbox row %s: %v", id, err)
+	}
+	return held
+}
+
 // eventRecords is out's records with msg msg naming the event id.
 func eventRecords(out, msg, id string) []map[string]any {
 	var matched []map[string]any
@@ -97,24 +121,31 @@ func unreadyChecks(t *testing.T, c *webtest.Client) (status int, unready []strin
 }
 
 // The relay publishes a committed outbox event to the broker: the row the
-// probe commits is published, so the outbox holds nothing pending, and the
-// service logs the event it sent.
+// probe commits is published once, the service logging the event it sent,
+// and then marked published, so the outbox holds nothing pending. The
+// reset commits its own event and its seed's first, so the case waits for
+// them to drain before it commits the probe, and the probe's row is then
+// the only one the relay has to publish. The relay logs the publish before
+// it marks the row in the same pass, so the case waits for the mark rather
+// than reading the outbox the moment the log appears.
 func TestMessaging_RelayPublishesCommittedEvents(t *testing.T) {
 	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	c := s.Client()
 	integration.Reset(t, c, integration.Default)
 	assertReady(t, c)
 	db := integration.Database(t)
+	drained(t, db)
 
 	id := emitProbe(t, db)
 	processtest.WaitFor(t, "the probe event published", func() bool {
 		return len(eventRecords(s.Output(), "event published", id)) == 1
 	})
-	if n := pending(t, db); n != 0 {
-		t.Errorf("pending = %d after the publish, want 0", n)
-	}
+	processtest.WaitFor(t, "the probe's row marked published", func() bool { return pending(t, db) == 0 })
 	if code := s.Stop(t); code != 0 {
 		t.Fatalf("exit = %d:\n%s", code, s.Output())
+	}
+	if n := len(eventRecords(s.Output(), "event published", id)); n != 1 {
+		t.Errorf("the service's log records the probe's publish %d times; want once", n)
 	}
 }
 
@@ -162,10 +193,13 @@ func TestMessaging_BrokerOutage(t *testing.T) {
 // exclusively, so the reset waits out the row in flight and the relay
 // claims nothing while the messaging set is reverted and applied again.
 // The event is held pending by severing NATS, so its publish fails and its
-// row stays in the outbox until the reset reverts it. From the reset's
-// start the relay reports no failure but the probe's refused publish, a
-// database error among them, and once NATS returns the service is ready,
-// the relay check with it, with nothing pending.
+// row stays in the outbox until the reset reverts it. The reset commits its
+// own web-service.database.reset, then its seed its creations' events,
+// every seed event type, to the outbox applied again, and their publishes
+// fail too while NATS is severed. From the reset's start the relay reports
+// no failure but those refused publishes, a database error among them,
+// and once NATS returns the service is ready, the relay check with it,
+// with nothing pending.
 func TestMessaging_StateResetUnderTheRelay(t *testing.T) {
 	f := processtest.Forward(t, integration.NATSAddr())
 	s := integration.Start(t, integration.Options{
@@ -180,6 +214,9 @@ func TestMessaging_StateResetUnderTheRelay(t *testing.T) {
 	c := s.Client()
 	integration.Reset(t, c, integration.Default)
 	db := integration.Database(t)
+	// The reset committed its event and its seed's; the probe's row is to
+	// be the only one pending once NATS is severed.
+	drained(t, db)
 
 	f.Sever()
 	restored := false
@@ -204,8 +241,8 @@ func TestMessaging_StateResetUnderTheRelay(t *testing.T) {
 	if m := tr.Schema.Set("messaging"); m.Version != m.Latest || m.Latest < 1 || !tr.Schema.Ready {
 		t.Errorf("schema after the reset = %+v, want the messaging set current and the schema ready", tr.Schema)
 	}
-	if n := pending(t, db); n != 0 {
-		t.Errorf("pending = %d after the reset, want the reverted outbox empty", n)
+	if outboxHolds(t, db, id) {
+		t.Errorf("the outbox holds the probe's row after the reset; want it reverted")
 	}
 
 	f.Restore(t)
@@ -214,12 +251,27 @@ func TestMessaging_StateResetUnderTheRelay(t *testing.T) {
 		return c.Get(t, "/readyz").Status == http.StatusOK
 	})
 	assertReady(t, c)
+	drained(t, db)
+	// The reset's event, held pending while NATS was severed, is published
+	// once NATS returns, about the state the reset applied.
+	var resets []map[string]any
+	for _, r := range withMsg(s.Output()[before:], "event published") {
+		if r["type"] == stateReset {
+			resets = append(resets, r)
+		}
+	}
+	if len(resets) != 1 || resets[0]["subject"] != integration.Default {
+		t.Errorf("published %s records = %v; want one about %s", stateReset, resets, integration.Default)
+	}
 	// The probe's row reports its refused publish until the reset reverts
-	// it, the row in flight as the reset began among them; any other
-	// failure, such as a claim against the reverted outbox, is the relay's
-	// running beside the reset.
+	// it, the row in flight as the reset began among them, and the reset's
+	// event or a seed's, of any type a seed commits, its refused publish
+	// until NATS returns; any other failure, such as a claim against the
+	// reverted outbox, is the relay's running beside the reset.
+	resetTypes := append([]string{stateReset}, seedTypes...)
 	for _, r := range withMsg(s.Output()[before:], "messaging failure") {
-		if r["event"] != id {
+		committed := slices.Contains(resetTypes, fmt.Sprint(r["type"])) && strings.Contains(fmt.Sprint(r["error"]), "nats: publish")
+		if r["event"] != id && !committed {
 			t.Errorf("the relay reported a failure during or after the reset: %v", r)
 		}
 	}
@@ -252,6 +304,9 @@ func TestMessaging_EventCommittedDuringTheDrainIsPublished(t *testing.T) {
 	c := s.Client()
 	integration.Reset(t, c, integration.Default)
 	db := integration.Database(t)
+	// The reset committed its event and its seed's; the drain is to
+	// publish the probe's.
+	drained(t, db)
 	held := hold(t, s, "/api/documents/"+tree(t, c)[docsOrg].ID+"/directories/root/files?name=held.txt")
 
 	exit := make(chan int, 1)

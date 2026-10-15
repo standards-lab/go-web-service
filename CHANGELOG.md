@@ -23,19 +23,33 @@ accumulate under [Unreleased] until the first cut.
   unready and keeps running, ready again when NATS returns. The relay holds the quiesce gate
   for each row, so a schema verb runs with it paused, and it drains after the server,
   publishing in a last pass what was committed during the drain.
-- The service's first event, `web-service.document.file.uploaded`: a document upload
-  (`POST /api/documents/{org}/directories/{id}/files`) emits it through the messaging runtime's
-  recorder in the transaction that makes the file available, so it commits exactly when the
-  upload completes and never for one whose put or completion fails. Its subject is the file's
-  id and its data the file's metadata (`file_id`, `organization_id`, `directory_id`, `name`,
-  `content_type`, `size`, `etag`, `version`), never its content; its type and data are public
-  API. The upload runs blobfs's two-phase write as `sdk.WriteFile` stages it, bound for blobfs:
-  the same steps, with a hook in the completion's transaction. The upload's responses are
-  unchanged; logo writes, seeds, and every other command emit nothing.
-- The event convention, in the README's Messaging section: every public command that changes
-  state emits exactly one event, in the transaction that makes that state true; the admin
-  layer, seeds included, emits none; types are `<service>.<domain>.<entity>.<past-tense verb>`,
-  with no version suffix before v1. The section is the guide to adding an event: where its kind
+- The service's events, one per public command that changes state, each committed through the
+  messaging runtime's recorder in the transaction that makes the change true, its subject the
+  id of the entity its type names and its data that entity's stored state under the API's field
+  names, never a file's content. The organization domain emits
+  `web-service.organization.created`, `.edited`, `.transferred`, and `.deleted`, and
+  `web-service.organization.logo.uploaded` and `.logo.deleted`; a logo `PUT` that replaces a
+  logo emits no `logo.deleted`. The document domain emits
+  `web-service.document.directory.created`, `.moved`, and `.deleted` (an empty directory's
+  delete and a branch's mark both, for the marked directory alone), and
+  `web-service.document.file.uploaded`, `.moved`, and `.deleted`; a file move's `size` and
+  `etag` are null for a pending file. A command that fails commits no event, and neither does a
+  retry of a delete already under way (a repeated file delete or branch mark), a read, the
+  sweep's reclamation, or a purge. The organization's document root emits `directory.created` in the
+  transaction of the first write that creates it, a seed's among them. Every seed write that
+  creates an entity emits its command's event, and a rerun over a seeded schema emits nothing.
+  A state reset emits one `web-service.database.reset`, its data the state's name, after its apply
+  and before its seed, through `database.OnReset` on go-database's reset hook; its revert drops
+  the outbox, so it loses the events still unpublished. The schema verbs emit nothing. Every
+  type and its data are public API, cataloged in the README's Messaging section.
+- The staged file protocols, bound for blobfs, in `sdk/blobfs.go`: `sdk.WriteFile`, blobfs's
+  two-phase write with a hook in the completion's transaction, which the document upload runs;
+  `sdk.EnsureFile`, its retry-safe form with the same hook, run only when the call completes
+  the file, which the document seed runs; and `sdk.RemoveFile`, blobfs's two-phase delete with
+  a hook in the delete's first transaction, skipped by a retry, which the file delete runs.
+- The event convention and catalog, in the README's Messaging section: the one-event rule, seeds
+  and the reset emitting, the type naming rule, and each type's emitting commands, subject, and
+  data. The section is the guide to adding an event: where its kind
   and data are defined, how a command emits it, how the unit and integration tiers test it
   (the outbox recorder, `integration.Subscribe` and `Stream.Await`, and a marker for absence),
   and how to watch it with slab.
@@ -165,6 +179,14 @@ accumulate under [Unreleased] until the first cut.
 
 ### Changed
 
+- Event types are named `<service>.<domain>.<operation>` for an operation on the domain itself
+  (`web-service.organization.created`) and `<service>.<domain>.<element>.<operation>` for one on
+  a sub-element (`web-service.document.file.uploaded`), superseding the four-token
+  `<service>.<domain>.<entity>.<past-tense verb>`; still no version suffix before v1. Seeds and
+  the state reset now emit, where the convention had the admin layer emit nothing, and every
+  command emits, where only the document upload did.
+- Pins: go-database v0.9.0, from v0.8.0, for `admin.Options.OnReset`, the hook a state reset
+  runs after its apply and before its seed; its own changes are in its CHANGELOG.
 - slab runs on go-cli-sdk v0.2.0, in place of cobra and pflag, with a composition root modeled
   on go-cli-sdk-template's. Help, a parent run with no or an unknown subcommand, and every usage
   error exit 2; help exited 0 and a usage error 1 before. Input a command refuses before it

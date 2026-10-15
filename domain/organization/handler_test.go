@@ -136,7 +136,7 @@ func TestRoutes_LibraryErrorsMapThroughTheDataMatcher(t *testing.T) {
 }
 
 func TestCreate_AnswersCreatedWithLocation(t *testing.T) {
-	rec := send(t, module(t, identity(validID, 1)), "POST", "/organizations", "", `{"code":"acme","name":"Acme"}`)
+	rec := send(t, module(t, identity(validID, 1), stored(validID, "acme", "Acme", 1), written()), "POST", "/organizations", "", `{"code":"acme","name":"Acme"}`)
 	if rec.Code != 201 || rec.Header().Get("Location") != "/organizations/"+validID {
 		t.Fatalf("status %d, Location %q, body %s", rec.Code, rec.Header().Get("Location"), rec.Body)
 	}

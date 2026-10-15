@@ -49,6 +49,8 @@ func (s *Service) Seed() data.FileSeed { return seed{store: s.store} }
 // ensuring the organization's root when the parent is its alias, and
 // returns its identity. A nonexistent organization is sql.ErrNoRows, a
 // parent outside the root is not found, and a taken name is a conflict.
+// The create emits DirectoryCreated in its transaction; a root it ensures
+// emits its own, in the transaction that creates the root, before it.
 func (s *Service) CreateDirectory(ctx context.Context, organizationID string, c CreateDirectory) (Identity, error) {
 	if err := c.Validate(); err != nil {
 		return Identity{}, err
@@ -81,7 +83,8 @@ func (s *Service) ListFiles(ctx context.Context, organizationID, id string, q we
 // DeleteDirectory removes the empty directory at version: a directory with
 // contents is blobfs.ErrNotEmpty and another version
 // query.ErrVersionMismatch. Removing the root removes its owner row with it,
-// through the row's cascading foreign key.
+// through the row's cascading foreign key. The delete emits
+// DirectoryDeleted in its transaction.
 func (s *Service) DeleteDirectory(ctx context.Context, organizationID, id string, version int64) error {
 	return s.store.deleteDirectory(ctx, organizationID, id, version)
 }
@@ -90,8 +93,10 @@ func (s *Service) DeleteDirectory(ctx context.Context, organizationID, id string
 // it, the directory at version, and returns its id: blobfs marks the
 // branch deleting in one transaction, and after the commit the sweep is
 // nudged to remove it. From the commit the directory reads deleting and
-// its listings are not found. A directory deleting already is the mark's
-// retry, accepted again at any version.
+// its listings are not found. The mark emits DirectoryDeleted for the
+// directory alone, in its transaction; the sweep that removes the branch
+// emits nothing. A directory deleting already is the mark's retry,
+// accepted again at any version, which emits nothing.
 func (s *Service) DeleteBranch(ctx context.Context, organizationID, id string, version int64) (string, error) {
 	id, err := s.store.markBranch(ctx, organizationID, id, version)
 	if err != nil {
@@ -104,7 +109,8 @@ func (s *Service) DeleteBranch(ctx context.Context, organizationID, id string, v
 // MoveDirectory is an action: it moves the directory under a new parent
 // within the same root, as the command's name, under the version guard.
 // The root is refused before any I/O, and a destination inside the
-// directory's own subtree is blobfs.ErrCycle.
+// directory's own subtree is blobfs.ErrCycle. The move emits
+// DirectoryMoved in its transaction.
 func (s *Service) MoveDirectory(ctx context.Context, organizationID, id string, version int64, m MoveDirectory) (Identity, error) {
 	if id == RootAlias {
 		return Identity{}, errRootMove
@@ -140,14 +146,16 @@ func (s *Service) Content(ctx context.Context, organizationID, id string) (Conte
 }
 
 // DeleteFile removes the file at version, its row and its object; another
-// version is query.ErrVersionMismatch. A file deleting already is the
-// delete's retry, which converges at any version.
+// version is query.ErrVersionMismatch. The delete emits FileDeleted in the
+// transaction that begins it. A file deleting already is the delete's
+// retry, which converges at any version and emits nothing.
 func (s *Service) DeleteFile(ctx context.Context, organizationID, id string, version int64) error {
 	return s.store.deleteFile(ctx, organizationID, id, version)
 }
 
 // MoveFile is an action: it moves the file into a directory within the
-// same root, as the command's name, under the version guard.
+// same root, as the command's name, under the version guard. The move
+// emits FileMoved in its transaction.
 func (s *Service) MoveFile(ctx context.Context, organizationID, id string, version int64, m MoveFile) (Identity, error) {
 	if err := m.Validate(); err != nil {
 		return Identity{}, err

@@ -13,6 +13,9 @@ import (
 	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/sqltest"
+
+	"github.com/standards-lab/go-web-service/domain/document"
+	"github.com/standards-lab/go-web-service/internal/outboxtest"
 )
 
 // A tree a state names: engineering's, by path, under a fixed root id,
@@ -30,10 +33,15 @@ var treeRows = json.RawMessage(`[{"organization":"/acme/engineering","root":"` +
 	]}
 ]}]`)
 
-// seedFile is the tree's file row at a status and version.
+// seedFile is the tree's file row at a status and version; one past
+// pending carries the four bytes of its content and an entity tag.
 func seedFile(status blobfs.Status, version int64) blobfs.File {
 	f := file(seedFileID, seedDirID, status, version)
 	f.Name, f.Key, f.ContentType = "q1.csv", seedFileID+"/q1.csv", "text/csv"
+	if f.Size != nil {
+		size := int64(4)
+		f.Size = &size
+	}
 	return f
 }
 
@@ -43,19 +51,24 @@ func idRow(id string) sqltest.Response {
 
 // On an organization without a root, the seed resolves the path a segment
 // at a time, ensures the root under the tree's id with its owner row, then
-// each entry under its own id: the directory on the pool, the file by the
-// write protocol's retry-safe form, its content put and the row completed.
-// The count is the entries created, the root not among them. A seeded file
-// is no upload, so it emits nothing.
+// each entry under its own id: the directory in a transaction of its own,
+// the file by the write protocol's retry-safe form, its content put and the
+// row completed. The count is the entries created, the root not among them.
+// Each creation commits its command's event, with the command's data, in
+// the transaction that creates it, the outbox insert its last statement
+// before the commit: the root's DirectoryCreated through the path a
+// request's first write takes, the directory's DirectoryCreated in its
+// insert's transaction, and the file's FileUploaded in its completion's,
+// as an upload's.
 func TestSeed_WritesTheTreeUnderItsIDs(t *testing.T) {
 	ctx := context.Background()
 	s, rec, fake := serviceOver(t,
 		idRow(parentOrgID), organization(), // the path: acme, then engineering
 		root(), // no root yet
-		organization(), datatest.DirectoryRows(), datatest.DirectoryRows(directory(seedRootID, blobfs.RootID, orgID, 1)), exec(1),
-		datatest.DirectoryRows(), datatest.DirectoryRows(directory(seedDirID, seedRootID, "reports", 1)),
+		organization(), datatest.DirectoryRows(), datatest.DirectoryRows(directory(seedRootID, blobfs.RootID, orgID, 1)), exec(1), written(),
+		datatest.DirectoryRows(), datatest.DirectoryRows(directory(seedDirID, seedRootID, "reports", 1)), written(),
 		datatest.FileRows(), datatest.FileRows(seedFile(blobfs.StatusPending, 1)),
-		datatest.FileRows(seedFile(blobfs.StatusAvailable, 2)),
+		datatest.FileRows(seedFile(blobfs.StatusAvailable, 2)), written(),
 	)
 	n, err := s.Seed().Write(ctx, treeRows, nil)
 	if err != nil || n != 2 {
@@ -65,7 +78,7 @@ func TestSeed_WritesTheTreeUnderItsIDs(t *testing.T) {
 	if calls[0].Args[0] != nil || calls[0].Args[1] != "acme" || calls[1].Args[0] != parentOrgID || calls[1].Args[1] != "engineering" {
 		t.Errorf("path walk bound %v then %v; want acme under no parent, then engineering under acme", calls[0].Args, calls[1].Args)
 	}
-	for i, id := range map[int]string{6: seedRootID, 10: seedDirID, 13: seedFileID} {
+	for i, id := range map[int]string{6: seedRootID, 12: seedDirID, 17: seedFileID} {
 		if !strings.HasPrefix(calls[i].SQL, "INSERT INTO blobfs_") || calls[i].Args[0] != id {
 			t.Errorf("call %d = %q %v; want the insert under %s", i, calls[i].SQL, calls[i].Args, id)
 		}
@@ -80,15 +93,70 @@ func TestSeed_WritesTheTreeUnderItsIDs(t *testing.T) {
 	}
 	sameOps(t, rec,
 		q, q,
-		q, begin, q, q, q, x, commit,
-		q, q,
-		begin, q, q, commit, q,
+		q, begin, q, q, q, x, x, commit,
+		begin, q, q, x, commit,
+		begin, q, q, commit, begin, q, x, commit,
 	)
-	noEvent(t, rec)
+	events := outboxtest.Committed(t, rec)
+	if len(events) != 3 {
+		t.Fatalf("events committed = %d; want the root's, the directory's, and the file's", len(events))
+	}
+	outboxtest.Want(t, events[0], document.DirectoryCreated.Type(), seedRootID,
+		map[string]any{"directory_id": seedRootID, "organization_id": orgID, "parent_id": nil, "name": "/", "version": float64(1)})
+	outboxtest.Want(t, events[1], document.DirectoryCreated.Type(), seedDirID,
+		map[string]any{"directory_id": seedDirID, "organization_id": orgID, "parent_id": seedRootID, "name": "reports", "version": float64(1)})
+	outboxtest.Want(t, events[2], document.FileUploaded.Type(), seedFileID, map[string]any{
+		"file_id": seedFileID, "organization_id": orgID, "directory_id": seedDirID, "name": "q1.csv",
+		"content_type": "text/csv", "size": float64(4), "etag": `"etag-` + seedFileID + `"`, "version": float64(2),
+	})
+}
+
+// A seed transaction that rolls back commits no event: a directory whose
+// event's write fails rolls its insert back with it, and the seed stops
+// there, and a file whose event's write fails fails its completion, which
+// rolls back and abandons the write, as a failed upload's does. Nothing
+// the failed transaction raised commits; what committed before it stands.
+func TestSeed_ARolledBackCreationCommitsNoEvent(t *testing.T) {
+	refused := sqltest.Response{Err: errors.New("the outbox refused the row")}
+	cases := map[string]struct {
+		responses []sqltest.Response
+		ops       []sqltest.Op
+	}{
+		"directory": {
+			[]sqltest.Response{
+				idRow(parentOrgID), organization(), root(seedRootID),
+				datatest.DirectoryRows(), datatest.DirectoryRows(directory(seedDirID, seedRootID, "reports", 1)), refused,
+			},
+			[]sqltest.Op{q, q, q, begin, q, q, x, rollback},
+		},
+		"file": {
+			[]sqltest.Response{
+				idRow(parentOrgID), organization(), root(seedRootID),
+				datatest.DirectoryRows(directory(seedDirID, seedRootID, "reports", 1)),
+				datatest.FileRows(), datatest.FileRows(seedFile(blobfs.StatusPending, 1)),
+				datatest.FileRows(seedFile(blobfs.StatusAvailable, 2)), refused,
+				datatest.FileRows(seedFile(blobfs.StatusDeleting, 2)), exec(1), // the abandon
+			},
+			[]sqltest.Op{q, q, q, begin, q, commit, begin, q, q, commit, begin, q, x, rollback, begin, q, commit, x},
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, rec, _ := serviceOver(t, c.responses...)
+			if _, err := s.Seed().Write(context.Background(), treeRows, nil); err == nil || !strings.Contains(err.Error(), "the outbox refused the row") {
+				t.Fatalf("Write = %v; want the event's write refused", err)
+			}
+			sameOps(t, rec, c.ops...)
+			if events := outboxtest.Committed(t, rec); len(events) != 0 {
+				t.Errorf("events committed = %v; want none", events)
+			}
+		})
+	}
 }
 
 // A seeded tree seeds nothing again: the root, the directory, and the file
-// are each found by name, and nothing is put.
+// are each found by name, nothing is put, and no event commits, so a rerun
+// over a seeded schema emits nothing.
 func TestSeed_ASeededTreeIsLeftAsItIs(t *testing.T) {
 	s, rec, fake := serviceOver(t,
 		idRow(parentOrgID), organization(),
@@ -102,7 +170,8 @@ func TestSeed_ASeededTreeIsLeftAsItIs(t *testing.T) {
 	if fake.Puts() != 0 {
 		t.Errorf("puts = %d; want none", fake.Puts())
 	}
-	sameOps(t, rec, q, q, q, q, begin, q, commit)
+	sameOps(t, rec, q, q, q, begin, q, commit, begin, q, commit)
+	noEvent(t, rec)
 }
 
 // An entry whose id a row carries under another name, one a client moved
@@ -111,13 +180,19 @@ func TestSeed_ASeededTreeIsLeftAsItIs(t *testing.T) {
 // nothing written beneath it.
 func TestSeed_AnEntryItDoesNotOwnIsLeftAlone(t *testing.T) {
 	taken := sqltest.Response{Err: &sqlate.ConstraintError{Constraint: blobfs.ConstraintPrimaryKeyDirectory, Class: sqlate.ErrUniqueViolation, Err: errors.New("duplicate key")}}
-	cases := map[string][]sqltest.Response{
-		"moved":    {datatest.DirectoryRows(), taken, datatest.DirectoryRows()}, // blobfs's second lookup finds no row under the name
-		"deleting": {datatest.DirectoryRows(deleting(directory(seedDirID, seedRootID, "reports", 1)))},
+	cases := map[string]struct {
+		found []sqltest.Response
+		ops   []sqltest.Op
+	}{
+		// The insert's violation aborts the transaction; the rerun's
+		// lookup finds no row under the name, and its insert is refused
+		// again.
+		"moved":    {[]sqltest.Response{datatest.DirectoryRows(), taken, datatest.DirectoryRows(), taken}, []sqltest.Op{begin, q, q, rollback, begin, q, q, rollback}},
+		"deleting": {[]sqltest.Response{datatest.DirectoryRows(deleting(directory(seedDirID, seedRootID, "reports", 1)))}, []sqltest.Op{begin, q, rollback}},
 	}
-	for name, found := range cases {
+	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			responses := append([]sqltest.Response{idRow(parentOrgID), organization(), root(seedRootID)}, found...)
+			responses := append([]sqltest.Response{idRow(parentOrgID), organization(), root(seedRootID)}, c.found...)
 			s, rec, fake := serviceOver(t, responses...)
 			if n, err := s.Seed().Write(context.Background(), treeRows, nil); err != nil || n != 0 {
 				t.Fatalf("Write = %d, %v; want the directory left alone", n, err)
@@ -125,9 +200,9 @@ func TestSeed_AnEntryItDoesNotOwnIsLeftAlone(t *testing.T) {
 			if fake.Puts() != 0 {
 				t.Errorf("puts = %d; want none", fake.Puts())
 			}
-			if rec.Pending() != 0 || len(rec.Calls()) != len(responses) {
-				t.Errorf("ran %d statements with %d pending; want nothing beneath the directory", len(rec.Calls()), rec.Pending())
-			}
+			// Nothing beneath the directory runs.
+			sameOps(t, rec, append([]sqltest.Op{q, q, q}, c.ops...)...)
+			noEvent(t, rec)
 		})
 	}
 }
@@ -151,14 +226,16 @@ func TestSeed_AClientsFileUnderTheNameIsLeftAlone(t *testing.T) {
 			if fake.Puts() != 0 {
 				t.Errorf("puts = %d; want none over the client's object", fake.Puts())
 			}
-			sameOps(t, rec, q, q, q, q, begin, q, commit)
+			sameOps(t, rec, q, q, q, begin, q, commit, begin, q, commit)
+			noEvent(t, rec)
 		})
 	}
 }
 
 // A concurrent seed that commits the directory between the lookup and the
-// insert takes the id; the retry finds its directory by name and seeds
-// beneath it.
+// insert takes the id, and the violation aborts the transaction; the rerun,
+// in a fresh one, finds that seed's directory by name, emits nothing, the
+// other seed having emitted its creation, and seeds beneath it.
 func TestSeed_ADirectoryAConcurrentSeedCreatedIsFound(t *testing.T) {
 	taken := sqltest.Response{Err: &sqlate.ConstraintError{Constraint: blobfs.ConstraintPrimaryKeyDirectory, Class: sqlate.ErrUniqueViolation, Err: errors.New("duplicate key")}}
 	s, rec, _ := serviceOver(t,
@@ -169,7 +246,8 @@ func TestSeed_ADirectoryAConcurrentSeedCreatedIsFound(t *testing.T) {
 	if n, err := s.Seed().Write(context.Background(), treeRows, nil); err != nil || n != 0 {
 		t.Fatalf("Write = %d, %v; want the other seed's tree found", n, err)
 	}
-	sameOps(t, rec, q, q, q, q, q, q, begin, q, commit)
+	sameOps(t, rec, q, q, q, begin, q, q, rollback, begin, q, commit, begin, q, commit)
+	noEvent(t, rec)
 }
 
 // A path no organization answers, or an entry that is both a directory

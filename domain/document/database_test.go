@@ -12,7 +12,7 @@ import (
 	"github.com/standards-lab/blobfs"
 	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/blobfs/data/datatest"
-	"github.com/standards-lab/go-core/event"
+	blobfspg "github.com/standards-lab/blobfs/postgres"
 	"github.com/standards-lab/go-messaging/outbox"
 	msgpg "github.com/standards-lab/go-messaging/postgres"
 	"github.com/standards-lab/go-storage"
@@ -23,6 +23,7 @@ import (
 
 	"github.com/standards-lab/go-web-service/data"
 	"github.com/standards-lab/go-web-service/domain/document"
+	"github.com/standards-lab/go-web-service/internal/outboxtest"
 )
 
 const (
@@ -57,10 +58,24 @@ func (n *nudges) Nudge() { n.seen = append(n.seen, n.rec.Ops()) }
 // serviceNudged is serviceOver with the sweeper the service nudges.
 func serviceNudged(t *testing.T, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *storagetest.Fake, *nudges) {
 	t.Helper()
+	return serviceOn(t, nil, responses...)
+}
+
+// serviceOnPostgres is serviceNudged with blobfs on the Postgres engine the
+// composition root gives it, whose tree lock is a statement the script
+// answers, where the baseline's is a no-op that runs none.
+func serviceOnPostgres(t *testing.T, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *storagetest.Fake, *nudges) {
+	t.Helper()
+	return serviceOn(t, []bfdata.Option{bfdata.WithEngine(blobfspg.Engine)}, responses...)
+}
+
+// serviceOn is serviceNudged with blobfs built with opts.
+func serviceOn(t *testing.T, opts []bfdata.Option, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *storagetest.Fake, *nudges) {
+	t.Helper()
 	dialect := sqltest.ReturningDialect{}
 	pool, rec := sqltest.Open(t, responses...)
 	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
-	fs, err := bfdata.New(catalog, dialect)
+	fs, err := bfdata.New(catalog, dialect, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,12 +94,6 @@ func serviceNudged(t *testing.T, responses ...sqltest.Response) (*document.Servi
 	return document.New(db, data.NewStorage(db, fs, objects), sweep, recorder(t)), rec, fake, sweep
 }
 
-// eventID and eventTime are what the tests' recorder stamps on every
-// event it emits.
-const eventID = "00000000-0000-7000-8000-0000000000ee"
-
-var eventTime = time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
-
 // recorder is the recorder the composition root injects, go-messaging's
 // over its Postgres outbox, with the id and the time it stamps fixed: its
 // event's write is one statement on the command's transaction, which the
@@ -95,8 +104,7 @@ func recorder(t *testing.T) *document.Recorder {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return event.NewRecorder(ob.Sink(), "web-service",
-		event.IDs(func() string { return eventID }), event.Clock(func() time.Time { return eventTime }))
+	return outboxtest.Stamped(ob.Sink())
 }
 
 // root scripts the owner row's read: the organization's document root, or
@@ -164,12 +172,15 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 		datatest.DirectoryRows(), // ensure: no directory named for it
 		datatest.DirectoryRows(directory(rootID, blobfs.RootID, orgID, 1)), // ensure: the root created
 		exec(1),      // ensure: the owner row
+		exec(1),      // ensure: the root's event
 		root(rootID), // create: the scope check
 		datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)), // create
+		exec(1), // create: its event
 		// DeleteDirectory of the root, empty: its owner row goes with it
 		// through the cascading foreign key, so no statement names the row.
 		root(rootID),
-		exec(1), // the root removed, on the pool
+		exec(1), // the root removed
+		exec(1), // its event
 	)
 	id, err := s.CreateDirectory(ctx, orgID, document.CreateDirectory{ParentID: document.RootAlias, Name: "reports"})
 	if err != nil || id != (document.Identity{ID: dirID, Version: 1}) {
@@ -202,9 +213,9 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 	ops := rec.Ops()
 	want := []sqltest.Op{
 		sqltest.OpQuery,
-		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpExec, sqltest.OpCommit,
-		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpCommit,
-		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpExec, sqltest.OpCommit, // the delete, scoped in its transaction
+		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpExec, sqltest.OpExec, sqltest.OpCommit,
+		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpExec, sqltest.OpCommit,
+		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpExec, sqltest.OpExec, sqltest.OpCommit, // the delete, scoped in its transaction
 	}
 	if len(ops) != len(want) {
 		t.Fatalf("ops = %v\nwant %v", ops, want)

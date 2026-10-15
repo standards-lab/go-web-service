@@ -184,7 +184,7 @@ func TestUploadFile_AnswersCreatedWithLocation(t *testing.T) {
 }
 
 func TestCreateDirectory_AnswersCreatedWithLocation(t *testing.T) {
-	h := module(t, root(rootID), root(rootID), datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)))
+	h := module(t, root(rootID), root(rootID), datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)), exec(1))
 	rec := send(t, h, "POST", base+"/directories", "", `{"parent_id":"root","name":"reports"}`)
 	if rec.Code != 201 || rec.Header().Get("Location") != base+"/directories/"+dirID {
 		t.Fatalf("status %d, Location %q, body %s", rec.Code, rec.Header().Get("Location"), rec.Body)
@@ -410,12 +410,12 @@ func TestDeleteDirectory_RecursiveIs202(t *testing.T) {
 		responses []sqltest.Response
 		id, want  string
 	}{
-		"a directory": {[]sqltest.Response{root(rootID), within(true), exec(1), exec(1)}, dirID, dirID},
+		"a directory": {[]sqltest.Response{root(rootID), within(true), datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)), exec(1), exec(1), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), exec(1)}, dirID, dirID},
 		"a retry": {
-			[]sqltest.Response{root(rootID), within(true), exec(0), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), exec(0)},
+			[]sqltest.Response{root(rootID), within(true), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), exec(0), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), exec(0)},
 			dirID, dirID,
 		},
-		"the root": {[]sqltest.Response{root(rootID), exec(1), exec(0)}, document.RootAlias, rootID},
+		"the root": {[]sqltest.Response{root(rootID), datatest.DirectoryRows(directory(rootID, blobfs.RootID, orgID, 1)), exec(1), exec(0), datatest.DirectoryRows(deleting(directory(rootID, blobfs.RootID, orgID, 1))), exec(1)}, document.RootAlias, rootID},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -434,17 +434,17 @@ func TestDeletes_GuardOnIfMatch(t *testing.T) {
 		path, ifMatch string
 		status        int
 	}{
-		"empty directory": {[]sqltest.Response{root(rootID), within(true), exec(1)}, "/directories/" + dirID, `"1"`, 204},
+		"empty directory": {[]sqltest.Response{root(rootID), within(true), exec(1), exec(1)}, "/directories/" + dirID, `"1"`, 204},
 		"stale directory": {
 			[]sqltest.Response{root(rootID), within(true), exec(0), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2))},
 			"/directories/" + dirID, `"1"`, 412,
 		},
 		"stale branch": {
-			[]sqltest.Response{root(rootID), within(true), exec(0), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2))},
+			[]sqltest.Response{root(rootID), within(true), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2)), exec(0), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2))},
 			"/directories/" + dirID + "?recursive=true", `"1"`, 412,
 		},
 		"stale file": {
-			[]sqltest.Response{root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), within(true), datatest.FileRows(), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3))},
+			[]sqltest.Response{root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), within(true), exec(0), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3))},
 			"/files/" + fileID, `"2"`, 412,
 		},
 	}

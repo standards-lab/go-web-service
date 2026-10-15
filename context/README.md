@@ -28,9 +28,9 @@ admin mount), observability (a telemetry node beneath every lifecycle participan
 metrics over OTLP, and structured logs correlated to them by trace id), and object storage (an
 organization's logo and its document hierarchy on blobfs over go-storage, proxied through the
 service, with the sweep that finishes a recursive delete), and messaging (NATS JetStream through
-go-messaging, with the document upload emitting `web-service.document.file.uploaded` through the
-outbox and relay), all wired over the SDKs, go-observability, go-storage, blobfs, go-messaging,
-and sqlate at pinned releases; the root `integration`
+go-messaging, with every public command, seed write, and state reset emitting its event through
+the outbox and relay, cataloged in the README's Messaging section), all wired over the SDKs,
+go-observability, go-storage, blobfs, go-messaging, and sqlate at pinned releases; the root `integration`
 package is the integration tier that asserts the running service through its API. The remaining layers are the
 `v1` goals in the workspace roadmap, which sequences them; each is named here with the note
 that carries its direction:
@@ -42,10 +42,8 @@ that carries its direction:
   strategy.
 - **The management listener** — the admin mount on its own listener, a composition-root
   reshape here and in the template; the coordinator's admin-listener note explores it.
-- **Messaging and reactor services** — the rest of goal `v1.messaging`: task `event-coverage`
-  makes the other public commands emit their events, as the README's "Adding an event"
-  describes, and the reactor layer go-messaging makes real follows; go-core's `reactor` package
-  already runs the sweep and the relay.
+- **Messaging and reactor services** — the rest of goal `v1.messaging`: the reactor layer
+  go-messaging makes real; go-core's `reactor` package already runs the sweep and the relay.
 - **AI** — the go-ai capability demonstrated in a documented layer.
 - **Embedded client** — a web client embedded in and served by the service binary.
 - **Deployment** — deployment infrastructure in its own repository, targeting this service.

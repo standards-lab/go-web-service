@@ -48,9 +48,11 @@ func defineAdmin(g *graph.Graph, n *Nodes) {
 // verifies are the ones registered on the sql node (each domain's and
 // blobfs's, and go-messaging's outbox and inbox, recorded here beside
 // their set), not a list kept here; using the domain nodes builds them, and
-// so registers them, first. Startup's own correction takes no gate, since
-// it runs before the sweeper and the relay, which order themselves after
-// the schema, start.
+// so registers them, first. A state reset commits the database admin
+// domain's StateReset through the messaging runtime's recorder, between the
+// reset's apply and its seed, so the event precedes the seed's on the
+// stream. Startup's own correction takes no gate, since it runs before the
+// sweeper and the relay, which order themselves after the schema, start.
 func newSchema(n *Nodes) func(*graph.Scope) (*admin.Service, error) {
 	return func(s *graph.Scope) (*admin.Service, error) {
 		sql := s.Use(n.SQL)
@@ -79,6 +81,7 @@ func newSchema(n *Nodes) func(*graph.Scope) (*admin.Service, error) {
 			Seeder:   seeder,
 			Registry: sql,
 			Logger:   logger,
+			OnReset:  dbadmin.OnReset(sql.DB, s.Use(n.Runtime).Recorder),
 		}), nil
 	}
 }

@@ -148,18 +148,54 @@ type Identity struct {
 	Version int64  `json:"version"`
 }
 
-// FileUploadedData is the data of a FileUploaded event: the file's
-// metadata as its upload's completion left it, available, never its
-// content. Its field names are the API's, as File's are; ETag is the
-// entity tag a download of the file answers with.
+// DirectoryData is the data of DirectoryCreated and DirectoryMoved: the
+// directory's stored state after the command, under the API's field names,
+// the id as directory_id, with the organization that owns it. It carries
+// neither the path nor the status nor the timestamps, and no earlier
+// state: a move's carries only the new parent. The document root's shows
+// it as Directory does, with no parent and named "/".
+type DirectoryData struct {
+	DirectoryID    string  `json:"directory_id"`
+	OrganizationID string  `json:"organization_id"`
+	ParentID       *string `json:"parent_id"`
+	Name           string  `json:"name"`
+	Version        int64   `json:"version"`
+}
+
+// DirectoryDeletedData is the data of DirectoryDeleted: the directory's
+// id, its organization, and the version the delete left it at, deleting,
+// or for an empty directory's removal the version its row was removed at.
+type DirectoryDeletedData struct {
+	DirectoryID    string `json:"directory_id"`
+	OrganizationID string `json:"organization_id"`
+	Version        int64  `json:"version"`
+}
+
+// FileUploadedData is the data of FileUploaded and FileMoved: the file's
+// metadata as the command left it, never its content, under the API's
+// field names, as File's are, the id as file_id, with the organization
+// that owns it. ETag is the entity tag a download of the file answers
+// with. An upload's file is available, so its size and entity tag are
+// always set; a move's is the stored state after the move, under its new
+// directory and name, and a pending file, whose write has not completed,
+// has neither, so they are null. It carries neither the path nor the
+// status nor the timestamps, and no earlier state.
 type FileUploadedData struct {
+	FileID         string  `json:"file_id"`
+	OrganizationID string  `json:"organization_id"`
+	DirectoryID    string  `json:"directory_id"`
+	Name           string  `json:"name"`
+	ContentType    string  `json:"content_type"`
+	Size           *int64  `json:"size"`
+	ETag           *string `json:"etag"`
+	Version        int64   `json:"version"`
+}
+
+// FileDeletedData is the data of FileDeleted: the file's id, its
+// organization, and the version the delete left it at, deleting.
+type FileDeletedData struct {
 	FileID         string `json:"file_id"`
 	OrganizationID string `json:"organization_id"`
-	DirectoryID    string `json:"directory_id"`
-	Name           string `json:"name"`
-	ContentType    string `json:"content_type"`
-	Size           int64  `json:"size"`
-	ETag           string `json:"etag"`
 	Version        int64  `json:"version"`
 }
 

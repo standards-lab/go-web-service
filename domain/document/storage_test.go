@@ -66,13 +66,13 @@ func TestStore_FileProtocols(t *testing.T) {
 		datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), exec(1),
 		// Content: the owner row, the file, its directory's scope.
 		root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), within(true),
-		// MoveFile to the root by its alias.
+		// MoveFile to the root by its alias, and its event.
 		root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), within(true),
-		datatest.FileRows(file(fileID, rootID, blobfs.StatusAvailable, 3)),
-		// DeleteFile: the scope and the delete begun in one transaction, the
-		// object deleted, the purge on the pool.
+		datatest.FileRows(file(fileID, rootID, blobfs.StatusAvailable, 3)), written(),
+		// DeleteFile: the scope, the hold, the delete begun, and its event in
+		// one transaction, the object deleted, the purge on the pool.
 		root(rootID), datatest.FileRows(file(fileID, rootID, blobfs.StatusAvailable, 3)),
-		datatest.FileRows(file(fileID, rootID, blobfs.StatusDeleting, 4)),
+		exec(1), datatest.FileRows(file(fileID, rootID, blobfs.StatusDeleting, 4)), written(),
 		exec(1),
 	)
 	id, err := s.UploadFile(ctx, orgID, dirID, "report.txt", textUpload(t))
@@ -113,8 +113,8 @@ func TestStore_FileProtocols(t *testing.T) {
 	sameOps(t, rec,
 		begin, q, q, q, commit, begin, q, x, commit,
 		q, q, q,
-		begin, q, q, q, q, commit,
-		begin, q, q, q, commit, x,
+		begin, q, q, q, q, x, commit,
+		begin, q, q, x, q, x, commit, x,
 	)
 }
 
@@ -122,7 +122,7 @@ func TestStore_FileProtocols(t *testing.T) {
 // first, the directory and its owner row in one transaction.
 func TestStore_UploadFileEnsuresTheRoot(t *testing.T) {
 	s, rec, _ := serviceOver(t,
-		root(), organization(), datatest.DirectoryRows(), datatest.DirectoryRows(directory(rootID, blobfs.RootID, orgID, 1)), exec(1),
+		root(), organization(), datatest.DirectoryRows(), datatest.DirectoryRows(directory(rootID, blobfs.RootID, orgID, 1)), exec(1), exec(1),
 		root(rootID), datatest.FileRows(file(fileID, rootID, blobfs.StatusPending, 1)),
 		datatest.FileRows(file(fileID, rootID, blobfs.StatusAvailable, 2)), exec(1),
 	)
@@ -130,7 +130,7 @@ func TestStore_UploadFileEnsuresTheRoot(t *testing.T) {
 		t.Fatalf("UploadFile = %v", err)
 	}
 	sameOps(t, rec,
-		q, begin, q, q, q, x, commit,
+		q, begin, q, q, q, x, x, commit,
 		begin, q, q, commit, begin, q, x, commit,
 	)
 }
@@ -317,12 +317,13 @@ func TestStore_MoveDirectory(t *testing.T) {
 		root(rootID), within(true), within(true), // the directory and its destination in scope
 		within(false), // blobfs's cycle check
 		datatest.DirectoryRows(directory(subID, dirID, "archive", 2)), // the guarded update
+		exec(1), // its event
 	)
 	id, err := s.MoveDirectory(context.Background(), orgID, subID, 1, document.MoveDirectory{ParentID: dirID, Name: "archive"})
 	if err != nil || id != (document.Identity{ID: subID, Version: 2}) {
 		t.Fatalf("MoveDirectory = %+v, %v", id, err)
 	}
-	sameOps(t, rec, begin, q, q, q, q, q, commit)
+	sameOps(t, rec, begin, q, q, q, q, q, x, commit)
 }
 
 // The root is not moved, by its alias before any I/O or by its id once
@@ -379,19 +380,29 @@ func takenName() error {
 
 // A recursive delete marks the branch in one transaction with its scope
 // check, the directory at the If-Match version, and nudges the sweep once,
-// after the commit.
+// after the commit. The tree lock precedes the directory's read, and the
+// mark takes it again.
 func TestStore_DeleteBranchMarksThenNudges(t *testing.T) {
-	s, rec, _, sweep := serviceNudged(t,
-		root(rootID), within(true),
+	s, rec, _, sweep := serviceOnPostgres(t,
+		root(rootID), within(true), exec(0), // the tree locked
+		datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)), // the directory read active before its mark
+		exec(0), // the mark's own lock, held already
 		exec(2), // the directory and one beneath it marked
 		exec(3), // their files marked
+		datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), exec(1), // the directory read for its event, written
 	)
 	id, err := s.DeleteBranch(context.Background(), orgID, dirID, 1)
 	if err != nil || id != dirID {
 		t.Fatalf("DeleteBranch = %q, %v", id, err)
 	}
-	sameOps(t, rec, begin, q, q, x, x, commit)
-	mark := rec.Calls()[3]
+	sameOps(t, rec, begin, q, q, x, q, x, x, x, q, x, commit)
+	calls := rec.Calls()
+	for _, i := range []int{3, 5} {
+		if !strings.Contains(calls[i].SQL, "pg_advisory_xact_lock") {
+			t.Errorf("call %d = %q; want the tree lock", i, calls[i].SQL)
+		}
+	}
+	mark := calls[6]
 	if !strings.HasPrefix(mark.SQL, "UPDATE blobfs_directory") || fmt.Sprint(mark.Args) != fmt.Sprint([]any{dirID, int64(1)}) {
 		t.Errorf("mark = %q %v; want the directory at the If-Match version", mark.SQL, mark.Args)
 	}
@@ -405,15 +416,15 @@ func TestStore_DeleteBranchMarksThenNudges(t *testing.T) {
 // advanced, it converges and is accepted again, nudging the sweep again.
 func TestStore_DeleteBranchRetryConverges(t *testing.T) {
 	marked := deleting(directory(dirID, rootID, "reports", 1))
-	s, rec, _, sweep := serviceNudged(t,
-		root(rootID), within(true),
-		exec(0), datatest.DirectoryRows(marked), // nothing newly marked; the read finds it deleting
+	s, rec, _, sweep := serviceOnPostgres(t,
+		root(rootID), within(true), exec(0), datatest.DirectoryRows(marked),
+		exec(0), exec(0), datatest.DirectoryRows(marked), // nothing newly marked; the read finds it deleting
 		exec(0),
 	)
 	if _, err := s.DeleteBranch(context.Background(), orgID, dirID, 1); err != nil {
 		t.Fatalf("DeleteBranch = %v; want the retry accepted", err)
 	}
-	sameOps(t, rec, begin, q, q, x, q, x, commit)
+	sameOps(t, rec, begin, q, q, x, q, x, x, q, x, commit)
 	if len(sweep.seen) != 1 {
 		t.Errorf("nudges = %d; want one", len(sweep.seen))
 	}
@@ -422,9 +433,9 @@ func TestStore_DeleteBranchRetryConverges(t *testing.T) {
 // A stale version marks nothing, rolls back, and nudges no sweep; the root
 // is marked like any directory, by its alias.
 func TestStore_DeleteBranchAtAStaleVersion(t *testing.T) {
-	s, rec, _, sweep := serviceNudged(t,
-		root(rootID), within(true), exec(0), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2)),
-		root(rootID), exec(1), exec(0),
+	s, rec, _, sweep := serviceOnPostgres(t,
+		root(rootID), within(true), exec(0), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2)), exec(0), exec(0), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2)),
+		root(rootID), exec(0), datatest.DirectoryRows(directory(rootID, blobfs.RootID, orgID, 1)), exec(0), exec(1), exec(0), datatest.DirectoryRows(deleting(directory(rootID, blobfs.RootID, orgID, 1))), exec(1),
 	)
 	ctx := context.Background()
 	if _, err := s.DeleteBranch(ctx, orgID, dirID, 1); !errors.Is(err, query.ErrVersionMismatch) {
@@ -436,7 +447,7 @@ func TestStore_DeleteBranchAtAStaleVersion(t *testing.T) {
 	if id, err := s.DeleteBranch(ctx, orgID, document.RootAlias, 1); err != nil || id != rootID {
 		t.Fatalf("DeleteBranch(root) = %q, %v; want the root marked", id, err)
 	}
-	sameOps(t, rec, begin, q, q, x, q, sqltest.OpRollback, begin, q, x, x, commit)
+	sameOps(t, rec, begin, q, q, x, q, x, x, q, sqltest.OpRollback, begin, q, x, q, x, x, x, q, x, commit)
 }
 
 // The deletes guard on the If-Match version: a file or an empty directory
@@ -444,7 +455,7 @@ func TestStore_DeleteBranchAtAStaleVersion(t *testing.T) {
 func TestStore_DeletesAtAStaleVersion(t *testing.T) {
 	s, _, fake := serviceOver(t,
 		root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), within(true),
-		datatest.FileRows(), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), // the guarded delete matches nothing; the read tells the version
+		exec(0), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), // the guarded hold matches nothing; the read tells the version
 		root(rootID), within(true), exec(0), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2)),
 	)
 	ctx := context.Background()

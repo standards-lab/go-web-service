@@ -12,6 +12,7 @@ import (
 
 	"github.com/standards-lab/blobfs"
 	bfdata "github.com/standards-lab/blobfs/data"
+	"github.com/standards-lab/go-core/event"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
 
@@ -31,12 +32,14 @@ const imagesDirectory = "organization-images"
 // partway leaves only a row the stale reclaim removes.
 //
 // One transaction then holds the completed file, releases the replaced
-// logo (its image removed, its file's delete begun), and binds the new file
-// as the active image. A concurrent replacement that activated first fails
-// the bind with a unique violation, and the new file is retired. Once the
-// activation commits, the replaced file is purged; a purge that fails is
-// logged and the request succeeds, since the replacement stands and the
-// stale reclaim finishes the deleting row.
+// logo (its image removed, its file's delete begun), binds the new file as
+// the active image, and emits LogoUploaded, but no LogoDeleted for the
+// logo it replaces. A concurrent replacement that activated first fails
+// the bind with a unique violation, and the new file is retired; an
+// activation that rolls back commits no event. Once the activation
+// commits, the replaced file is purged; a purge that fails is logged and
+// the request succeeds, since the replacement stands, its event committed,
+// and the stale reclaim finishes the deleting row.
 //
 // The steps after the write run on a context the request's cancellation
 // does not reach. A client that hangs up would otherwise leave an available
@@ -63,7 +66,7 @@ func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload
 		return LogoIdentity{}, err
 	}
 	cleanup := context.WithoutCancel(ctx)
-	replaced, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (blobfs.File, error) {
+	replaced, err := s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (blobfs.File, error) {
 		// A hold refused as deleting is blobfs's blobfs.DeletingError,
 		// which names the file's own delete apart from its directory's.
 		if err := st.FS.Files.Hold(ctx, tx, file.ID); err != nil {
@@ -79,8 +82,11 @@ func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload
 				return blobfs.File{}, err
 			}
 		}
-		return current, s.attach(ctx, tx, organizationID, file.ID)
-	})
+		if err := s.attach(ctx, tx, organizationID, file.ID); err != nil {
+			return blobfs.File{}, err
+		}
+		return current, raiseUploaded(q, organizationID, file)
+	}))
 	if err != nil {
 		// The activation rolled back, so no image references the new file.
 		return LogoIdentity{}, abandoned(err, st.FS.RemoveFileID(cleanup, s.db.DB, st.Objects, file.ID))
@@ -106,17 +112,23 @@ func (s *store) logo(ctx context.Context, organizationID string) (Logo, error) {
 }
 
 // deleteLogo retires the organization's active logo by blobfs's two-phase
-// delete: one transaction removes its image and begins its file's delete,
-// and the file is purged once that commits; none is sql.ErrNoRows. A purge
-// that fails is logged and the delete succeeds, as putLogo's does.
+// delete: one transaction removes its image, begins its file's delete, and
+// emits LogoDeleted, and the file is purged once that commits; none is
+// sql.ErrNoRows. A purge that fails is logged and the delete succeeds, as
+// putLogo's does, its event committed already.
 func (s *store) deleteLogo(ctx context.Context, organizationID string) error {
-	deleting, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (blobfs.File, error) {
+	deleting, err := s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (blobfs.File, error) {
 		logo, err := s.activeLogo(ctx, tx, organizationID)
 		if err != nil {
 			return blobfs.File{}, err
 		}
-		return s.release(ctx, tx, logo.ID)
-	})
+		deleting, err := s.release(ctx, tx, logo.ID)
+		if err != nil {
+			return blobfs.File{}, err
+		}
+		LogoDeleted.Raise(q, deleting.ID, LogoDeletedData{FileID: deleting.ID, OrganizationID: organizationID, Version: deleting.Version})
+		return deleting, nil
+	}))
 	if err != nil {
 		return err
 	}
@@ -182,7 +194,10 @@ func (s logoSeed) Write(ctx context.Context, raw json.RawMessage, fixtures fs.FS
 // one, and reports whether it did. The fixture passes the upload's rules
 // before any I/O. The file is written under the row's id by blobfs's
 // Store.EnsureFile, which finds or resumes an interrupted run's file, and
-// is activated only if no logo became active meanwhile.
+// is activated only if no logo became active meanwhile. The activation's
+// transaction emits LogoUploaded, as a logo PUT's does, its data the file
+// the write completed or found; an organization with an active logo, the
+// seed's or a client's, emits nothing.
 //
 // What the seed does not own it leaves as it stands, with no error: a file
 // under the id that another organization's image binds, a row holding the
@@ -231,7 +246,7 @@ func (s *store) seedLogo(ctx context.Context, l logoSeedRow, fixtures fs.FS) (bo
 	// active is the organization's active logo once the activation
 	// commits, the seeded file when this run attached it.
 	var attached bool
-	active, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (string, error) {
+	active, err := s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (string, error) {
 		if err := st.FS.Files.Hold(ctx, tx, file.ID); err != nil {
 			return "", err
 		}
@@ -243,8 +258,11 @@ func (s *store) seedLogo(ctx context.Context, l logoSeedRow, fixtures fs.FS) (bo
 			return "", err
 		}
 		attached = true
-		return file.ID, s.attach(ctx, tx, org.ID, file.ID)
-	})
+		if err := s.attach(ctx, tx, org.ID, file.ID); err != nil {
+			return "", err
+		}
+		return file.ID, raiseUploaded(q, org.ID, file)
+	}))
 	var ce *sqlate.ConstraintError
 	switch {
 	case err == nil && active == file.ID:

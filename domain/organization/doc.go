@@ -11,9 +11,23 @@
 // one active per organization, and a PUT replaces whatever is active, the
 // last write winning.
 //
+// Each command emits one event through the messaging runtime's recorder,
+// in the transaction that makes its change true, so a command that fails
+// commits none. A seed that creates an organization or activates a logo
+// emits OrganizationCreated or LogoUploaded, with the data the command's
+// carries, in the transaction that creates it, and nothing for one it
+// finds already there; the reads and the purge that finishes a logo's
+// delete emit nothing.
+//
 // The package's API:
 //
 //   - [Service], built by [New]: the layer's operations, one per endpoint.
+//   - [Recorder]: the recorder the layer emits its events through.
+//   - [OrganizationCreated], [OrganizationEdited], [OrganizationTransferred],
+//     [OrganizationDeleted], [LogoUploaded], [LogoDeleted], with
+//     [OrganizationData], [OrganizationDeletedData], [LogoUploadedData], and
+//     [LogoDeletedData]: the events the commands emit, each in the
+//     transaction that makes its change true.
 //   - [Routes]: the route group the composition root mounts.
 //   - [Organization] and [Logo]: the read shape and the logo's download.
 //   - [CreateOrganization], [EditOrganization], [TransferOrganization]: the

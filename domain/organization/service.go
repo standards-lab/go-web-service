@@ -24,10 +24,10 @@ type Service struct {
 
 // New constructs the service over the database and the object storage the
 // domains share. logger records what a request that succeeded left for the
-// sweep. Construction compiles and binds the statements and performs no
-// I/O.
-func New(db *data.Database, st *data.Storage, logger *slog.Logger) *Service {
-	return &Service{store: newStore(db, st, logger)}
+// sweep, and the commands emit their events through events. Construction
+// compiles and binds the statements and performs no I/O.
+func New(db *data.Database, st *data.Storage, logger *slog.Logger, events *Recorder) *Service {
+	return &Service{store: newStore(db, st, logger, events)}
 }
 
 // Seed is the layer's row contribution to the data package's named states:

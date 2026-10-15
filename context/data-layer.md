@@ -74,11 +74,12 @@ surfaces, routes, constraint names, and enum vocabularies are settled per task.
 The `v1.data.evaluation` task weighs this evidence. The `sdk` package stages `Command`, for
 go-web-sdk, whose path parse is already promoted as go-web-sdk v0.13.0's `PathUUID`. The file
 protocols' hooks it staged are promoted as blobfs v0.7.0's `OnComplete` and `OnDelete`. The
-`data` package holds the shared status matcher and the directives lowering, which the template cannot
-scaffold while it stays engine-free. A generic seed helper is a fit question for the evaluation: it
-promotes to go-database when its shape is the library's own, not when a second service repeats the
-per-table loop. It also decides whether a linter (`depguard`, denying the provider modules outside
-the composition root) enforces the provider import boundary the README's Stack section states.
+`data` package holds the shared status matcher and the directives lowering, which the template
+cannot scaffold while it stays engine-free. A generic seed helper is a fit question for the
+evaluation: it promotes to go-database when its shape is the library's own, not when a second
+service repeats the per-table loop. It also decides whether a linter (`depguard`, denying the
+provider modules outside the composition root) enforces the provider import boundary the
+README's Stack section states.
 
 ## When to build a general sweeper
 

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 
 	"github.com/standards-lab/blobfs"
+	"github.com/standards-lab/go-core/event"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/query"
@@ -33,9 +34,11 @@ type store struct {
 	db             *data.Database
 	storage        *data.Storage
 	logger         *slog.Logger
+	events         *Recorder
 	stmts          *query.Statements
 	view           query.Projection[Organization]
 	createRows     query.Rows[Identity]
+	storedRows     query.Rows[OrganizationData]
 	inSubtree      query.Rows[int64]
 	editGuard      query.Guard
 	transferGuard  query.Guard
@@ -52,16 +55,18 @@ type store struct {
 // handles, and registers the inventory under the domain's name with the
 // store as its verifier, so the seeder's Verify checks it. A compile
 // failure is a wiring defect and panics; no I/O happens here.
-func newStore(db *data.Database, st *data.Storage, logger *slog.Logger) *store {
+func newStore(db *data.Database, st *data.Storage, logger *slog.Logger, events *Recorder) *store {
 	stmts := db.Catalog.MustCompile(files, "statements", db.Dialect())
 	check := stmts.Statement("version")
 	s := &store{
 		db:             db,
 		storage:        st,
 		logger:         logger,
+		events:         events,
 		stmts:          stmts,
 		view:           stmts.Statement("organization_view").Project(query.Scanner[Organization]()),
 		createRows:     stmts.Statement("create").Scan(query.Scanner[Identity]()),
+		storedRows:     stmts.Statement("stored").Scan(query.Scanner[OrganizationData]()),
 		inSubtree:      stmts.Statement("in_subtree").Scan(query.Scalar[int64]),
 		editGuard:      stmts.Statement("edit").Guarded(check, "version"),
 		transferGuard:  stmts.Statement("transfer").Guarded(check, "version"),
@@ -92,21 +97,40 @@ func (s *store) find(ctx context.Context, field, value string) (Organization, er
 	return s.view.One(ctx, s.db, field, value)
 }
 
+// create inserts the organization and emits OrganizationCreated in one
+// transaction, so a create the engine refuses, a duplicate sibling code or
+// a nonexistent parent, commits neither.
 func (s *store) create(ctx context.Context, c CreateOrganization) (Identity, error) {
-	return s.createRows.One(ctx, s.db, query.ArgsOf(c))
+	return s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (Identity, error) {
+		id, err := s.createRows.One(ctx, tx, query.ArgsOf(c))
+		if err != nil {
+			return Identity{}, err
+		}
+		return id, s.raiseStored(ctx, tx, q, OrganizationCreated, id.ID)
+	}))
 }
 
+// edit runs the guarded update and emits OrganizationEdited in one
+// transaction, so an update the guard refuses commits no event.
 func (s *store) edit(ctx context.Context, id string, version int64, e EditOrganization) (Identity, error) {
-	v, err := s.editGuard.Run(ctx, s.db, version, query.ArgsOf(e).With("id", id))
+	v, err := s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (int64, error) {
+		v, err := s.editGuard.Run(ctx, tx, version, query.ArgsOf(e).With("id", id))
+		if err != nil {
+			return 0, err
+		}
+		return v, s.raiseStored(ctx, tx, q, OrganizationEdited, id)
+	}))
 	return Identity{ID: id, Version: v}, err
 }
 
 // transfer is the domain's action: under the tree's lock, the cycle check
 // walks the new parent's ancestor chain, then the guarded update moves
-// parent_id. A nonexistent new parent falls through the walk to the
-// foreign-key violation.
+// parent_id, and OrganizationTransferred is emitted in the same
+// transaction. A nonexistent new parent falls through the walk to the
+// foreign-key violation; a cycle, a guard's refusal, or a violation
+// commits no event.
 func (s *store) transfer(ctx context.Context, id string, version int64, t TransferOrganization) (Identity, error) {
-	v, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (int64, error) {
+	v, err := s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (int64, error) {
 		if err := s.db.Lock(ctx, tx, data.LockOrganizationTree); err != nil {
 			return 0, err
 		}
@@ -119,13 +143,26 @@ func (s *store) transfer(ctx context.Context, id string, version int64, t Transf
 				return 0, fmt.Errorf("%w: %s is in the subtree of %s", ErrCycle, *t.ParentID, id)
 			}
 		}
-		return s.transferGuard.Run(ctx, tx, version, query.ArgsOf(t).With("id", id))
-	})
+		v, err := s.transferGuard.Run(ctx, tx, version, query.ArgsOf(t).With("id", id))
+		if err != nil {
+			return 0, err
+		}
+		return v, s.raiseStored(ctx, tx, q, OrganizationTransferred, id)
+	}))
 	return Identity{ID: id, Version: v}, err
 }
 
+// delete runs the guarded delete and emits OrganizationDeleted in one
+// transaction, the version the row was removed at being the one the guard
+// matched; a guard's refusal or a child's foreign key commits no event.
 func (s *store) delete(ctx context.Context, id string, version int64) error {
-	_, err := s.deleteGuard.Run(ctx, s.db, version, query.Args{"id": id})
+	_, err := s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (struct{}, error) {
+		if _, err := s.deleteGuard.Run(ctx, tx, version, query.Args{"id": id}); err != nil {
+			return struct{}{}, err
+		}
+		OrganizationDeleted.Raise(q, id, OrganizationDeletedData{OrganizationID: id, Version: version})
+		return struct{}{}, nil
+	}))
 	return err
 }
 

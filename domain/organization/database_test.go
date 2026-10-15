@@ -15,6 +15,9 @@ import (
 	"time"
 
 	bfdata "github.com/standards-lab/blobfs/data"
+	"github.com/standards-lab/go-core/event"
+	"github.com/standards-lab/go-messaging/outbox"
+	msgpg "github.com/standards-lab/go-messaging/postgres"
 	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-storage/storagetest"
 	"github.com/standards-lab/go-web-sdk"
@@ -68,7 +71,27 @@ func serviceLogging(t *testing.T, logger *slog.Logger, dialect sqlate.Dialect, r
 	}
 	t.Cleanup(func() { _ = objects.Shutdown(context.Background()) })
 	db := data.New(sqlate.Wrap(pool, dialect), catalog)
-	return organization.New(db, data.NewStorage(db, fs, objects), logger), rec, fake
+	return organization.New(db, data.NewStorage(db, fs, objects), logger, recorder(t)), rec, fake
+}
+
+// eventID and eventTime are what the tests' recorder stamps on every
+// event it emits.
+const eventID = "00000000-0000-7000-8000-0000000000ee"
+
+var eventTime = time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+
+// recorder is the recorder the composition root injects, go-messaging's
+// over its Postgres outbox, with the id and the time it stamps fixed: its
+// event's write is one statement on the command's transaction, which the
+// scripted driver records.
+func recorder(t *testing.T) *organization.Recorder {
+	t.Helper()
+	ob, err := outbox.New(msgpg.Outbox())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return event.NewRecorder(ob.Sink(), "web-service",
+		event.IDs(func() string { return eventID }), event.Clock(func() time.Time { return eventTime }))
 }
 
 // seeder composes the data package's seeder over the layer's row
@@ -92,7 +115,7 @@ func seederOver(t *testing.T, responses ...sqltest.Response) (*data.Seeder, *dat
 		t.Fatal(err)
 	}
 	db := data.New(sqlate.Wrap(pool, sqltest.Dialect{}), catalog)
-	svc := organization.New(db, data.NewStorage(db, fs, nil), slog.New(slog.DiscardHandler))
+	svc := organization.New(db, data.NewStorage(db, fs, nil), slog.New(slog.DiscardHandler), recorder(t))
 	return data.NewSeeder(db, svc.Seed(), noFiles("logos"), noFiles("documents")), db, rec
 }
 
@@ -134,6 +157,22 @@ func exists() sqltest.Response {
 	return sqltest.Response{Columns: []string{"version"}, Rows: [][]driver.Value{{int64(1)}}}
 }
 
+// stored is the stored statement's read of the organization after the
+// command that changed it, a root unless parent is given.
+func stored(id, code, name string, version int64, parent ...string) sqltest.Response {
+	var p driver.Value
+	if len(parent) > 0 {
+		p = parent[0]
+	}
+	return sqltest.Response{
+		Columns: []string{"organization_id", "parent_id", "code", "name", "version"},
+		Rows:    [][]driver.Value{{id, p, code, name, version}},
+	}
+}
+
+// written is the outbox's insert of a command's event.
+func written() sqltest.Response { return sqltest.Response{Affected: 1} }
+
 func row() sqltest.Response {
 	now := time.Now()
 	return sqltest.Response{
@@ -150,17 +189,24 @@ func row() sqltest.Response {
 func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 	ctx := context.Background()
 	s, rec := service(t,
-		sqltest.WithTotal(row(), 1),   // list: the page and its window count in one statement
-		row(),                         // find by id
-		identity(validID, 1),          // create
-		sqltest.Response{Affected: 1}, // edit
-		sqltest.Response{Affected: 0}, // transfer: lock
-		count(0),                      // transfer: in_subtree
-		sqltest.Response{Affected: 1}, // transfer: update
-		sqltest.Response{Affected: 1}, // delete
+		sqltest.WithTotal(row(), 1),                // list: the page and its window count in one statement
+		row(),                                      // find by id
+		identity(validID, 1),                       // create
+		stored(validID, "eng", "Eng", 1),           // create: the stored row
+		written(),                                  // create: the event
+		sqltest.Response{Affected: 1},              // edit
+		stored(validID, "eng", "Eng", 2),           // edit: the stored row
+		written(),                                  // edit: the event
+		sqltest.Response{Affected: 0},              // transfer: lock
+		count(0),                                   // transfer: in_subtree
+		sqltest.Response{Affected: 1},              // transfer: update
+		stored(validID, "eng", "Eng", 3, parentID), // transfer: the stored row
+		written(),                                  // transfer: the event
+		sqltest.Response{Affected: 1},              // delete
+		written(),                                  // delete: the event
 	)
-	q, _ := web.ParseQuery(url.Values{"code": {"acme"}, "sort": {"-path"}}, web.Limits{DefaultSize: 20, MaxSize: 100})
-	if items, paging, err := s.List(ctx, q); err != nil || (paging.Total == nil || *paging.Total != 1) || paging.More || items[0].Path != "/acme" {
+	lq, _ := web.ParseQuery(url.Values{"code": {"acme"}, "sort": {"-path"}}, web.Limits{DefaultSize: 20, MaxSize: 100})
+	if items, paging, err := s.List(ctx, lq); err != nil || (paging.Total == nil || *paging.Total != 1) || paging.More || items[0].Path != "/acme" {
 		t.Fatalf("List = %v, %+v, %v", items, paging, err)
 	}
 	if o, err := s.Find(ctx, validID); err != nil || o.Code != "acme" || o.ParentID != nil {
@@ -188,13 +234,17 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 	if create := sqls[2]; !strings.HasSuffix(create, "RETURNING id, version") {
 		t.Errorf("create = %q; want the identity pattern spliced", create)
 	}
-	if lock := rec.Calls()[5]; lock.SQL != "SELECT pg_advisory_xact_lock(hashtext($1))" || lock.Args[0] != data.LockOrganizationTree {
+	if lock := rec.Calls()[13]; lock.SQL != "SELECT pg_advisory_xact_lock(hashtext($1))" || lock.Args[0] != data.LockOrganizationTree {
 		t.Errorf("transfer did not take the named tree lock first: %+v", lock)
 	}
-	ops := rec.Ops()
-	if ops[len(ops)-1] != sqltest.OpExec || ops[len(ops)-2] != sqltest.OpCommit {
-		t.Errorf("ops = %v, want the transfer committed and the delete last", ops)
-	}
+	// Each command is one transaction: its change, its stored row's read
+	// when it leaves a row, and its event.
+	sameOps(t, rec, q, q,
+		begin, q, q, x, commit, // create
+		begin, x, q, x, commit, // edit
+		begin, x, q, x, q, x, commit, // transfer
+		begin, x, x, commit, // delete
+	)
 }
 
 func TestStore_TransferRejectsACycleBeforeTheUpdate(t *testing.T) {
@@ -209,13 +259,14 @@ func TestStore_TransferRejectsACycleBeforeTheUpdate(t *testing.T) {
 }
 
 func TestStore_TransferToRootBindsNull(t *testing.T) {
-	s, rec := service(t, sqltest.Response{Affected: 0}, sqltest.Response{Affected: 1})
+	s, rec := service(t, sqltest.Response{Affected: 0}, sqltest.Response{Affected: 1}, stored(validID, "eng", "Eng", 2), written())
 	if _, err := s.Transfer(context.Background(), validID, 1, transferTo(t, `{"parent_id":null}`)); err != nil {
 		t.Fatal(err)
 	}
 	update := rec.Calls()[2]
-	if update.Args[0] != nil || len(rec.SQL(sqltest.OpQuery)) != 0 {
-		t.Errorf("root transfer: args %v, queries %v; want a null parent and no cycle walk", update.Args, rec.SQL(sqltest.OpQuery))
+	queries := rec.SQL(sqltest.OpQuery)
+	if update.Args[0] != nil || len(queries) != 1 || !strings.HasPrefix(queries[0], "SELECT id AS organization_id") {
+		t.Errorf("root transfer: args %v, queries %v; want a null parent and no cycle walk, only the stored row's read", update.Args, queries)
 	}
 }
 

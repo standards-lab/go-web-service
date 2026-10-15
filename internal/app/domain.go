@@ -17,13 +17,15 @@ import (
 // contributions join checks its statements (admin.go). It constructs
 // nothing.
 func defineDomain(g *graph.Graph, n *Nodes) {
+	// The runtime's recorder is the one each layer's commands emit
+	// through. Their commands run in the server's requests, so neither
+	// needs an edge to the relay: the server drains before it
+	// (reactors.go).
 	n.Organization = g.Define("organization", func(s *graph.Scope) (*organization.Service, error) {
-		return organization.New(s.Use(n.SQL), s.Use(n.Files), s.Use(n.Logger)), nil
+		return organization.New(s.Use(n.SQL), s.Use(n.Files), s.Use(n.Logger), s.Use(n.Runtime).Recorder), nil
 	})
 	// The wake node is the document layer's Sweeper, which it nudges after
-	// each branch it marks, and the runtime's recorder is the one its
-	// upload emits through. Its commands run in the server's requests, so it
-	// needs no edge to the relay: the server drains before it (reactors.go).
+	// each branch it marks.
 	n.Document = g.Define("document", func(s *graph.Scope) (*document.Service, error) {
 		return document.New(s.Use(n.SQL), s.Use(n.Files), s.Use(n.Wake), s.Use(n.Runtime).Recorder), nil
 	})

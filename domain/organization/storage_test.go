@@ -82,15 +82,17 @@ func TestStore_LogoProtocolsBindTheirFilesParameters(t *testing.T) {
 		datatest.FileRows(file(oldFileID, blobfs.StatusAvailable, 2)), // activate: the current logo
 		exec(1), // activate: the replaced image removed
 		datatest.FileRows(file(oldFileID, blobfs.StatusDeleting, 3)), // activate: the replaced file's delete begun
-		exec(1), // activate: the new image, active
-		exec(1), // the replaced file purged, on the pool
+		exec(1),   // activate: the new image, active
+		written(), // activate: the event
+		exec(1),   // the replaced file purged, on the pool
 		// Logo.
 		datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)),
 		// DeleteLogo.
 		datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)), // the active logo
 		exec(1), // its image removed
 		datatest.FileRows(file(newFileID, blobfs.StatusDeleting, 3)), // the delete begun
-		exec(1), // the purge
+		written(), // the event
+		exec(1),   // the purge
 	)
 	old := file(oldFileID, blobfs.StatusAvailable, 2)
 	if _, err := fake.Put(ctx, old.Key, strings.NewReader("old"), storage.PutOptions{}); err != nil {
@@ -137,9 +139,9 @@ func TestStore_LogoProtocolsBindTheirFilesParameters(t *testing.T) {
 		q,
 		begin, q, q, commit,
 		q,
-		begin, x, q, x, q, x, commit, x,
+		begin, x, q, x, q, x, x, commit, x,
 		q,
-		begin, q, x, q, commit, x,
+		begin, q, x, q, x, commit, x,
 	)
 }
 
@@ -395,7 +397,7 @@ func TestPutLogo_AnswersCreatedWithLocation(t *testing.T) {
 	s, db, _ := serviceOver(t, sqltest.ReturningDialect{},
 		datatest.DirectoryRows(imagesDirectory()), exists(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
 		datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)),
-		exec(1), datatest.FileRows(), exec(1), // the hold, no current logo, the new image
+		exec(1), datatest.FileRows(), exec(1), written(), // the hold, no current logo, the new image, the event
 	)
 	r := web.NewRouter()
 	r.Mount(web.NewModule(organization.Routes(s, web.Limits{DefaultSize: 20, MaxSize: 100}, transfer, slog.New(slog.DiscardHandler))))
@@ -404,7 +406,7 @@ func TestPutLogo_AnswersCreatedWithLocation(t *testing.T) {
 	if rec.Code != 201 || rec.Header().Get("Location") != path || strings.TrimSpace(rec.Body.String()) != `{"id":"`+newFileID+`"}` {
 		t.Fatalf("status %d, Location %q, body %s", rec.Code, rec.Header().Get("Location"), rec.Body)
 	}
-	sameOps(t, db, q, begin, q, q, commit, q, begin, x, q, x, commit)
+	sameOps(t, db, q, begin, q, q, commit, q, begin, x, q, x, x, commit)
 }
 
 // seededLogoID is the fixed id a state gives the seeded logo's file.
@@ -669,7 +671,7 @@ func TestStore_AFailedPurgeAfterTheCommitIsLogged(t *testing.T) {
 			datatest.DirectoryRows(imagesDirectory()), exists(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
 			datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)),
 			exec(1), datatest.FileRows(file(oldFileID, blobfs.StatusAvailable, 2)), exec(1),
-			datatest.FileRows(file(oldFileID, blobfs.StatusDeleting, 3)), exec(1),
+			datatest.FileRows(file(oldFileID, blobfs.StatusDeleting, 3)), exec(1), written(),
 			lost, // the replaced file's purge
 		}, func(s *organization.Service) error {
 			_, err := s.PutLogo(ctx, validID, logoUpload(t))
@@ -677,7 +679,7 @@ func TestStore_AFailedPurgeAfterTheCommitIsLogged(t *testing.T) {
 		}},
 		"delete": {[]sqltest.Response{
 			datatest.FileRows(file(oldFileID, blobfs.StatusAvailable, 2)), exec(1),
-			datatest.FileRows(file(oldFileID, blobfs.StatusDeleting, 3)),
+			datatest.FileRows(file(oldFileID, blobfs.StatusDeleting, 3)), written(),
 			lost, // the purge
 		}, func(s *organization.Service) error { return s.DeleteLogo(ctx, validID) }},
 	}

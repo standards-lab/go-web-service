@@ -120,6 +120,47 @@ type LogoIdentity struct {
 	ID string `json:"id"`
 }
 
+// OrganizationData is the data of OrganizationCreated, OrganizationEdited,
+// and OrganizationTransferred: the organization's stored state after the
+// command, under the API's field names, the id as organization_id. It
+// carries neither the composed path nor the timestamps, and no earlier
+// state: a transfer's carries only the new parent. The json tags are also
+// the scan contract of the stored statement.
+type OrganizationData struct {
+	OrganizationID string  `json:"organization_id"`
+	ParentID       *string `json:"parent_id"`
+	Code           string  `json:"code"`
+	Name           string  `json:"name"`
+	Version        int64   `json:"version"`
+}
+
+// OrganizationDeletedData is the data of OrganizationDeleted: the
+// organization's id and the version its row was removed at.
+type OrganizationDeletedData struct {
+	OrganizationID string `json:"organization_id"`
+	Version        int64  `json:"version"`
+}
+
+// LogoUploadedData is the data of LogoUploaded: the logo file's metadata
+// as its write's completion left it, available, never its content. ETag is
+// the entity tag the logo's download answers with.
+type LogoUploadedData struct {
+	FileID         string `json:"file_id"`
+	OrganizationID string `json:"organization_id"`
+	ContentType    string `json:"content_type"`
+	Size           int64  `json:"size"`
+	ETag           string `json:"etag"`
+	Version        int64  `json:"version"`
+}
+
+// LogoDeletedData is the data of LogoDeleted: the logo file's id, its
+// organization, and the version its release left it at, deleting.
+type LogoDeletedData struct {
+	FileID         string `json:"file_id"`
+	OrganizationID string `json:"organization_id"`
+	Version        int64  `json:"version"`
+}
+
 // seedRow is one organization of a named state, in the vocabulary of the
 // API: an organization names its parent by code, the empty code being the
 // root, and the rows come parents first.

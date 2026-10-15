@@ -5,6 +5,7 @@ package integration_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"testing"
@@ -15,11 +16,18 @@ import (
 	"github.com/standards-lab/go-web-sdk/webtest"
 
 	"github.com/standards-lab/go-web-service/domain/document"
+	orgdomain "github.com/standards-lab/go-web-service/domain/organization"
 	"github.com/standards-lab/go-web-service/integration"
 )
 
-// uploaded is the document upload's event type.
+// uploaded is the document upload's event type, and the marker's.
 var uploaded = document.FileUploaded.Type()
+
+// The logo commands' event types.
+var (
+	logoUploaded = orgdomain.LogoUploaded.Type()
+	logoDeleted  = orgdomain.LogoDeleted.Type()
+)
 
 // fileMeta is the file's metadata as the API presents it: the fields its
 // upload's event carries.
@@ -217,16 +225,113 @@ func TestEvents_SeedsEmitNothing(t *testing.T) {
 	onlyMarkers(t, got, started.ID, reset.ID)
 }
 
-// A logo's upload is no document upload, and emits nothing.
-func TestEvents_ALogoEmitsNothing(t *testing.T) {
+// A logo's upload is no document upload: it emits exactly one
+// web-service.organization.logo.uploaded, about the logo's file, and no
+// web-service.organization.logo.deleted for the seeded logo it replaces.
+func TestEvents_ALogoEmitsLogoUploaded(t *testing.T) {
 	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	c := s.Client()
 	integration.Reset(t, c, integration.Default)
-	events := integration.Subscribe(t, uploaded)
+	events := integration.Subscribe(t, uploaded, logoUploaded, logoDeleted)
 	all := tree(t, c)
-	webtest.Decode[identity](t, c.Put(t, organizations+"/"+all["logistics"].ID+"/logo", webtest.Raw{ContentType: "image/png", Body: []byte("png")}), http.StatusCreated)
+	logo := webtest.Decode[identity](t, c.Put(t, organizations+"/"+all["logistics"].ID+"/logo", webtest.Raw{ContentType: "image/png", Body: []byte("png")}), http.StatusCreated)
 	m, got := marker(t, c, events, "/api/documents/"+all[docsOrg].ID, "after-logo.txt")
-	onlyMarkers(t, got, m.ID)
+	if l := about(got, logo.ID); len(l) != 1 || l[0].Type != logoUploaded {
+		t.Errorf("events about the logo = %v; want one %s", subjects(l), logoUploaded)
+	}
+	if n := len(about(got, m.ID)); n != 1 || len(got) != 2 {
+		t.Errorf("events = %v; want the logo's and the marker's alone", subjects(got))
+	}
+}
+
+// commandTypes is every type a command case's event may carry, the types
+// the commands' case subscribes to beside the marker's.
+var commandTypes = []string{
+	orgdomain.OrganizationCreated.Type(), orgdomain.OrganizationEdited.Type(),
+	orgdomain.OrganizationTransferred.Type(), orgdomain.OrganizationDeleted.Type(),
+	logoUploaded, logoDeleted,
+}
+
+// commandFixture is what a command case runs against: the client, and the
+// default state's organizations by code, as the case found them.
+type commandFixture struct {
+	c    *webtest.Client
+	orgs map[string]organization
+}
+
+// commandCase is one command and the event it commits: run performs it,
+// after any setup of its own, and returns the event's type and the id of
+// the entity the type names, the event's subject. Each case leaves the
+// organizations the others use as it found them, or uses its own.
+type commandCase struct {
+	name string
+	run  func(t *testing.T, f commandFixture) (typ, subject string)
+}
+
+// commandCases is every command the service emits an event for, one row
+// each.
+var commandCases = []commandCase{
+	{"organization create", func(t *testing.T, f commandFixture) (string, string) {
+		id := webtest.Decode[identity](t, f.c.Post(t, organizations, map[string]any{"parent_id": f.orgs["acme"].ID, "code": "events-created", "name": "Created"}), http.StatusCreated)
+		return orgdomain.OrganizationCreated.Type(), id.ID
+	}},
+	{"organization edit", func(t *testing.T, f commandFixture) (string, string) {
+		o := f.orgs["product"]
+		webtest.Decode[identity](t, f.c.Put(t, organizations+"/"+o.ID, map[string]any{"code": o.Code, "name": "Product Line"}, webtest.IfMatch(o.Version)), http.StatusOK)
+		return orgdomain.OrganizationEdited.Type(), o.ID
+	}},
+	{"organization transfer", func(t *testing.T, f commandFixture) (string, string) {
+		o := f.orgs["platform"]
+		webtest.Decode[identity](t, f.c.Post(t, organizations+"/"+o.ID+"/transfer", map[string]any{"parent_id": f.orgs["operations"].ID}, webtest.IfMatch(o.Version)), http.StatusOK)
+		return orgdomain.OrganizationTransferred.Type(), o.ID
+	}},
+	{"organization delete", func(t *testing.T, f commandFixture) (string, string) {
+		id := webtest.Decode[identity](t, f.c.Post(t, organizations, map[string]any{"parent_id": f.orgs["acme"].ID, "code": "events-deleted", "name": "Deleted"}), http.StatusCreated)
+		f.c.Delete(t, organizations+"/"+id.ID, webtest.IfMatch(id.Version)).Expect(t, http.StatusNoContent)
+		return orgdomain.OrganizationDeleted.Type(), id.ID
+	}},
+	{"logo put", func(t *testing.T, f commandFixture) (string, string) {
+		id := webtest.Decode[identity](t, f.c.Put(t, organizations+"/"+f.orgs["logistics"].ID+"/logo", webtest.Raw{ContentType: "image/png", Body: []byte("png")}), http.StatusCreated)
+		return logoUploaded, id.ID
+	}},
+	{"logo delete", func(t *testing.T, f commandFixture) (string, string) {
+		logo := organizations + "/" + f.orgs["engineering"].ID + "/logo"
+		id := webtest.Decode[identity](t, f.c.Put(t, logo, webtest.Raw{ContentType: "image/png", Body: []byte("png")}), http.StatusCreated)
+		f.c.Delete(t, logo).Expect(t, http.StatusNoContent)
+		return logoDeleted, id.ID
+	}},
+}
+
+// Each command commits exactly one event of its type about the entity the
+// type names, published on its type from the service's source, which a
+// subscriber that does not own the stream receives. Each case is followed
+// by a marker upload, so every event its command committed has arrived by
+// the marker's.
+func TestEvents_EachCommandEmitsItsEvent(t *testing.T) {
+	s := integration.Start(t, integration.Options{Seed: integration.Default})
+	c := s.Client()
+	integration.Reset(t, c, integration.Default)
+	events := integration.Subscribe(t, append([]string{uploaded}, commandTypes...)...)
+	f := commandFixture{c: c, orgs: tree(t, c)}
+	docs := "/api/documents/" + f.orgs[docsOrg].ID
+	for i, cc := range commandCases {
+		t.Run(cc.name, func(t *testing.T) {
+			typ, subject := cc.run(t, f)
+			_, got := marker(t, c, events, docs, fmt.Sprintf("after-command-%d.txt", i))
+			var match []event.Event
+			for _, e := range about(got, subject) {
+				if e.Type == typ {
+					match = append(match, e)
+				}
+			}
+			if len(match) != 1 {
+				t.Fatalf("%s events about %s = %d (%v); want one", typ, subject, len(match), subjects(got))
+			}
+			if e := match[0]; e.Source != "web-service" || e.ID == "" || e.Time.IsZero() || e.DataContentType != "application/json" {
+				t.Errorf("event = %+v; want it from web-service, stamped", e)
+			}
+		})
+	}
 }
 
 // The drain runs the server before the relay, so a request-driven

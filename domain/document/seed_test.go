@@ -15,6 +15,7 @@ import (
 	"github.com/standards-lab/sqlate/sqltest"
 
 	"github.com/standards-lab/go-web-service/domain/document"
+	"github.com/standards-lab/go-web-service/internal/outboxtest"
 )
 
 // A tree a state names: engineering's, by path, under a fixed root id,
@@ -96,15 +97,15 @@ func TestSeed_WritesTheTreeUnderItsIDs(t *testing.T) {
 		begin, q, q, x, commit,
 		begin, q, q, commit, begin, q, x, commit,
 	)
-	events := committedEvents(t, rec)
+	events := outboxtest.Committed(t, rec)
 	if len(events) != 3 {
 		t.Fatalf("events committed = %d; want the root's, the directory's, and the file's", len(events))
 	}
-	wantEvent(t, events[0], document.DirectoryCreated.Type(), seedRootID,
+	outboxtest.Want(t, events[0], document.DirectoryCreated.Type(), seedRootID,
 		map[string]any{"directory_id": seedRootID, "organization_id": orgID, "parent_id": nil, "name": "/", "version": float64(1)})
-	wantEvent(t, events[1], document.DirectoryCreated.Type(), seedDirID,
+	outboxtest.Want(t, events[1], document.DirectoryCreated.Type(), seedDirID,
 		map[string]any{"directory_id": seedDirID, "organization_id": orgID, "parent_id": seedRootID, "name": "reports", "version": float64(1)})
-	wantEvent(t, events[2], document.FileUploaded.Type(), seedFileID, map[string]any{
+	outboxtest.Want(t, events[2], document.FileUploaded.Type(), seedFileID, map[string]any{
 		"file_id": seedFileID, "organization_id": orgID, "directory_id": seedDirID, "name": "q1.csv",
 		"content_type": "text/csv", "size": float64(4), "etag": `"etag-` + seedFileID + `"`, "version": float64(2),
 	})
@@ -146,7 +147,7 @@ func TestSeed_ARolledBackCreationCommitsNoEvent(t *testing.T) {
 				t.Fatalf("Write = %v; want the event's write refused", err)
 			}
 			sameOps(t, rec, c.ops...)
-			if events := committedEvents(t, rec); len(events) != 0 {
+			if events := outboxtest.Committed(t, rec); len(events) != 0 {
 				t.Errorf("events committed = %v; want none", events)
 			}
 		})

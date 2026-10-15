@@ -27,6 +27,7 @@ import (
 
 	"github.com/standards-lab/go-web-service/data"
 	"github.com/standards-lab/go-web-service/domain/organization"
+	"github.com/standards-lab/go-web-service/internal/outboxtest"
 )
 
 const (
@@ -74,12 +75,6 @@ func serviceLogging(t *testing.T, logger *slog.Logger, dialect sqlate.Dialect, r
 	return organization.New(db, data.NewStorage(db, fs, objects), logger, recorder(t)), rec, fake
 }
 
-// eventID and eventTime are what the tests' recorder stamps on every
-// event it emits.
-const eventID = "00000000-0000-7000-8000-0000000000ee"
-
-var eventTime = time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
-
 // recorder is the recorder the composition root injects, go-messaging's
 // over its Postgres outbox, with the id and the time it stamps fixed: its
 // event's write is one statement on the command's transaction, which the
@@ -90,8 +85,7 @@ func recorder(t *testing.T) *organization.Recorder {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return event.NewRecorder(ob.Sink(), "web-service",
-		event.IDs(func() string { return eventID }), event.Clock(func() time.Time { return eventTime }))
+	return outboxtest.Stamped(ob.Sink())
 }
 
 // seeder composes the data package's seeder over the layer's row
@@ -440,7 +434,7 @@ func wantCreated(t *testing.T, events []event.Event, rows []defaultRow, first in
 	}
 	for i, e := range events {
 		o, id := rows[first+i], seededID(first+i)
-		wantEvent(t, e, organization.OrganizationCreated.Type(), id,
+		outboxtest.Want(t, e, organization.OrganizationCreated.Type(), id,
 			map[string]any{"organization_id": id, "parent_id": ids[o.Parent], "code": o.Code, "name": o.Name, "version": float64(1)})
 	}
 }
@@ -475,7 +469,7 @@ func TestSeed_InsertsEveryRowOnce(t *testing.T) {
 	if calls[2].Args[0] != seededID(0) {
 		t.Errorf("the stored read bound %v; want the inserted row's id", calls[2].Args)
 	}
-	wantCreated(t, committedEvents(t, rec), rows, 0)
+	wantCreated(t, outboxtest.Committed(t, rec), rows, 0)
 }
 
 // A row already there is found by its parent and code, and commits no
@@ -500,7 +494,7 @@ func TestSeed_FindsExistingRows(t *testing.T) {
 	if rec.Pending() != 0 {
 		t.Fatalf("pending %d", rec.Pending())
 	}
-	wantCreated(t, committedEvents(t, rec), rows, 1)
+	wantCreated(t, outboxtest.Committed(t, rec), rows, 1)
 }
 
 // A seed over a seeded state finds every row and commits no event.
@@ -514,7 +508,7 @@ func TestSeed_ASeededStateCommitsNoEvent(t *testing.T) {
 	if n, err := s.Seed(context.Background(), "default"); err != nil || n["organizations"] != 0 {
 		t.Fatalf("Seed = %v, %v; want nothing inserted", n, err)
 	}
-	if w := outboxWrites(rec); len(w) != 0 {
+	if w := outboxtest.Writes(rec); len(w) != 0 {
 		t.Errorf("events written = %d; want none", len(w))
 	}
 }
@@ -529,10 +523,10 @@ func TestSeed_RollsBackOnFailure(t *testing.T) {
 		t.Fatalf("err = %v; want the failing row named", err)
 	}
 	sameOps(t, rec, begin, q, q, x, q, rollback)
-	if len(outboxWrites(rec)) != 1 {
-		t.Errorf("events written = %d; want the first row's, rolled back", len(outboxWrites(rec)))
+	if len(outboxtest.Writes(rec)) != 1 {
+		t.Errorf("events written = %d; want the first row's, rolled back", len(outboxtest.Writes(rec)))
 	}
-	noEventCommitted(t, rec)
+	outboxtest.NoneCommitted(t, rec)
 }
 
 // The layer's verifier covers its statements, the seed's among them, when

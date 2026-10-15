@@ -3,63 +3,17 @@ package organization_test
 import (
 	"context"
 	"database/sql/driver"
-	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/standards-lab/blobfs"
 	"github.com/standards-lab/blobfs/data/datatest"
-	"github.com/standards-lab/go-core/event"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/sqltest"
 
 	"github.com/standards-lab/go-web-service/domain/organization"
+	"github.com/standards-lab/go-web-service/internal/outboxtest"
 )
-
-// outboxWrites is every outbox insert the recorder ran, in order.
-func outboxWrites(rec *sqltest.Recorder) []sqltest.Call {
-	var out []sqltest.Call
-	for _, c := range rec.Calls() {
-		if c.Op == sqltest.OpExec && strings.Contains(c.SQL, "messaging_outbox") {
-			out = append(out, c)
-		}
-	}
-	return out
-}
-
-// bytesOf is a bound argument's bytes, as the driver was handed them.
-func bytesOf(t *testing.T, arg any) []byte {
-	t.Helper()
-	switch v := arg.(type) {
-	case []byte:
-		return v
-	case string:
-		return []byte(v)
-	case json.RawMessage:
-		return v
-	}
-	t.Fatalf("argument %T is neither bytes nor a string", arg)
-	return nil
-}
-
-// writtenEvent decodes the outbox insert's event: its parameters are the
-// source, the id, the header as JSON, and the data, in that order.
-func writtenEvent(t *testing.T, c sqltest.Call) event.Event {
-	t.Helper()
-	if len(c.Args) != 4 {
-		t.Fatalf("outbox insert args = %v; want source, id, header, data", c.Args)
-	}
-	var h event.Header
-	if err := json.Unmarshal(bytesOf(t, c.Args[2]), &h); err != nil {
-		t.Fatalf("decode the header: %v", err)
-	}
-	e, err := event.Decode(h, bytesOf(t, c.Args[3]))
-	if err != nil {
-		t.Fatalf("decode the event: %v", err)
-	}
-	return e
-}
 
 // Each command writes exactly one event, its kind's, in the transaction
 // that makes its change true: the outbox insert is the last statement
@@ -163,7 +117,7 @@ func TestCommands_EmitTheirEventInTheirTransaction(t *testing.T) {
 				t.Fatalf("= %v", err)
 			}
 			sameOps(t, rec, c.ops...)
-			writes := outboxWrites(rec)
+			writes := outboxtest.Writes(rec)
 			if len(writes) != 1 {
 				t.Fatalf("events written = %d; want one", len(writes))
 			}
@@ -173,23 +127,7 @@ func TestCommands_EmitTheirEventInTheirTransaction(t *testing.T) {
 					t.Errorf("the event's write is followed by %v; want the change's commit", calls[i+1].Op)
 				}
 			}
-			e := writtenEvent(t, writes[0])
-			if e.Type != c.typ || e.Subject != c.subject || e.Source != "web-service" || e.ID != eventID ||
-				!e.Time.Equal(eventTime) || e.DataContentType != "application/json" {
-				t.Errorf("event = %+v; want %s about %s, stamped by the recorder", e, c.typ, c.subject)
-			}
-			var got map[string]any
-			if err := json.Unmarshal(e.Data, &got); err != nil {
-				t.Fatal(err)
-			}
-			if len(got) != len(c.data) {
-				t.Errorf("data = %v; want exactly %v", got, c.data)
-			}
-			for k, v := range c.data {
-				if w, ok := got[k]; !ok || w != v {
-					t.Errorf("data[%q] = %v; want %v", k, got[k], v)
-				}
-			}
+			outboxtest.Want(t, outboxtest.Decode(t, writes[0]), c.typ, c.subject, c.data)
 		})
 	}
 }
@@ -286,68 +224,9 @@ func TestCommands_AFailedCommandCommitsNoEvent(t *testing.T) {
 				t.Fatal("= nil; want the command's failure")
 			}
 			sameOps(t, rec, c.ops...)
-			noEventCommitted(t, rec)
+			outboxtest.NoneCommitted(t, rec)
 		})
 	}
 }
 
 const rollback = sqltest.OpRollback
-
-// noEventCommitted fails the test if an outbox insert reached a commit: a
-// write its transaction rolled back is no event.
-func noEventCommitted(t *testing.T, rec *sqltest.Recorder) {
-	t.Helper()
-	written := false
-	for _, c := range rec.Calls() {
-		switch {
-		case c.Op == sqltest.OpExec && strings.Contains(c.SQL, "messaging_outbox"):
-			written = true
-		case c.Op == rollback:
-			written = false
-		case c.Op == commit && written:
-			t.Errorf("an event committed: ops %v", rec.Ops())
-			return
-		}
-	}
-}
-
-// committedEvents is every event a committed transaction wrote, in commit
-// order: an outbox insert counts once its transaction commits, and one a
-// rollback undid never does.
-func committedEvents(t *testing.T, rec *sqltest.Recorder) []event.Event {
-	t.Helper()
-	var out, open []event.Event
-	for _, c := range rec.Calls() {
-		switch {
-		case c.Op == sqltest.OpExec && strings.Contains(c.SQL, "messaging_outbox"):
-			open = append(open, writtenEvent(t, c))
-		case c.Op == rollback:
-			open = nil
-		case c.Op == commit:
-			out, open = append(out, open...), nil
-		}
-	}
-	return out
-}
-
-// wantEvent fails the test unless e is typ about subject, stamped by the
-// recorder, its data exactly want: every field, and no other.
-func wantEvent(t *testing.T, e event.Event, typ, subject string, want map[string]any) {
-	t.Helper()
-	if e.Type != typ || e.Subject != subject || e.Source != "web-service" || e.ID != eventID ||
-		!e.Time.Equal(eventTime) || e.DataContentType != "application/json" {
-		t.Errorf("event = %+v; want %s about %s, stamped by the recorder", e, typ, subject)
-	}
-	var got map[string]any
-	if err := json.Unmarshal(e.Data, &got); err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != len(want) {
-		t.Errorf("data = %v; want exactly %v", got, want)
-	}
-	for k, v := range want {
-		if w, ok := got[k]; !ok || w != v {
-			t.Errorf("data[%q] = %v; want %v", k, got[k], v)
-		}
-	}
-}

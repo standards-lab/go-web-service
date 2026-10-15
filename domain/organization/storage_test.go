@@ -25,6 +25,7 @@ import (
 	"github.com/standards-lab/sqlate/sqltest"
 
 	"github.com/standards-lab/go-web-service/domain/organization"
+	"github.com/standards-lab/go-web-service/internal/outboxtest"
 )
 
 const (
@@ -474,11 +475,11 @@ func TestLogoSeed_WritesAndActivatesTheFixture(t *testing.T) {
 // file as its write completed it.
 func wantLogoUploaded(t *testing.T, rec *sqltest.Recorder) {
 	t.Helper()
-	events := committedEvents(t, rec)
+	events := outboxtest.Committed(t, rec)
 	if len(events) != 1 {
 		t.Fatalf("events committed = %d; want the activation's LogoUploaded", len(events))
 	}
-	wantEvent(t, events[0], organization.LogoUploaded.Type(), seededLogoID, map[string]any{
+	outboxtest.Want(t, events[0], organization.LogoUploaded.Type(), seededLogoID, map[string]any{
 		"file_id": seededLogoID, "organization_id": validID, "content_type": "image/png",
 		"size": float64(3), "etag": `"etag-` + seededLogoID + `"`, "version": float64(2),
 	})
@@ -498,7 +499,7 @@ func TestLogoSeed_LeavesAnActiveLogoAlone(t *testing.T) {
 		t.Errorf("puts = %d; want none", fake.Puts())
 	}
 	sameOps(t, rec, q, q)
-	noEventCommitted(t, rec)
+	outboxtest.NoneCommitted(t, rec)
 }
 
 // A file an interrupted run completed but never activated is found by its
@@ -544,7 +545,7 @@ func TestLogoSeed_ARolledBackActivationCommitsNoEvent(t *testing.T) {
 	if _, err := fake.Get(ctx, file(seededLogoID, blobfs.StatusPending, 1).Key, storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
 		t.Errorf("the retired file's object outlived it: %v", err)
 	}
-	noEventCommitted(t, rec)
+	outboxtest.NoneCommitted(t, rec)
 }
 
 // A logo that became active between the check and the activation is left

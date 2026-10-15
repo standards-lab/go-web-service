@@ -12,7 +12,6 @@ import (
 	"github.com/standards-lab/blobfs"
 	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/blobfs/data/datatest"
-	"github.com/standards-lab/go-core/event"
 	"github.com/standards-lab/go-messaging/outbox"
 	msgpg "github.com/standards-lab/go-messaging/postgres"
 	"github.com/standards-lab/go-storage"
@@ -23,6 +22,7 @@ import (
 
 	"github.com/standards-lab/go-web-service/data"
 	"github.com/standards-lab/go-web-service/domain/document"
+	"github.com/standards-lab/go-web-service/internal/outboxtest"
 )
 
 const (
@@ -79,12 +79,6 @@ func serviceNudged(t *testing.T, responses ...sqltest.Response) (*document.Servi
 	return document.New(db, data.NewStorage(db, fs, objects), sweep, recorder(t)), rec, fake, sweep
 }
 
-// eventID and eventTime are what the tests' recorder stamps on every
-// event it emits.
-const eventID = "00000000-0000-7000-8000-0000000000ee"
-
-var eventTime = time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
-
 // recorder is the recorder the composition root injects, go-messaging's
 // over its Postgres outbox, with the id and the time it stamps fixed: its
 // event's write is one statement on the command's transaction, which the
@@ -95,8 +89,7 @@ func recorder(t *testing.T) *document.Recorder {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return event.NewRecorder(ob.Sink(), "web-service",
-		event.IDs(func() string { return eventID }), event.Clock(func() time.Time { return eventTime }))
+	return outboxtest.Stamped(ob.Sink())
 }
 
 // root scripts the owner row's read: the organization's document root, or

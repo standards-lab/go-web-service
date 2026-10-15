@@ -476,15 +476,16 @@ event commits in the activation's transaction that follows.
    to write fails the command. A command whose state becomes true inside a blobfs file protocol
    runs it as the `sdk` package stages it and emits in its hook ([The staged file
    protocols](#the-staged-file-protocols)). A seed write that creates an entity emits as its
-   command does. A domain service runs in the
-   server's requests and needs no graph edge to the relay; a producer outside a request Uses the
-   relay's node ([Adding a service](#adding-a-service)).
+   command does. A domain service runs in the server's requests and needs no graph edge to the
+   relay; a producer outside a request Uses the relay's node ([Adding a
+   service](#adding-a-service)).
 3. **Test it.** In the unit tier the domain's service is built over sqlate's scripted driver
    with go-messaging's recorder over its Postgres outbox, its id and time fixed (`recorder` in
-   `domain/document/database_test.go`). The outbox insert is one recorded statement, so a test
-   asserts it runs once, between the completion and its commit, decodes it to check the type,
-   subject, and data, and scripts a refused insert to prove the command rolls back
-   (`domain/document/messaging_test.go`). In the integration tier, `integration.Subscribe`
+   `domain/document/database_test.go`, stamped by `internal/outboxtest`). The outbox insert is
+   one recorded statement, so a test asserts it runs once, between the completion and its
+   commit, decodes it to check the type, subject, and data (`outboxtest.Decode` and
+   `outboxtest.Want`), and scripts a refused insert to prove the command rolls back with no
+   event committed (`outboxtest.Committed`; `domain/document/messaging_test.go`). In the integration tier, `integration.Subscribe`
    binds the stream for the kind's type before the command runs and returns a `Stream`, and
    `Stream.Await` waits for the event about a subject. Absence cannot be awaited, so a test
    proves a command emits nothing with a marker: after the command it runs one that does emit,

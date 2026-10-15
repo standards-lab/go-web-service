@@ -2,72 +2,27 @@ package document_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/standards-lab/blobfs"
 	"github.com/standards-lab/blobfs/data/datatest"
-	"github.com/standards-lab/go-core/event"
 	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/query"
 	"github.com/standards-lab/sqlate/sqltest"
 
 	"github.com/standards-lab/go-web-service/domain/document"
+	"github.com/standards-lab/go-web-service/internal/outboxtest"
 )
-
-// outboxWrites is every outbox insert the recorder ran, in order.
-func outboxWrites(rec *sqltest.Recorder) []sqltest.Call {
-	var out []sqltest.Call
-	for _, c := range rec.Calls() {
-		if c.Op == sqltest.OpExec && strings.Contains(c.SQL, "messaging_outbox") {
-			out = append(out, c)
-		}
-	}
-	return out
-}
 
 // noEvent fails the test if the recorder wrote any event.
 func noEvent(t *testing.T, rec *sqltest.Recorder) {
 	t.Helper()
-	if w := outboxWrites(rec); len(w) != 0 {
+	if w := outboxtest.Writes(rec); len(w) != 0 {
 		t.Errorf("events written = %d; want none", len(w))
 	}
-}
-
-// bytesOf is a bound argument's bytes, as the driver was handed them.
-func bytesOf(t *testing.T, arg any) []byte {
-	t.Helper()
-	switch v := arg.(type) {
-	case []byte:
-		return v
-	case string:
-		return []byte(v)
-	case json.RawMessage:
-		return v
-	}
-	t.Fatalf("argument %T is neither bytes nor a string", arg)
-	return nil
-}
-
-// writtenEvent decodes the outbox insert's event: its parameters are the
-// source, the id, the header as JSON, and the data, in that order.
-func writtenEvent(t *testing.T, c sqltest.Call) event.Event {
-	t.Helper()
-	if len(c.Args) != 4 {
-		t.Fatalf("outbox insert args = %v; want source, id, header, data", c.Args)
-	}
-	var h event.Header
-	if err := json.Unmarshal(bytesOf(t, c.Args[2]), &h); err != nil {
-		t.Fatalf("decode the header: %v", err)
-	}
-	e, err := event.Decode(h, bytesOf(t, c.Args[3]))
-	if err != nil {
-		t.Fatalf("decode the event: %v", err)
-	}
-	return e
 }
 
 // An upload that completes writes exactly one FileUploaded, in the
@@ -84,31 +39,14 @@ func TestUploadFile_EmitsFileUploadedInTheCompletion(t *testing.T) {
 		t.Fatalf("UploadFile = %v", err)
 	}
 	sameOps(t, rec, begin, q, q, q, commit, begin, q, x, commit)
-	writes := outboxWrites(rec)
+	writes := outboxtest.Writes(rec)
 	if len(writes) != 1 {
 		t.Fatalf("events written = %d; want one", len(writes))
 	}
-	e := writtenEvent(t, writes[0])
-	if e.Type != "web-service.document.file.uploaded" || e.Type != document.FileUploaded.Type() || e.Subject != fileID ||
-		e.Source != "web-service" || e.ID != eventID || !e.Time.Equal(eventTime) || e.DataContentType != "application/json" {
-		t.Errorf("event = %+v; want FileUploaded about the file, stamped by the recorder", e)
-	}
-	var got map[string]any
-	if err := json.Unmarshal(e.Data, &got); err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]any{
+	outboxtest.Want(t, outboxtest.Decode(t, writes[0]), "web-service.document.file.uploaded", fileID, map[string]any{
 		"file_id": fileID, "organization_id": orgID, "directory_id": dirID, "name": "report.txt",
 		"content_type": "text/plain", "size": float64(6), "etag": `"etag-` + fileID + `"`, "version": float64(2),
-	}
-	if len(got) != len(want) {
-		t.Errorf("data = %v; want exactly %v", got, want)
-	}
-	for k, v := range want {
-		if got[k] != v {
-			t.Errorf("data[%q] = %v; want %v", k, got[k], v)
-		}
-	}
+	})
 }
 
 // An event whose write fails fails the completion with it: the
@@ -134,47 +72,6 @@ func TestUploadFile_AFailedEmitRollsBackTheCompletion(t *testing.T) {
 	}
 	if _, err := fake.Get(context.Background(), fileID+"/report.txt", storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
 		t.Errorf("the abandoned upload's object is still stored: %v", err)
-	}
-}
-
-// committedEvents is every event a committed transaction wrote, in commit
-// order: an outbox insert counts once its transaction commits, and one a
-// rollback undid never does.
-func committedEvents(t *testing.T, rec *sqltest.Recorder) []event.Event {
-	t.Helper()
-	var out, open []event.Event
-	for _, c := range rec.Calls() {
-		switch {
-		case c.Op == sqltest.OpExec && strings.Contains(c.SQL, "messaging_outbox"):
-			open = append(open, writtenEvent(t, c))
-		case c.Op == rollback:
-			open = nil
-		case c.Op == commit:
-			out, open = append(out, open...), nil
-		}
-	}
-	return out
-}
-
-// wantEvent fails the test unless e is typ about subject, stamped by the
-// recorder, its data exactly want: every field, and no other.
-func wantEvent(t *testing.T, e event.Event, typ, subject string, want map[string]any) {
-	t.Helper()
-	if e.Type != typ || e.Subject != subject || e.Source != "web-service" || e.ID != eventID ||
-		!e.Time.Equal(eventTime) || e.DataContentType != "application/json" {
-		t.Errorf("event = %+v; want %s about %s, stamped by the recorder", e, typ, subject)
-	}
-	var got map[string]any
-	if err := json.Unmarshal(e.Data, &got); err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != len(want) {
-		t.Errorf("data = %v; want exactly %v", got, want)
-	}
-	for k, v := range want {
-		if w, ok := got[k]; !ok || w != v {
-			t.Errorf("data[%q] = %v; want %v", k, got[k], v)
-		}
 	}
 }
 
@@ -328,7 +225,7 @@ func TestCommands_EmitTheirEventInTheirTransaction(t *testing.T) {
 				t.Fatalf("= %v", err)
 			}
 			sameOps(t, rec, c.ops...)
-			writes := outboxWrites(rec)
+			writes := outboxtest.Writes(rec)
 			if len(writes) != 1 {
 				t.Fatalf("events written = %d; want one", len(writes))
 			}
@@ -338,7 +235,7 @@ func TestCommands_EmitTheirEventInTheirTransaction(t *testing.T) {
 					t.Errorf("the event's write is followed by %v; want the change's commit", calls[i+1].Op)
 				}
 			}
-			wantEvent(t, writtenEvent(t, writes[0]), c.typ, c.subject, c.data)
+			outboxtest.Want(t, outboxtest.Decode(t, writes[0]), c.typ, c.subject, c.data)
 		})
 	}
 }
@@ -396,12 +293,12 @@ func TestEnsureRoot_TheTransactionThatCreatesTheRootEmitsIt(t *testing.T) {
 				t.Fatalf("CreateDirectory = %v; want failure %t", err, c.fails)
 			}
 			sameOps(t, rec, c.ops...)
-			events := committedEvents(t, rec)
+			events := outboxtest.Committed(t, rec)
 			if len(events) != len(c.events) {
 				t.Fatalf("events committed = %d; want %d", len(events), len(c.events))
 			}
 			for i, e := range events {
-				wantEvent(t, e, document.DirectoryCreated.Type(), c.events[i]["directory_id"].(string), c.events[i])
+				outboxtest.Want(t, e, document.DirectoryCreated.Type(), c.events[i]["directory_id"].(string), c.events[i])
 			}
 		})
 	}
@@ -615,7 +512,7 @@ func TestCommands_AFailedCommandCommitsNoEvent(t *testing.T) {
 				t.Fatalf("= %v; want the command's failure %v", err, c.want)
 			}
 			sameOps(t, rec, c.ops...)
-			if events := committedEvents(t, rec); len(events) != 0 {
+			if events := outboxtest.Committed(t, rec); len(events) != 0 {
 				t.Errorf("events committed = %d; want none", len(events))
 			}
 		})

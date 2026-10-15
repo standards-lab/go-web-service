@@ -11,10 +11,12 @@ import (
 	"github.com/standards-lab/go-cli-sdk/scenario"
 
 	"github.com/standards-lab/go-web-service/tools/slab/admin/database"
+	"github.com/standards-lab/go-web-service/tools/slab/domain/document"
 	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 	"github.com/standards-lab/go-web-service/tools/slab/output"
 	"github.com/standards-lab/go-web-service/tools/slab/repo"
+	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
 // seedState is the named state a scenario's first step resets to, and
@@ -79,4 +81,55 @@ func reset(ctx context.Context, n Nodes, inv *cli.Invocation, c *httpx.Client, r
 		return err
 	}
 	return res.Expect(http.StatusOK)
+}
+
+// lookup finds the organization at orgPath without narrating it: the ids
+// are bookkeeping for the steps that follow, not something the storage and
+// events scenarios demonstrate.
+func lookup(ctx context.Context, c *httpx.Client, orgPath string) (organization.Organization, error) {
+	res, err := c.Get(ctx, organization.Organizations+"/lookup?"+httpx.RawQuery([2]string{"path", orgPath}))
+	if err != nil {
+		return organization.Organization{}, err
+	}
+	if err := res.Expect(http.StatusOK); err != nil {
+		return organization.Organization{}, fmt.Errorf("lookup %s: %w", orgPath, err)
+	}
+	var o organization.Organization
+	if err := res.JSON(&o); err != nil {
+		return organization.Organization{}, err
+	}
+	return o, nil
+}
+
+// logoRoute is the logo route of the organization with id org.
+func logoRoute(org string) string {
+	return organization.Organizations + "/" + org + "/logo"
+}
+
+// documentsRoute is the document route of the organization with id org.
+func documentsRoute(org string) string {
+	return document.Documents + "/" + org
+}
+
+// directoryRoute is one of an organization's directories, by id or the
+// root alias.
+func directoryRoute(org, id string) string {
+	return documentsRoute(org) + "/directories/" + id
+}
+
+// createDirectory sends a narrated directory create to route through c and
+// expects 201, returning the new directory's identity.
+func createDirectory(ctx context.Context, r *scenario.Reporter, st style.Style, c *httpx.Client, route string, body document.CreateDirectory) (document.Identity, error) {
+	res, err := call(ctx, r, st, c, http.MethodPost, route, nil, body)
+	if err != nil {
+		return document.Identity{}, err
+	}
+	if err := res.Expect(http.StatusCreated); err != nil {
+		return document.Identity{}, err
+	}
+	var id document.Identity
+	if err := res.JSON(&id); err != nil {
+		return document.Identity{}, err
+	}
+	return id, nil
 }

@@ -13,9 +13,14 @@
 // logo's replace cycle, a document tree and a cursor walk, the scoped
 // refusals, a recursive delete waited out to 404, and a reset. It starts
 // with an additive seed rather than a reset, and names what it creates for
-// the run, so it runs twice in a row without a reset between.
+// the run, so it runs twice in a row without a reset between. The events
+// scenario sends one command for each event the service publishes, each
+// step naming the events "slab events watch" prints for it in another
+// terminal; it too names what it creates for the run, and leaves its
+// first organization behind with an empty document root, which no API
+// removes.
 //
-// The three scenarios against the running service declare the service
+// The four scenarios against the running service declare the service
 // node, whose value is a [Service]; the two that point at traces declare
 // the grafana up node too, whose value is a [Grafana]. Each value is a
 // lifecycle Starter that probes what it names, so a run whose stack is down
@@ -29,7 +34,7 @@
 //   - [Nodes], the graph nodes the scenarios are built over
 //   - [Service] and [Grafana], the values of the need nodes
 //   - [All], the scenarios in presentation order
-//   - [Sqlate], [Domain], [Problems], and [Storage], the scenarios
+//   - [Sqlate], [Domain], [Problems], [Storage], and [Events], the scenarios
 //
 // scenarios.go holds Nodes, All, and the narration helpers every
 // scenario's steps share, and stack.go holds the need nodes' values.
@@ -48,7 +53,7 @@
 //
 // The wire types and routes come from domain/organization, domain/document,
 // and admin/database, which restate the service's contract once for every
-// slab command. The storage scenario waits for the sweep through
+// slab command. The storage and events scenarios wait for the sweep through
 // document.AwaitSweep, the one definition of dirs delete's --wait. A
 // step's method name is its Intent in lowerCamel, with articles and
 // prepositions dropped and a nominalized title turned back into its verb

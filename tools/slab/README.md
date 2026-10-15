@@ -25,6 +25,7 @@ mise run slab -- scenario sqlate                 # the compile pipeline, in proc
 mise run slab -- scenario domain                 # the organization domain's full CRUD, against the running service
 mise run slab -- scenario problems               # a tour of the service's problem responses, against the running service
 mise run slab -- scenario storage                # logos, documents, the refusals, and the sweep, against the running service
+mise run slab -- scenario events                 # one command per event the service publishes, for events watch to print
 mise run slab -- org list                        # the organization domain's endpoints, one subcommand per route
 mise run slab -- docs dirs list <org-id> root    # the document domain's endpoints, grouped by dirs and files
 mise run slab -- admin database schema status    # the admin mount's endpoints, under their own domain word
@@ -33,7 +34,7 @@ mise run slab -- version                         # slab's version
 ```
 
 Everything but `scenario sqlate` needs the compose stack and the service (`scenario storage`
-reads no traces, so it needs no Grafana, but `mise run serve` streams its logs to the
+and `scenario events` read no traces, so they need no Grafana, but `mise run serve` streams its logs to the
 collector; `events watch` needs only NATS and the stream the service creates when it starts):
 
 ```sh
@@ -155,6 +156,21 @@ nothing but the repository root and the color setting.
   The additive seed writes back a logo an interrupted run deleted, and the branch's name is
   unique to the run, so the scenario runs twice in a row. Needs postgres, azurite, and the
   service, not Grafana.
+- **events** — one command for each event the service publishes, meant to run while
+  `mise run slab -- events watch` runs in another terminal, so the watcher prints each event's
+  payload; each step names the events it makes the watcher print. It creates a run-named
+  organization under acme, edits it, and transfers it to the root; uploads a seeded fixture as
+  its logo, replaces it with another (no `logo.deleted` for the replaced one), and deletes it. It
+  creates `reports` (which first creates the organization's document root, so two
+  `directory.created`), `scratch`, and `empty`, uploads a file into `reports` and one into
+  `scratch`, moves `empty` into `reports` as `archive`, renames the `reports` file, deletes it,
+  and deletes `archive`; it deletes `scratch` and then `reports` recursively, waiting out each
+  sweep, one `directory.deleted` each for the marked directory alone. The organization's delete
+  is a 409, since its document root and logo history reference it and no API removes the root,
+  so it creates and deletes a second run-named organization. Twenty events in all. Each run
+  leaves its first organization behind at the root with an empty document root, until a state
+  reset; its names are unique to the run, so it runs twice in a row. Needs postgres, azurite,
+  NATS, and the service, not Grafana.
 
 Two of the nodes are needs, each checked when the run starts, before any step:
 

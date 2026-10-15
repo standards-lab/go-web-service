@@ -35,7 +35,7 @@ type Nodes struct {
 // All returns the scenarios built over n, in the order the scenario
 // parent and its listing present them.
 func All(n Nodes) []scenario.Scenario {
-	return []scenario.Scenario{Sqlate(n), Domain(n), Problems(n), Storage(n)}
+	return []scenario.Scenario{Sqlate(n), Domain(n), Problems(n), Storage(n), Events(n)}
 }
 
 // styleOf returns the style a step colors its blocks with: color on when

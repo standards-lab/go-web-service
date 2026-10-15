@@ -105,7 +105,8 @@ returned by a method of its service (`Seed`, `LogoSeed`). A contribution of rows
 applied in the seed's one transaction. A contribution of stored files is a `data.FileSeed`: blobfs's
 two-phase write puts an object outside any transaction, so the seeder runs it after the row
 transaction commits. Each file goes through blobfs's `Store.EnsureFile`, the two-phase write's
-retry-safe form, under a fixed id the state file carries. A rerun then finds the file, and a reset,
+retry-safe form, or its staging `sdk.EnsureFile` where the file's event commits in the completion,
+under a fixed id the state file carries. A rerun then finds the file, and a reset,
 which leaves the container's objects in place, writes it again under the same key. A file seed
 leaves alone what it does not own. `admin.go` hands every contribution to `data.NewSeeder` in the
 tables' dependency order, so the domain is constructed before the admin layer and `data` names no

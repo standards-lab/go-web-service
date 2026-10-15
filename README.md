@@ -303,11 +303,14 @@ seed applies idempotently: it leaves a row or file that exists as it is and writ
 state names that is missing, so a seeded organization, logo, or file deleted since the last
 start is restored at the next. The seed's response, and the state's `seeded` member, count what
 the run stored under the same keys. The rows commit in one transaction first, and the files are
-written after it commits, since a file's object is put outside any transaction.
+written after it commits, since a file's object is put outside any transaction. Each entity the
+seed creates commits its command's event, and a rerun that finds everything there emits nothing
+([Messaging](#the-event-convention)).
 
 The state operation is destructive, in the class of `down` and `force`, and
 `mise run db:state <state>` runs it against the local service. A reset reverts the messaging
-set too, dropping any event still pending in the outbox. It reverts blobfs's tables but leaves
+set too, dropping any event still pending in the outbox, and commits one
+`web-service.database.reset` before it seeds. It reverts blobfs's tables but leaves
 the objects in the container, which is accepted in development: a seeded file carries
 a fixed id (the `5eed…` ids in the state file), so the reseed writes it again under the same key
 and replaces the object left there.
@@ -383,31 +386,97 @@ service](#adding-a-service) gives the rule a new producer follows.
 
 ### The event convention
 
-- Every public command that changes state emits exactly one event, in the transaction that
-  makes that state true, so the event commits exactly when the state does. A read emits
-  nothing, and neither does a command that fails.
-- The admin layer emits nothing: its verbs, the state reset, and the seeds, startup's
-  included, write beneath the domains' commands, not through them.
-- A type is `<service>.<domain>.<entity>.<past-tense verb>`, as
-  `web-service.document.file.uploaded` is, with no version suffix before v1.
+- **One event per command.** Every public command that changes state commits exactly one event,
+  in the transaction that makes that state true, so the event commits exactly when the state
+  does. A command that fails commits none, and so does a retry that changes nothing: a repeated
+  file delete, which finds the file deleting already, or a repeated branch mark. A read commits
+  none, and neither do the sweep's reclamation of a marked branch or an abandoned write and the
+  purges that finish a delete.
+- **Seeds emit.** Every seed write that creates an entity commits the event its command
+  commits, with the same data, in the transaction that creates it: an organization's
+  `organization.created`, a logo's `organization.logo.uploaded` in its activation's, a
+  directory's `document.directory.created`, and a file's `document.file.uploaded` in its
+  completion's. A rerun over a seeded schema creates nothing and emits nothing. An
+  organization's document root is created implicitly by its first write under the root alias, a
+  client's or a seed's, and that write's transaction commits the root's
+  `document.directory.created`; a write that finds the root, or loses the race to create it,
+  commits no root event.
+- **A reset emits once.** A state reset commits one `web-service.database.reset` after its
+  revert and apply and before its seed, so it reaches the stream ahead of the seed's creation
+  events; a consumer that holds a copy of the service's entities discards it there and rebuilds
+  from what follows. The revert drops the outbox with every other table, so a reset loses the
+  events still unpublished when it runs, and it emits nothing for the entities it drops. The
+  schema verbs (`up`, `down`, `steps`, `force`) emit nothing, and neither does a retry of a
+  seed that finds everything there.
+- **Naming.** An operation on the domain itself is `<service>.<domain>.<operation>`, as
+  `web-service.organization.created` is; an operation on a sub-element of the domain is
+  `<service>.<domain>.<element>.<operation>`, as `web-service.document.file.uploaded` and
+  `web-service.organization.logo.uploaded` are. The operation is a past-tense verb, and no type
+  carries a version suffix before v1.
 
-Only the document upload emits so far; the task `event-coverage` brings the other commands to
-the convention.
+### The event catalog
+
+Each event is a CloudEvent whose `source` is the configured `messaging.source` (`web-service`),
+whose `subject` is the id of the entity its type names, and whose data is the JSON below. The
+data carries an entity's stored state after the command, under the API's field names, never a
+file's content, and never the state before: a move or a transfer carries only the new parent.
+It carries neither a composed path, a status, nor the timestamps. The types are defined in each
+domain's `messaging.go` and their data in its `entities.go`.
+
+| Type | Emitted by | Subject | Data |
+|------|------------|---------|------|
+| `web-service.organization.created` | `POST /api/organizations`; a seed's organization | organization id | `organization_id`, `parent_id` (null at the top), `code`, `name`, `version` |
+| `web-service.organization.edited` | `PUT /api/organizations/{id}` | organization id | as `created`, as the edit left it |
+| `web-service.organization.transferred` | `POST /api/organizations/{id}/transfer` | organization id | as `created`, under the new parent |
+| `web-service.organization.deleted` | `DELETE /api/organizations/{id}` | organization id | `organization_id`, `version` (the version the row was removed at) |
+| `web-service.organization.logo.uploaded` | `PUT /api/organizations/{id}/logo`; a seed's logo | logo's file id | `file_id`, `organization_id`, `content_type`, `size`, `etag`, `version` |
+| `web-service.organization.logo.deleted` | `DELETE /api/organizations/{id}/logo` | logo's file id | `file_id`, `organization_id`, `version` (the version its release left it at, deleting) |
+| `web-service.document.directory.created` | `POST /directories`; the document root's implicit creation; a seed's directory | directory id | `directory_id`, `organization_id`, `parent_id`, `name`, `version`; the root's `parent_id` is null and its `name` is `/` |
+| `web-service.document.directory.moved` | `POST /directories/{id}/move` | directory id | as `created`, as the move left it |
+| `web-service.document.directory.deleted` | `DELETE /directories/{id}` (an empty directory's removal) and `DELETE /directories/{id}?recursive=true` (a branch's mark, for the marked directory alone) | directory id | `directory_id`, `organization_id`, `version` (the removed row's, or the version the mark left it at) |
+| `web-service.document.file.uploaded` | `POST /directories/{id}/files`; a seed's file | file id | `file_id`, `organization_id`, `directory_id`, `name`, `content_type`, `size`, `etag`, `version` |
+| `web-service.document.file.moved` | `POST /files/{id}/move` | file id | as `uploaded`, as the move left it; `size` and `etag` are null for a pending file, whose write has not completed |
+| `web-service.document.file.deleted` | `DELETE /files/{id}` | file id | `file_id`, `organization_id`, `version` (the version the delete left it at, deleting) |
+| `web-service.database.reset` | `POST /admin/database/state` | the state's name | `state` |
+
+The document routes sit under `/api/documents/{org}`. A logo `PUT` that replaces a logo commits
+`logo.uploaded` alone, no `logo.deleted` for the logo it replaces, and nothing beneath a marked
+branch emits.
+
+### The staged file protocols
+
+A command whose change becomes true inside one of blobfs's file protocols runs that protocol as
+the `sdk` package stages it (`sdk/blobfs.go`), bound for blobfs: the library's steps, with one
+hook in the transaction that makes the change true, where the domain commits its event.
+
+- `sdk.WriteFile`, blobfs's two-phase write: its hook runs in the completion's transaction once
+  the row is available, and never on a refused completion. The document upload runs it.
+- `sdk.EnsureFile`, the two-phase write's retry-safe form under a fixed id: its hook runs as
+  `WriteFile`'s does, and only when this call completes the file; a file found complete runs
+  none. The document seed's files run it.
+- `sdk.RemoveFile`, blobfs's two-phase delete: its hook runs in the delete's first
+  transaction once the row is deleting; a retry that finds the row deleting already skips it
+  and finishes the purge, and the purge runs no hook. The document file delete runs it.
+
+The logo needs none: its write and its seed complete through blobfs's own protocols, and its
+event commits in the activation's transaction that follows.
 
 ### Adding an event
 
 1. **Define the kind** in the domain's `messaging.go` with go-core's `event.Define`, its doc
    comment stating when it commits and what its subject is (`document.FileUploaded`). Its data
    type sits in `entities.go` beside the read shapes, under the API's field names, and carries
-   the entity's metadata, never its content (`document.FileUploadedData`). List both in the
-   package doc.
+   the entity's metadata, never its content (`document.FileUploadedData`). Name the type by
+   [the convention](#the-event-convention), list both in the package doc, and add the type's row
+   to [the catalog](#the-event-catalog).
 2. **Emit it in the committing transaction.** The domain's store holds the `Recorder` the
    composition root injects (the runtime's, `domain.go`); the command calls the recorder's `Emit`
    on the transaction that changes the state and raises the kind there with its subject
    (`emitUploaded`). The write is one more statement on that transaction, so an event that fails
-   to write fails the command. The upload's state becomes true in blobfs's two-phase write's
-   completion, so it runs that write as `sdk.WriteFile` stages it, with a hook in the
-   completion's transaction; the staging is bound for blobfs. A domain service runs in the
+   to write fails the command. A command whose state becomes true inside a blobfs file protocol
+   runs it as the `sdk` package stages it and emits in its hook ([The staged file
+   protocols](#the-staged-file-protocols)). A seed write that creates an entity emits as its
+   command does. A domain service runs in the
    server's requests and needs no graph edge to the relay; a producer outside a request Uses the
    relay's node ([Adding a service](#adding-a-service)).
 3. **Test it.** In the unit tier the domain's service is built over sqlate's scripted driver

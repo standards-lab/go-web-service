@@ -78,7 +78,7 @@ func TestStore_LogoProtocolsBindTheirFilesParameters(t *testing.T) {
 		datatest.DirectoryRows(imagesDirectory()), // the images directory, found on the pool
 		exists(), // write: the organization exists
 		datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),   // write: the pending file, alone
-		datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)), // complete, on the pool
+		datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)), // complete, in its own transaction
 		exec(1), // activate: the hold
 		datatest.FileRows(file(oldFileID, blobfs.StatusAvailable, 2)), // activate: the current logo
 		exec(1), // activate: the replaced image removed
@@ -107,7 +107,7 @@ func TestStore_LogoProtocolsBindTheirFilesParameters(t *testing.T) {
 	if name, key := create.Args[1], create.Args[2]; !strings.HasPrefix(create.SQL, "INSERT INTO blobfs_file") || name != fmt.Sprint(create.Args[0])+".png" || key != fmt.Sprint(create.Args[0])+"/"+fmt.Sprint(name) {
 		t.Errorf("create = %q %v; want the file named for its minted id", create.SQL, create.Args)
 	}
-	if attach := rec.Calls()[11]; !strings.HasPrefix(attach.SQL, "INSERT INTO organization_image") || fmt.Sprint(attach.Args) != fmt.Sprint([]any{validID, newFileID}) {
+	if attach := rec.Calls()[13]; !strings.HasPrefix(attach.SQL, "INSERT INTO organization_image") || fmt.Sprint(attach.Args) != fmt.Sprint([]any{validID, newFileID}) {
 		t.Errorf("attach = %q %v; want the new file bound in the activation", attach.SQL, attach.Args)
 	}
 	if fake.Puts() != 2 {
@@ -139,7 +139,7 @@ func TestStore_LogoProtocolsBindTheirFilesParameters(t *testing.T) {
 	sameOps(t, rec,
 		q,
 		begin, q, q, commit,
-		q,
+		begin, q, commit,
 		begin, x, q, x, q, x, x, commit, x,
 		q,
 		begin, q, x, q, x, commit, x,
@@ -180,7 +180,7 @@ func TestStore_ARefusedCompletionDeletesTheLogosObject(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			s, rec, fake := serviceOver(t, sqltest.ReturningDialect{}, append([]sqltest.Response{
 				datatest.DirectoryRows(imagesDirectory()), exists(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
-				datatest.FileRows(), // the completion matches no pending row; blobfs reads why
+				datatest.FileRows(), // the completion matches no pending row; blobfs reads why, in its transaction
 			}, c.reads...)...)
 			_, err := s.PutLogo(context.Background(), validID, logoUpload(t))
 			if !errors.Is(err, c.want) {
@@ -196,11 +196,11 @@ func TestStore_ARefusedCompletionDeletesTheLogosObject(t *testing.T) {
 			if _, err := fake.Get(context.Background(), key, storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
 				t.Errorf("the object outlived the refused completion: %v", err)
 			}
-			want := []sqltest.Op{q, begin, q, q, commit, q}
+			want := []sqltest.Op{q, begin, q, q, commit, begin, q}
 			for range c.reads {
 				want = append(want, q)
 			}
-			sameOps(t, rec, want...)
+			sameOps(t, rec, append(want, sqltest.OpRollback)...)
 			noImage(t, rec)
 		})
 	}
@@ -246,12 +246,12 @@ func (c *hangUp) Err() error {
 func TestStore_AHangUpAfterTheWriteRetiresTheNewFile(t *testing.T) {
 	s, rec, fake := serviceOver(t, sqltest.ReturningDialect{},
 		datatest.DirectoryRows(imagesDirectory()), exists(), datatest.FileRows(file(newFileID, blobfs.StatusPending, 1)),
-		datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)),         // complete, on the pool
+		datatest.FileRows(file(newFileID, blobfs.StatusAvailable, 2)),         // complete, in its own transaction
 		datatest.FileRows(file(newFileID, blobfs.StatusDeleting, 3)), exec(1), // the new file retired
 	)
 	// The calls before the hang-up: the directory, the write's
-	// transaction, the completion, and the activation's begin.
-	ctx := newHangUp(rec, 7)
+	// transaction, the completion's, and the activation's begin.
+	ctx := newHangUp(rec, 9)
 	if _, err := s.PutLogo(ctx, validID, logoUpload(t)); !errors.Is(err, context.Canceled) {
 		t.Fatalf("PutLogo = %v; want the hang-up's cancellation", err)
 	}
@@ -290,7 +290,7 @@ func TestStore_ALostActivationIs409AndRetiresTheNewFile(t *testing.T) {
 	sameOps(t, rec,
 		q,
 		begin, q, q, commit,
-		q,
+		begin, q, commit,
 		begin, x, q, x, sqltest.OpRollback,
 		begin, q, commit, x,
 	)
@@ -321,7 +321,7 @@ func TestStore_AHoldRefusedByTheFilesOwnDeleteIs409(t *testing.T) {
 	sameOps(t, rec,
 		q,
 		begin, q, q, commit,
-		q,
+		begin, q, commit,
 		begin, x, q, q, sqltest.OpRollback,
 		begin, q, commit, x,
 	)
@@ -351,7 +351,7 @@ func TestStore_AHoldRefusedAfterTheReclaimIs409(t *testing.T) {
 	sameOps(t, rec,
 		q,
 		begin, q, q, commit,
-		q,
+		begin, q, commit,
 		begin, x, q, q, sqltest.OpRollback,
 		begin, q, q, sqltest.OpRollback,
 	)
@@ -407,7 +407,7 @@ func TestPutLogo_AnswersCreatedWithLocation(t *testing.T) {
 	if rec.Code != 201 || rec.Header().Get("Location") != path || strings.TrimSpace(rec.Body.String()) != `{"id":"`+newFileID+`"}` {
 		t.Fatalf("status %d, Location %q, body %s", rec.Code, rec.Header().Get("Location"), rec.Body)
 	}
-	sameOps(t, db, q, begin, q, q, commit, q, begin, x, q, x, x, commit)
+	sameOps(t, db, q, begin, q, q, commit, begin, q, commit, begin, x, q, x, x, commit)
 }
 
 // seededLogoID is the fixed id a state gives the seeded logo's file.
@@ -442,7 +442,7 @@ func TestLogoSeed_WritesAndActivatesTheFixture(t *testing.T) {
 		datatest.DirectoryRows(imagesDirectory()),                        // the images directory, found on the pool
 		datatest.FileRows(),                                              // write: no file holds the name
 		datatest.FileRows(file(seededLogoID, blobfs.StatusPending, 1)),   // write: the pending file, under the fixed id
-		datatest.FileRows(file(seededLogoID, blobfs.StatusAvailable, 2)), // complete, on the pool
+		datatest.FileRows(file(seededLogoID, blobfs.StatusAvailable, 2)), // complete, in its own transaction
 		exec(1), datatest.FileRows(), exec(1), written(), // activate: the hold, still no logo, the image, the event
 	)
 	n, err := s.LogoSeed().Write(ctx, logoRows, fixtures)
@@ -455,7 +455,7 @@ func TestLogoSeed_WritesAndActivatesTheFixture(t *testing.T) {
 	if insert := rec.Calls()[5]; !strings.HasPrefix(insert.SQL, "INSERT INTO blobfs_file") || insert.Args[0] != seededLogoID || insert.Args[1] != seededLogoID+".png" {
 		t.Errorf("insert = %q %v; want the file under its fixed id, named for it", insert.SQL, insert.Args)
 	}
-	if attach := rec.Calls()[11]; !strings.HasPrefix(attach.SQL, "INSERT INTO organization_image") || fmt.Sprint(attach.Args) != fmt.Sprint([]any{validID, seededLogoID}) {
+	if attach := rec.Calls()[13]; !strings.HasPrefix(attach.SQL, "INSERT INTO organization_image") || fmt.Sprint(attach.Args) != fmt.Sprint([]any{validID, seededLogoID}) {
 		t.Errorf("attach = %q %v; want the seeded file bound", attach.SQL, attach.Args)
 	}
 	blob, err := fake.Get(ctx, file(seededLogoID, blobfs.StatusPending, 1).Key, storage.GetOptions{})
@@ -466,7 +466,7 @@ func TestLogoSeed_WritesAndActivatesTheFixture(t *testing.T) {
 	if b, _ := io.ReadAll(blob.Body); !bytes.Equal(b, body) || blob.ContentType != "image/png" {
 		t.Errorf("stored %d bytes as %q; want the fixture as image/png", len(b), blob.ContentType)
 	}
-	sameOps(t, rec, q, q, q, begin, q, q, commit, q, begin, x, q, x, x, commit)
+	sameOps(t, rec, q, q, q, begin, q, q, commit, begin, q, commit, begin, x, q, x, x, commit)
 	wantLogoUploaded(t, rec)
 }
 
@@ -538,8 +538,8 @@ func TestLogoSeed_ARolledBackActivationCommitsNoEvent(t *testing.T) {
 	if _, err := s.LogoSeed().Write(ctx, logoRows, fixtures); err == nil || !strings.Contains(err.Error(), "the outbox refused the row") {
 		t.Fatalf("Write = %v; want the event's write refused", err)
 	}
-	sameOps(t, rec, q, q, q, begin, q, q, commit, q, begin, x, q, x, x, sqltest.OpRollback, begin, q, commit, x)
-	if retire := rec.Calls()[15]; !strings.Contains(retire.SQL, "status = 'deleting'") || retire.Args[1] != int64(2) {
+	sameOps(t, rec, q, q, q, begin, q, q, commit, begin, q, commit, begin, x, q, x, x, sqltest.OpRollback, begin, q, commit, x)
+	if retire := rec.Calls()[17]; !strings.Contains(retire.SQL, "status = 'deleting'") || retire.Args[1] != int64(2) {
 		t.Errorf("retire = %q %v; want the delete begun at the completed version", retire.SQL, retire.Args)
 	}
 	if _, err := fake.Get(ctx, file(seededLogoID, blobfs.StatusPending, 1).Key, storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
@@ -566,7 +566,7 @@ func TestLogoSeed_ALogoActivatedMeanwhileRetiresTheSeededFile(t *testing.T) {
 	if _, err := fake.Get(ctx, file(seededLogoID, blobfs.StatusPending, 1).Key, storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
 		t.Errorf("the retired file's object outlived it: %v", err)
 	}
-	sameOps(t, rec, q, q, q, begin, q, q, commit, q, begin, x, q, commit, begin, q, commit, x)
+	sameOps(t, rec, q, q, q, begin, q, q, commit, begin, q, commit, begin, x, q, commit, begin, q, commit, x)
 	for _, c := range rec.Calls() {
 		if strings.HasPrefix(c.SQL, "INSERT INTO organization_image") {
 			t.Errorf("the seeded file was bound: %q", c.SQL)
@@ -642,7 +642,7 @@ func TestLogoSeed_ALostActivationToAConcurrentSeedLeavesTheFile(t *testing.T) {
 	if fake.Puts() != 1 {
 		t.Errorf("puts = %d; want the resumed row's put", fake.Puts())
 	}
-	sameOps(t, rec, q, q, q, begin, q, commit, q, begin, x, q, x, sqltest.OpRollback, q)
+	sameOps(t, rec, q, q, q, begin, q, commit, begin, q, commit, begin, x, q, x, sqltest.OpRollback, q)
 }
 
 // A different logo that wins the activation after the check, a client's
@@ -667,7 +667,7 @@ func TestLogoSeed_ALostActivationToAnotherLogoRetiresTheSeededFile(t *testing.T)
 	if _, err := fake.Get(ctx, file(seededLogoID, blobfs.StatusPending, 1).Key, storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
 		t.Errorf("the retired file's object outlived it: %v", err)
 	}
-	sameOps(t, rec, q, q, q, begin, q, q, commit, q, begin, x, q, x, sqltest.OpRollback, q, begin, q, commit, x)
+	sameOps(t, rec, q, q, q, begin, q, q, commit, begin, q, commit, begin, x, q, x, sqltest.OpRollback, q, begin, q, commit, x)
 }
 
 // A re-read of the active logo that fails after the activation was lost
@@ -691,7 +691,7 @@ func TestLogoSeed_AFailedReReadAfterALostActivationRetiresNothing(t *testing.T) 
 	if _, err := fake.Get(ctx, file(seededLogoID, blobfs.StatusPending, 1).Key, storage.GetOptions{}); err != nil {
 		t.Errorf("the seeded file's object was removed: %v", err)
 	}
-	sameOps(t, rec, q, q, q, begin, q, q, commit, q, begin, x, q, x, sqltest.OpRollback, q)
+	sameOps(t, rec, q, q, q, begin, q, q, commit, begin, q, commit, begin, x, q, x, sqltest.OpRollback, q)
 }
 
 // requestIDHandler adds the request id its record's context carries, as

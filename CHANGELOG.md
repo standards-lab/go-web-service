@@ -42,11 +42,6 @@ accumulate under [Unreleased] until the first cut.
   and before its seed, through `database.OnReset` on go-database's reset hook; its revert drops
   the outbox, so it loses the events still unpublished. The schema verbs emit nothing. Every
   type and its data are public API, cataloged in the README's Messaging section.
-- The staged file protocols, bound for blobfs, in `sdk/blobfs.go`: `sdk.WriteFile`, blobfs's
-  two-phase write with a hook in the completion's transaction, which the document upload runs;
-  `sdk.EnsureFile`, its retry-safe form with the same hook, run only when the call completes
-  the file, which the document seed runs; and `sdk.RemoveFile`, blobfs's two-phase delete with
-  a hook in the delete's first transaction, skipped by a retry, which the file delete runs.
 - The event convention and catalog, in the README's Messaging section: the one-event rule, seeds
   and the reset emitting, the type naming rule, and each type's emitting commands, subject, and
   data. The section is the guide to adding an event: where its kind
@@ -61,6 +56,11 @@ accumulate under [Unreleased] until the first cut.
   With nothing answering it exits 1 naming `mise run db:up`, and with no stream `mise run serve`.
   The root flags `--nats`, `--nats-stream`, and `--nats-prefix` (`SLAB_NATS`,
   `SLAB_NATS_STREAM`, `SLAB_NATS_PREFIX`) default to `config.json`'s `nats` block.
+- `slab scenario events`, a narrated run of one command for each event the service publishes,
+  every type at least once and nineteen events in all, each step naming the events
+  `slab events watch` prints for it in another terminal. It ends by deleting its organization's
+  document root recursively and then the organization, so it leaves nothing behind, and its
+  names are unique to the run, so it runs twice in a row.
 - NATS 2.15 with JetStream in the compose file (`compose/nats/`, on 4222, `NATS_PORT` to move
   it), started and stopped with the `db:` and `stack:` tasks; the integration task runs it on
   4223 in its own project, and its harness reaches the stream (`integration.Subscribe`), the
@@ -179,6 +179,16 @@ accumulate under [Unreleased] until the first cut.
 
 ### Changed
 
+- The document upload, the file delete, and the seeded document files run on blobfs v0.7.0's
+  completion and delete hooks: `Store.WriteFile` and `Store.EnsureFile` with `OnComplete`, run
+  in the completion's transaction, only when the call completes the file, and `Store.RemoveFile`
+  with `AtVersion` and `OnDelete`, run in the transaction that leaves the file deleting and
+  skipped by a retry. Their events are unchanged in type, subject, data, and transaction, and a
+  seed write that finds its file there emits nothing, as before. A hook's failure is wrapped
+  `data: ... file <id>: the hook: ...`, where it was `sdk: ...`.
+- Pins: blobfs v0.7.0 and blobfs/postgres v0.5.0, from v0.6.0 and v0.4.0, in the base module, and
+  blobfs v0.7.0 in slab's, for the completion and delete hooks; their own changes are in their
+  CHANGELOGs.
 - Event types are named `<service>.<domain>.<operation>` for an operation on the domain itself
   (`web-service.organization.created`) and `<service>.<domain>.<element>.<operation>` for one on
   a sub-element (`web-service.document.file.uploaded`), superseding the four-token
@@ -361,6 +371,8 @@ accumulate under [Unreleased] until the first cut.
   promoted to go-web-sdk v0.13.0 as `PathUUID`.
 - The reactor and the quiesce gate `sdk` staged (`reactor.go` and `gate.go`), promoted to go-core
   v0.9.0's `reactor` package.
+- `sdk.WriteFile`, `sdk.EnsureFile`, and `sdk.RemoveFile`, the file protocols with hooks `sdk`
+  staged (`blobfs.go`), promoted to blobfs v0.7.0 as `OnComplete` and `OnDelete`.
 - `slab demo` and `slab list`, superseded by `slab scenario`, along with slab's own scenario
   runner and its `env` package; and the `--tempo`/`SLAB_TEMPO` setting, which nothing read.
 

@@ -197,6 +197,8 @@ mise run slab -- scenario domain
 mise run slab -- scenario problems
 mise run slab -- scenario storage    # ends by resetting to the default state
 mise run slab -- scenario storage    # runs again as it stands: the branch it deletes is named for the run
+mise run slab -- scenario events     # with events watch in another terminal: each step names the events it prints
+mise run slab -- scenario events     # runs again as it stands: it deletes what it creates, named for the run
 mise run slab -- scenario            # the listing: each scenario, its summary, and the nodes it uses
 mise run slab -- scenario none       # usage error (exit 2): unknown command "none"
 ```

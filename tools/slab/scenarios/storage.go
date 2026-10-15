@@ -41,24 +41,14 @@ const (
 	takenDirPath    = "/engineering"
 )
 
-// fixturesDir is the seeded fixtures' directory under seedsDir.
 // replacementFixture is the seeded fixture the logo step uploads in place
 // of acme's own: another organization's logo, a PNG that passes the
 // upload's sniffed-type rule, under fixturesDir.
-const (
-	fixturesDir        = seedsDir + "/fixtures"
-	replacementFixture = "engineering.png"
-)
+const replacementFixture = "engineering.png"
 
 // cursorPageSize is the page size the cursor walk asks for: one, so acme's
 // three seeded top-level directories take three pages and two cursors.
 const cursorPageSize = 1
-
-// sweepLimit bounds the wait for the sweep, as --wait's duration bounds
-// dirs delete. The delete nudges the sweep, so a small branch is gone well
-// inside it; the sweep's own interval (30 seconds) is the fallback the
-// limit leaves room for.
-const sweepLimit = 45 * time.Second
 
 // detailNameTaken is the curated detail of a taken name's 409:
 // data.DetailNameTaken, restated because slab does not import the service.
@@ -304,34 +294,11 @@ func (s *storage) additiveSeed(ctx context.Context, inv *cli.Invocation, r *scen
 	if err := res.JSON(&n); err != nil {
 		return err
 	}
-	if s.acme, err = s.lookup(ctx, storageOrgPath); err != nil {
+	if s.acme, err = lookup(ctx, s.client, storageOrgPath); err != nil {
 		return err
 	}
-	s.other, err = s.lookup(ctx, otherOrgPath)
+	s.other, err = lookup(ctx, s.client, otherOrgPath)
 	return err
-}
-
-// lookup finds the organization at orgPath without narrating it: the ids
-// are bookkeeping for the steps that follow, not something this scenario
-// demonstrates.
-func (s *storage) lookup(ctx context.Context, orgPath string) (organization.Organization, error) {
-	res, err := s.client.Get(ctx, organization.Organizations+"/lookup?"+httpx.RawQuery([2]string{"path", orgPath}))
-	if err != nil {
-		return organization.Organization{}, err
-	}
-	if err := res.Expect(http.StatusOK); err != nil {
-		return organization.Organization{}, fmt.Errorf("lookup %s: %w", orgPath, err)
-	}
-	var o organization.Organization
-	if err := res.JSON(&o); err != nil {
-		return organization.Organization{}, err
-	}
-	return o, nil
-}
-
-// logoPath is acme's logo route.
-func (s *storage) logoPath() string {
-	return organization.Organizations + "/" + s.acme.ID + "/logo"
 }
 
 func (s *storage) readLogo(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
@@ -353,7 +320,7 @@ func (s *storage) readLogo(ctx context.Context, inv *cli.Invocation, r *scenario
 func (s *storage) revalidateLogo(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
 	r.Note("A conditional read names the ETag it holds in If-None-Match. The bytes have not changed, so the answer is 304 Not Modified with no body, and the object is never opened.")
 	headers := []httpx.Header{{Name: "If-None-Match", Value: s.etag}}
-	res, err := call(ctx, r, styleOf(s.n, inv), s.client, http.MethodGet, s.logoPath(), headers, nil)
+	res, err := call(ctx, r, styleOf(s.n, inv), s.client, http.MethodGet, logoRoute(s.acme.ID), headers, nil)
 	if err != nil {
 		return err
 	}
@@ -373,10 +340,10 @@ func (s *storage) replaceLogo(ctx context.Context, inv *cli.Invocation, r *scena
 	r.Note("The logo is a singleton addressed by its organization, so it takes no version: a PUT replaces whatever is active, the last write winning. It answers 201 with the new file's id and no version, since every PUT creates a new file, and the replaced file is retired. This uploads another organization's seeded logo, %s, as acme's; the read after it shows the new bytes under a new ETag.", replacementFixture)
 	st := styleOf(s.n, inv)
 	headers := []httpx.Header{{Name: "Content-Type", Value: "image/png"}}
-	if err := showApart(r, "", output.Request(st, http.MethodPut, s.logoPath(), headers, fmt.Sprintf("(%d bytes of %s)", len(png), file))); err != nil {
+	if err := showApart(r, "", output.Request(st, http.MethodPut, logoRoute(s.acme.ID), headers, fmt.Sprintf("(%d bytes of %s)", len(png), file))); err != nil {
 		return err
 	}
-	res, err := s.client.Put(ctx, s.logoPath(), png, headers...)
+	res, err := s.client.Put(ctx, logoRoute(s.acme.ID), png, headers...)
 	if err != nil {
 		return err
 	}
@@ -416,14 +383,14 @@ func (s *storage) replaceLogo(ctx context.Context, inv *cli.Invocation, r *scena
 func (s *storage) deleteLogo(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
 	r.Note("A DELETE retires whatever logo is active, again with no version, and the read after it is 404. The seeded logo comes back with the reset at the end of this run, and the additive seed at the start of the next run writes it again if this one stops before then.")
 	st := styleOf(s.n, inv)
-	res, err := call(ctx, r, st, s.client, http.MethodDelete, s.logoPath(), nil, nil)
+	res, err := call(ctx, r, st, s.client, http.MethodDelete, logoRoute(s.acme.ID), nil, nil)
 	if err != nil {
 		return err
 	}
 	if err := res.Expect(http.StatusNoContent); err != nil {
 		return err
 	}
-	res, err = call(ctx, r, st, s.client, http.MethodGet, s.logoPath(), nil, nil)
+	res, err = call(ctx, r, st, s.client, http.MethodGet, logoRoute(s.acme.ID), nil, nil)
 	if err != nil {
 		return err
 	}
@@ -434,37 +401,26 @@ func (s *storage) deleteLogo(ctx context.Context, inv *cli.Invocation, r *scenar
 // getLogo sends a narrated GET of acme's logo, its response shown
 // summarized: the logo's bytes are a PNG, which would print as noise.
 func (s *storage) getLogo(ctx context.Context, r *scenario.Reporter, st style.Style) (*httpx.Response, error) {
-	if err := showApart(r, "", output.Request(st, http.MethodGet, s.logoPath(), nil, nil)); err != nil {
+	if err := showApart(r, "", output.Request(st, http.MethodGet, logoRoute(s.acme.ID), nil, nil)); err != nil {
 		return nil, err
 	}
-	res, err := s.client.Get(ctx, s.logoPath())
+	res, err := s.client.Get(ctx, logoRoute(s.acme.ID))
 	if err != nil {
 		return nil, err
 	}
 	return res, showApart(r, "", output.Response(st, summarized(res)))
 }
 
-// documents is an organization's document route.
-func (s *storage) documents(org string) string {
-	return document.Documents + "/" + org
-}
-
-// directory is one of an organization's directories, by id or the root
-// alias.
-func (s *storage) directory(org, id string) string {
-	return s.documents(org) + "/directories/" + id
-}
-
 func (s *storage) documentTree(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
 	st := styleOf(s.n, inv)
 	r.Note("Each organization's documents hang from its own root, one directory the %q alias names, with every entry beneath it the organization's by containment. A directory's contents read as two listings, its child directories and its files, each paged, filtered, and sorted. Below are the root's two listings, then the whole tree the seed wrote, walked a listing at a time, every entry at the fixed id the seed file gives it.", document.RootAlias)
 	var dirs document.DirectoryPage
-	listDirs := s.directory(s.acme.ID, document.RootAlias) + "/directories?" + httpx.RawQuery([2]string{"sort", "name"})
+	listDirs := directoryRoute(s.acme.ID, document.RootAlias) + "/directories?" + httpx.RawQuery([2]string{"sort", "name"})
 	if err := s.get(ctx, r, st, listDirs, &dirs); err != nil {
 		return err
 	}
 	var files document.FilePage
-	listFiles := s.directory(s.acme.ID, document.RootAlias) + "/files?" + httpx.RawQuery([2]string{"sort", "name"})
+	listFiles := directoryRoute(s.acme.ID, document.RootAlias) + "/files?" + httpx.RawQuery([2]string{"sort", "name"})
 	if err := s.get(ctx, r, st, listFiles, &files); err != nil {
 		return err
 	}
@@ -481,11 +437,11 @@ func (s *storage) documentTree(ctx context.Context, inv *cli.Invocation, r *scen
 			found[p] = d.ID
 			rows = append(rows, [2]string{p, d.ID})
 			var sub document.DirectoryPage
-			if err := s.getQuiet(ctx, s.directory(s.acme.ID, d.ID)+"/directories?"+httpx.RawQuery([2]string{"sort", "name"}), &sub); err != nil {
+			if err := s.getQuiet(ctx, directoryRoute(s.acme.ID, d.ID)+"/directories?"+httpx.RawQuery([2]string{"sort", "name"}), &sub); err != nil {
 				return err
 			}
 			var subFiles document.FilePage
-			if err := s.getQuiet(ctx, s.directory(s.acme.ID, d.ID)+"/files?"+httpx.RawQuery([2]string{"sort", "name"}), &subFiles); err != nil {
+			if err := s.getQuiet(ctx, directoryRoute(s.acme.ID, d.ID)+"/files?"+httpx.RawQuery([2]string{"sort", "name"}), &subFiles); err != nil {
 				return err
 			}
 			if err := walk(p, sub.Items, subFiles.Items); err != nil {
@@ -541,7 +497,7 @@ func (s *storage) getQuiet(ctx context.Context, p string, v any) error {
 func (s *storage) cursorWalk(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
 	st := styleOf(s.n, inv)
 	r.Note("A listing's envelope carries a next cursor while more rows follow. Sending cursor=<next> in place of page, with the same sort, continues after the last row the previous page showed, so a tree that changes between requests neither skips nor repeats an entry; a continued page carries no page number. This walks the root's child directories %d to a page until more is false.", cursorPageSize)
-	base := s.directory(s.acme.ID, document.RootAlias) + "/directories?"
+	base := directoryRoute(s.acme.ID, document.RootAlias) + "/directories?"
 	var names []string
 	total, cursor := -1, ""
 	for pages := 0; ; pages++ {
@@ -615,7 +571,7 @@ func (s *storage) missingIfMatch(ctx context.Context, inv *cli.Invocation, r *sc
 		return err
 	}
 	r.Note("A move or a delete acts on a row the client read, which another request may have changed since, so it carries the version it read as If-Match. This reads the seeded %s for its version, then deletes it with no If-Match: 428 Precondition Required, refused before anything is touched.", guardedFilePath[1:])
-	filePath := s.documents(s.acme.ID) + "/files/" + id
+	filePath := documentsRoute(s.acme.ID) + "/files/" + id
 	if err := s.get(ctx, r, st, filePath, &s.guarded); err != nil {
 		return err
 	}
@@ -634,7 +590,7 @@ func (s *storage) staleIfMatch(ctx context.Context, inv *cli.Invocation, r *scen
 		stale = s.guarded.Version + 1
 	}
 	r.Note("The same delete with a well-formed If-Match naming version %d, not the %d the read showed, is 412 Precondition Failed: the guarded statement matches no row at that version, so the file stays.", stale, s.guarded.Version)
-	filePath := s.documents(s.acme.ID) + "/files/" + s.guarded.ID
+	filePath := documentsRoute(s.acme.ID) + "/files/" + s.guarded.ID
 	headers := []httpx.Header{httpx.IfMatch(stale)}
 	res, err := call(ctx, r, st, s.client, http.MethodDelete, filePath, headers, nil)
 	if err != nil {
@@ -648,7 +604,7 @@ func (s *storage) takenName(ctx context.Context, inv *cli.Invocation, r *scenari
 	st := styleOf(s.n, inv)
 	name := path.Base(takenDirPath)
 	r.Note("Names are unique within a directory. Creating a second %s directory under the root is a 409 Conflict whose detail is a fixed text naming the kind of conflict, %q, never the underlying error's own, which would name the library's operation, ids, and constraints.", name, detailNameTaken)
-	route := s.documents(s.acme.ID) + "/directories"
+	route := documentsRoute(s.acme.ID) + "/directories"
 	body := document.CreateDirectory{ParentID: document.RootAlias, Name: name}
 	res, err := call(ctx, r, st, s.client, http.MethodPost, route, nil, body)
 	if err != nil {
@@ -672,10 +628,10 @@ func (s *storage) anotherOrganization(ctx context.Context, inv *cli.Invocation, 
 	}
 	r.Note("Every route that takes an id checks its scope first: the id must lie within the addressed organization's root. acme's %s directory reads under acme, and the same id under finance is 404, indistinguishable from an id that does not exist, so no request reads, moves, or deletes across organizations.", path.Base(takenDirPath))
 	var d document.Directory
-	if err := s.get(ctx, r, st, s.directory(s.acme.ID, id), &d); err != nil {
+	if err := s.get(ctx, r, st, directoryRoute(s.acme.ID, id), &d); err != nil {
 		return err
 	}
-	other := s.directory(s.other.ID, id)
+	other := directoryRoute(s.other.ID, id)
 	res, err := call(ctx, r, st, s.client, http.MethodGet, other, nil, nil)
 	if err != nil {
 		return err
@@ -688,16 +644,16 @@ func (s *storage) createBranch(ctx context.Context, inv *cli.Invocation, r *scen
 	st := styleOf(s.n, inv)
 	name := "storage-demo-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	r.Note("A small branch for the recursive delete to remove: a directory under the root named for this run, %s, so a second run never collides with the first, a subdirectory in it, and a file in that. The directory's read closes the step with its status, active, and the version the delete guards on.", name)
-	route := s.documents(s.acme.ID) + "/directories"
-	top, err := s.createDirectory(ctx, r, st, route, document.CreateDirectory{ParentID: document.RootAlias, Name: name})
+	route := documentsRoute(s.acme.ID) + "/directories"
+	top, err := createDirectory(ctx, r, st, s.client, route, document.CreateDirectory{ParentID: document.RootAlias, Name: name})
 	if err != nil {
 		return err
 	}
-	sub, err := s.createDirectory(ctx, r, st, route, document.CreateDirectory{ParentID: top.ID, Name: "drafts"})
+	sub, err := createDirectory(ctx, r, st, s.client, route, document.CreateDirectory{ParentID: top.ID, Name: "drafts"})
 	if err != nil {
 		return err
 	}
-	filePath := s.directory(s.acme.ID, sub.ID) + "/files?name=notes.txt"
+	filePath := directoryRoute(s.acme.ID, sub.ID) + "/files?name=notes.txt"
 	headers := []httpx.Header{{Name: "Content-Type", Value: "text/plain; charset=utf-8"}}
 	content := "Draft notes, removed with their branch.\n"
 	res, err := call(ctx, r, st, s.client, http.MethodPost, filePath, headers, content)
@@ -707,7 +663,7 @@ func (s *storage) createBranch(ctx context.Context, inv *cli.Invocation, r *scen
 	if err := res.Expect(http.StatusCreated); err != nil {
 		return err
 	}
-	if err := s.get(ctx, r, st, s.directory(s.acme.ID, top.ID), &s.branch); err != nil {
+	if err := s.get(ctx, r, st, directoryRoute(s.acme.ID, top.ID), &s.branch); err != nil {
 		return err
 	}
 	if s.branch.Status != document.DirectoryActive {
@@ -716,26 +672,10 @@ func (s *storage) createBranch(ctx context.Context, inv *cli.Invocation, r *scen
 	return nil
 }
 
-// createDirectory sends a narrated directory create and expects 201.
-func (s *storage) createDirectory(ctx context.Context, r *scenario.Reporter, st style.Style, route string, body document.CreateDirectory) (document.Identity, error) {
-	res, err := call(ctx, r, st, s.client, http.MethodPost, route, nil, body)
-	if err != nil {
-		return document.Identity{}, err
-	}
-	if err := res.Expect(http.StatusCreated); err != nil {
-		return document.Identity{}, err
-	}
-	var id document.Identity
-	if err := res.JSON(&id); err != nil {
-		return document.Identity{}, err
-	}
-	return id, nil
-}
-
 func (s *storage) recursiveDelete(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
 	st := styleOf(s.n, inv)
 	r.Note("With recursive=true a directory delete takes the branch in two stages: one transaction marks the directory and everything beneath it deleting, and the request answers 202 Accepted with the directory's read as its Location; the sweep, nudged after the commit, then removes the rows and their objects. Until it finishes the directory reads deleting, and a listing within the branch is 404. The nudged sweep is quick, so the read may already find the branch gone.")
-	route := s.directory(s.acme.ID, s.branch.ID) + "?recursive=true"
+	route := directoryRoute(s.acme.ID, s.branch.ID) + "?recursive=true"
 	headers := []httpx.Header{httpx.IfMatch(s.branch.Version)}
 	res, err := call(ctx, r, st, s.client, http.MethodDelete, route, headers, nil)
 	if err != nil {

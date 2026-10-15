@@ -94,7 +94,7 @@ func TestCommands_EmitTheirEventInTheirTransaction(t *testing.T) {
 				_, err := s.PutLogo(ctx, validID, logoUpload(t))
 				return err
 			},
-			[]sqltest.Op{q, begin, q, q, commit, q, begin, x, q, x, q, x, x, commit, x},
+			[]sqltest.Op{q, begin, q, q, commit, begin, q, commit, begin, x, q, x, q, x, x, commit, x},
 			organization.LogoUploaded.Type(), newFileID,
 			map[string]any{"file_id": newFileID, "organization_id": validID, "content_type": "image/png", "size": float64(3), "etag": etag, "version": float64(2)},
 		},
@@ -209,7 +209,7 @@ func TestCommands_AFailedCommandCommitsNoEvent(t *testing.T) {
 				_, err := s.PutLogo(ctx, validID, logoUpload(t))
 				return err
 			},
-			[]sqltest.Op{q, begin, q, q, commit, q, begin, x, q, x, rollback, begin, q, commit, x},
+			[]sqltest.Op{q, begin, q, q, commit, begin, q, commit, begin, x, q, x, rollback, begin, q, commit, x},
 		},
 		"delete logo, none active": {
 			[]sqltest.Response{datatest.FileRows()},

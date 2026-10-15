@@ -214,15 +214,17 @@ func TestScenario_WithNoScenarioPrintsItsHelpEndingInTheListing(t *testing.T) {
 		}
 		names = append(names, strings.Fields(line)[0])
 	}
-	if want := []string{"sqlate", "domain", "problems", "storage"}; !slices.Equal(names, want) {
+	if want := []string{"sqlate", "domain", "problems", "storage", "events"}; !slices.Equal(names, want) {
 		t.Errorf("the listing names %q, want %q:\n%s", names, want, listing)
 	}
 	// Each uses line names the need nodes first, then the settings the
-	// steps read: storage points at no trace, so it uses no grafana up.
+	// steps read: storage and events point at no trace, so they use no
+	// grafana up.
 	if want := []string{
 		"repo, no color",
 		"service, grafana up, repo, no color",
 		"service, grafana up, repo, no color",
+		"service, repo, no color",
 		"service, repo, no color",
 	}; !slices.Equal(uses, want) {
 		t.Errorf("the listing's uses lines are %q, want %q:\n%s", uses, want, listing)
@@ -290,7 +292,7 @@ func TestScenario_UsageErrors(t *testing.T) {
 }
 
 // stackScenarios are the scenarios that declare the service node.
-var stackScenarios = []string{"domain", "problems", "storage"}
+var stackScenarios = []string{"domain", "problems", "storage", "events"}
 
 // closedURL returns the URL of a listener that has been closed, where
 // nothing answers.

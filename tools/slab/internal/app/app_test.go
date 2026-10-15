@@ -95,7 +95,7 @@ func TestRun_RootHelp(t *testing.T) {
 				"Commands:", "version", "org", "docs", "admin", "events", "scenario",
 				"--base string", `(default "http://127.0.0.1:8080")`, "--grafana string", "--repo string", "--no-color",
 				"--nats string", `(default "nats://127.0.0.1:4222")`, "--nats-stream string", "--nats-prefix string",
-				"Scenarios:", "  sqlate    ", "  domain    ", "  problems  ", "  storage   ",
+				"Scenarios:", "  sqlate    ", "  domain    ", "  problems  ", "  storage   ", "  events    ",
 			} {
 				if !strings.Contains(stdout.String(), want) {
 					t.Errorf("root help lacks %q:\n%s", want, stdout)

@@ -586,7 +586,10 @@ for an outage. go-web-sdk's `webtest` drives the service through its API; beneat
 `integration.Objects` reads the container, `integration.Database` opens a session on the
 database, and `integration.Subscribe` reads the service's stream ([Adding an
 event](#adding-an-event)). `sweep_metrics_test.go` points the service's OTLP exporter at a
-gRPC receiver in the test and reads the sweep's metrics from what it exports. A failing test prints each service process's output, so a 500 comes with the
+gRPC receiver in the test and reads the sweep's metrics from what it exports. The unit tier's
+`internal/app/sweep_metrics_test.go` proves each outcome, the backlog gauge per reclaimer, and the
+`"sweep pass failed"` record, reporting passes to the sweep metrics node's hook under a manual
+reader through `internal/apptest`'s fixtures. A failing test prints each service process's output, so a 500 comes with the
 service's own record of it. The service adds only its configuration and state control through
 the admin mount; nothing in the service exists for the tests' sake.
 

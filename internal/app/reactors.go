@@ -9,7 +9,6 @@ import (
 	"github.com/standards-lab/go-database/sweep"
 	"github.com/standards-lab/go-messaging"
 	msgpg "github.com/standards-lab/go-messaging/postgres"
-	"go.opentelemetry.io/otel"
 )
 
 // defineReactors defines the reactors on g into n: the entry points that
@@ -45,6 +44,12 @@ const (
 	reclaimOutbox = "outbox"
 	reclaimInbox  = "inbox"
 )
+
+// reclaimers names every reclaimer the sweeper registers, in its
+// registration order: the sweep metrics node reports each one's backlog
+// from the start, before its first pass. A reclaimer newSweeper registers
+// is named here too.
+var reclaimers = []string{reclaimFiles, reclaimOutbox, reclaimInbox}
 
 // Nudge is the nudge node's value, the document layer's document.Sweeper:
 // the layer nudges it after each branch it marks, and it marks the
@@ -83,11 +88,11 @@ func (n *Nudge) Nudge() {
 // than an interval later. Each pass holds the gate shared, so a schema verb
 // never meets one. The dialect is Postgres, a sqlate.TryLocker, so each
 // cycle claims "sweep.<name>" (data.LockSweepPrefix) and two replicas never
-// run one reclaimer's cycle at once. Each pass is reported to the hook
-// newSweepMetrics returns (telemetry.go), which counts it and records its
-// reclaimer's backlog on the otel global meter provider, and logs a failed
-// pass at warn as go-database's default report did. It binds the nudge
-// node to the sweeper.
+// run one reclaimer's cycle at once. Each pass is reported to the sweep
+// metrics node's hook (telemetry.go), which counts it and records its
+// reclaimer's backlog on the meter provider node's provider, and logs a
+// failed pass at warn as go-database's default report did. It binds the
+// nudge node to the sweeper.
 //
 // Its value is a lifecycle Subsystem, ReadinessChecker, and Monitored, so
 // the Coordinator starts it, drains it, reports it, and ends the run on its
@@ -119,17 +124,8 @@ func newSweeper(n *Nodes) func(*graph.Scope) (*sweep.Sweeper, error) {
 			{Name: reclaimOutbox, Reclaimer: outbox, Policy: policy},
 			{Name: reclaimInbox, Reclaimer: inbox, Policy: policy},
 		}
-		names := make([]string, len(regs))
-		for i, r := range regs {
-			names[i] = r.Name
-		}
-		hook, err := newSweepMetrics(otel.GetMeterProvider(), logger, names)
-		if err != nil {
-			return nil, err
-		}
-
 		sw, err := sweep.New(db, regs, cfg.ShutdownTimeout.Duration(), logger,
-			sweep.Gated(s.Use(n.Gate)), sweep.OnPass(hook))
+			sweep.Gated(s.Use(n.Gate)), sweep.OnPass(s.Use(n.SweepMetrics)))
 		if err != nil {
 			return nil, err
 		}

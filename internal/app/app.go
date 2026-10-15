@@ -17,6 +17,7 @@ import (
 	"github.com/standards-lab/go-messaging/nats"
 	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-web-sdk"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/standards-lab/go-web-service/data"
 	"github.com/standards-lab/go-web-service/domain/document"
@@ -53,7 +54,9 @@ type Nodes struct {
 	Files    *graph.Node[*data.Storage]  // "files"
 
 	// Telemetry (telemetry.go).
-	Telemetry *graph.Node[*Telemetry] // "telemetry"
+	Telemetry     *graph.Node[*Telemetry]           // "telemetry"
+	MeterProvider *graph.Node[metric.MeterProvider] // "meterprovider"
+	SweepMetrics  *graph.Node[sweep.Hook]           // "sweepmetrics"
 
 	// Admin (admin.go).
 	Gate   *graph.Node[*reactor.Gate]  // "gate"

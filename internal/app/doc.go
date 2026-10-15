@@ -8,8 +8,10 @@
 //     the two the domains see the first two through, the sql session and
 //     the files store;
 //   - telemetry.go: defineTelemetry, the trace and meter providers, which
-//     start before the connections and flush after them, and the
-//     sweeper's instruments, sweep.passes and sweep.backlogged;
+//     start before the connections and flush after them, the meter
+//     provider the service's own instruments are created on, and the
+//     sweep metrics, the sweeper's per-pass hook over its instruments,
+//     sweep.passes and sweep.backlogged;
 //   - admin.go: defineAdmin, the quiesce gate and the schema service, and
 //     the /admin mount;
 //   - domain.go: defineDomain, the domain services, and the /api mount;
@@ -27,7 +29,8 @@
 // with Use. [App] is the described process. [New] is the cold start: it
 // describes the graph, layer by layer, lowest first, constructs nothing,
 // and cannot fail. [App.Graph] and [App.Nodes] publish the graph and its
-// handles, so a caller can Observe or Replace a node before Run. [App.Run]
+// handles, so a caller can Observe or Replace a node before Run, as
+// internal/apptest's fixtures do. [App.Run]
 // is the hot start plus shutdown: it builds the graph from the config, the
 // logger, the server, the schema, and each reactor as roots, hands the
 // System to go-core's lifecycle Coordinator, and returns the process exit

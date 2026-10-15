@@ -444,7 +444,7 @@ func TestDeletes_GuardOnIfMatch(t *testing.T) {
 			"/directories/" + dirID + "?recursive=true", `"1"`, 412,
 		},
 		"stale file": {
-			[]sqltest.Response{root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), within(true), datatest.FileRows(), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3))},
+			[]sqltest.Response{root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), within(true), exec(0), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3))},
 			"/files/" + fileID, `"2"`, 412,
 		},
 	}

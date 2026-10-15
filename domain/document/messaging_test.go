@@ -181,14 +181,18 @@ func wantEvent(t *testing.T, e event.Event, typ, subject string, want map[string
 // written scripts the outbox insert of one event.
 func written() sqltest.Response { return sqltest.Response{Affected: 1} }
 
-// Each directory command writes exactly one event, its kind's, in the
-// transaction that makes its change true: the outbox insert is the last
-// statement before that transaction's commit. Its subject is the
-// directory's id, and its data the directory's stored state after the
-// command, under the API's field names, every field checked: no path, no
-// status, no timestamps, no earlier state. A create under the alias that
-// finds the root emits no root event, and a branch's delete emits for the
-// marked directory alone, at the version the mark left it at.
+// Each directory and file command writes exactly one event, its kind's,
+// in the transaction that makes its change true: the outbox insert is the
+// last statement before that transaction's commit. Its subject is the id
+// of the directory or file, and its data the entity's stored state after
+// the command, under the API's field names, every field checked: no path,
+// no status, no timestamps, no earlier state. A create under the alias
+// that finds the root emits no root event, and a branch's delete emits for
+// the marked directory alone, at the version the mark left it at. A file's
+// move carries what its upload carries, a pending file's size and entity
+// tag null; a file's delete commits in the transaction that begins it, at
+// the version that left the file deleting, and its purge, after the
+// commit, writes no event.
 func TestCommands_EmitTheirEventInTheirTransaction(t *testing.T) {
 	ctx := context.Background()
 	cases := map[string]struct {
@@ -258,6 +262,49 @@ func TestCommands_EmitTheirEventInTheirTransaction(t *testing.T) {
 			[]sqltest.Op{begin, q, x, x, commit},
 			document.DirectoryDeleted.Type(), rootID,
 			map[string]any{"directory_id": rootID, "organization_id": orgID, "version": float64(2)},
+		},
+		"move file": {
+			[]sqltest.Response{
+				root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), within(true), within(true),
+				datatest.FileRows(file(fileID, subID, blobfs.StatusAvailable, 3)), written(),
+			},
+			func(s *document.Service) error {
+				_, err := s.MoveFile(ctx, orgID, fileID, 2, document.MoveFile{DirectoryID: subID, Name: "report.txt"})
+				return err
+			},
+			[]sqltest.Op{begin, q, q, q, q, q, x, commit},
+			document.FileMoved.Type(), fileID,
+			map[string]any{
+				"file_id": fileID, "organization_id": orgID, "directory_id": subID, "name": "report.txt",
+				"content_type": "text/plain", "size": float64(6), "etag": `"etag-` + fileID + `"`, "version": float64(3),
+			},
+		},
+		"move a pending file": {
+			[]sqltest.Response{
+				root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusPending, 1)), within(true),
+				datatest.FileRows(file(fileID, rootID, blobfs.StatusPending, 2)), written(),
+			},
+			func(s *document.Service) error {
+				_, err := s.MoveFile(ctx, orgID, fileID, 1, document.MoveFile{DirectoryID: document.RootAlias, Name: "report.txt"})
+				return err
+			},
+			[]sqltest.Op{begin, q, q, q, q, x, commit},
+			document.FileMoved.Type(), fileID,
+			map[string]any{
+				"file_id": fileID, "organization_id": orgID, "directory_id": rootID, "name": "report.txt",
+				"content_type": "text/plain", "size": nil, "etag": nil, "version": float64(2),
+			},
+		},
+		"delete file": {
+			[]sqltest.Response{
+				root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), within(true),
+				exec(1), datatest.FileRows(file(fileID, dirID, blobfs.StatusDeleting, 4)), written(),
+				exec(1), // the purge, after the commit
+			},
+			func(s *document.Service) error { return s.DeleteFile(ctx, orgID, fileID, 3) },
+			[]sqltest.Op{begin, q, q, q, x, q, x, commit, x},
+			document.FileDeleted.Type(), fileID,
+			map[string]any{"file_id": fileID, "organization_id": orgID, "version": float64(4)},
 		},
 		"delete branch": {
 			[]sqltest.Response{
@@ -376,11 +423,51 @@ func TestDeleteBranch_ARetryOfTheMarkEmitsNothing(t *testing.T) {
 	noEvent(t, rec)
 }
 
-// A directory command that fails commits no event, however it fails: its
-// transaction rolls back with the change and the event together, and the
-// API's result is the failure it was. That holds for a scope check, a
-// taken name, a cycle, the root's move, the version guard, a non-empty
-// directory, a missing organization, and an event whose own write fails.
+// A delete that finds the file deleting already, the delete's retry, is
+// accepted at any version, as it always was, and commits no event: the
+// hold reports the delete begun, so the delete's first transaction runs no
+// hook, the first delete having emitted the file's event. The retry still
+// finishes the delete, the object deleted and the row purged, and the
+// purge emits nothing. A file in a marked branch is deleting by its
+// branch's mark, which emitted the directory's event alone, and its
+// delete is the retry too.
+func TestDeleteFile_ARetryEmitsNothingAndPurges(t *testing.T) {
+	cases := map[string]sqltest.Response{
+		"its own delete":  datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)),
+		"a marked branch": datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))),
+	}
+	for name, dir := range cases {
+		t.Run(name, func(t *testing.T) {
+			deletingRow := datatest.FileRows(file(fileID, dirID, blobfs.StatusDeleting, 4))
+			s, rec, fake := serviceOver(t,
+				root(rootID), deletingRow, within(true),
+				exec(0), deletingRow, dir, // the hold matches nothing; the reads tell whose delete began
+				datatest.FileRows(), deletingRow, // the delete's retry leaves the row as it is
+				exec(1), // the purge
+			)
+			ctx := context.Background()
+			key := fileID + "/report.txt"
+			if _, err := fake.Put(ctx, key, strings.NewReader("report"), storage.PutOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.DeleteFile(ctx, orgID, fileID, 1); err != nil {
+				t.Fatalf("DeleteFile = %v; want the retry accepted", err)
+			}
+			sameOps(t, rec, begin, q, q, q, x, q, q, q, q, commit, x)
+			noEvent(t, rec)
+			if _, err := fake.Get(ctx, key, storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
+				t.Errorf("the retried delete's object is still stored: %v", err)
+			}
+		})
+	}
+}
+
+// A directory or file command that fails commits no event, however it
+// fails: its transaction rolls back with the change and the event
+// together, and the API's result is the failure it was. That holds for a
+// scope check, a taken name, a cycle, the root's move, the version guard,
+// a non-empty directory, a missing organization or file, a file deleting,
+// and an event whose own write fails.
 func TestCommands_AFailedCommandCommitsNoEvent(t *testing.T) {
 	ctx := context.Background()
 	stale := datatest.DirectoryRows(directory(dirID, rootID, "reports", 2))
@@ -402,6 +489,13 @@ func TestCommands_AFailedCommandCommitsNoEvent(t *testing.T) {
 		_, err := s.DeleteBranch(ctx, orgID, dirID, 1)
 		return err
 	}
+	moveFile := func(dir string) func(*document.Service) error {
+		return func(s *document.Service) error {
+			_, err := s.MoveFile(ctx, orgID, fileID, 2, document.MoveFile{DirectoryID: dir, Name: "report.txt"})
+			return err
+		}
+	}
+	deleteFile := func(s *document.Service) error { return s.DeleteFile(ctx, orgID, fileID, 2) }
 	cases := map[string]struct {
 		responses []sqltest.Response
 		run       func(*document.Service) error
@@ -450,6 +544,55 @@ func TestCommands_AFailedCommandCommitsNoEvent(t *testing.T) {
 			[]sqltest.Response{root(rootID), within(true), exec(1), refused},
 			func(s *document.Service) error { return s.DeleteDirectory(ctx, orgID, dirID, 1) },
 			[]sqltest.Op{begin, q, q, x, x, rollback}, nil,
+		},
+		"move file, a stale version": {
+			[]sqltest.Response{
+				root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), within(true), within(true),
+				datatest.FileRows(), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), // the guarded move matches nothing
+				datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)), datatest.DirectoryRows(directory(subID, dirID, "drafts", 1)),
+			}, moveFile(subID),
+			[]sqltest.Op{begin, q, q, q, q, q, q, q, q, rollback}, query.ErrVersionMismatch,
+		},
+		"move file, outside the root": {
+			[]sqltest.Response{root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), within(true), within(false)}, moveFile(otherID),
+			[]sqltest.Op{begin, q, q, q, q, rollback}, blobfs.ErrNotFound,
+		},
+		"move file, a taken name": {
+			[]sqltest.Response{root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), within(true), within(true), {Err: takenName()}}, moveFile(subID),
+			[]sqltest.Op{begin, q, q, q, q, q, rollback}, blobfs.ErrNameTaken,
+		},
+		"move file, the file deleting": {
+			[]sqltest.Response{
+				root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), within(true), within(true),
+				datatest.FileRows(), datatest.FileRows(file(fileID, dirID, blobfs.StatusDeleting, 3)), datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)),
+			}, moveFile(subID),
+			[]sqltest.Op{begin, q, q, q, q, q, q, q, rollback}, blobfs.ErrDeleting,
+		},
+		"move file, the event's write refused": {
+			[]sqltest.Response{
+				root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), within(true), within(true),
+				datatest.FileRows(file(fileID, subID, blobfs.StatusAvailable, 3)), refused,
+			}, moveFile(subID),
+			[]sqltest.Op{begin, q, q, q, q, q, x, rollback}, nil,
+		},
+		"delete file, a stale version": {
+			[]sqltest.Response{root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), within(true), exec(0), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3))},
+			deleteFile, []sqltest.Op{begin, q, q, q, x, q, rollback}, query.ErrVersionMismatch,
+		},
+		"delete file, outside the root": {
+			[]sqltest.Response{root(rootID), datatest.FileRows(file(fileID, otherID, blobfs.StatusAvailable, 2)), within(false)},
+			deleteFile, []sqltest.Op{begin, q, q, q, rollback}, blobfs.ErrNotFound,
+		},
+		"delete file, gone": {
+			[]sqltest.Response{root(rootID), datatest.FileRows()},
+			deleteFile, []sqltest.Op{begin, q, q, rollback}, blobfs.ErrNotFound,
+		},
+		"delete file, the event's write refused": {
+			[]sqltest.Response{
+				root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), within(true),
+				exec(1), datatest.FileRows(file(fileID, dirID, blobfs.StatusDeleting, 3)), refused,
+			},
+			deleteFile, []sqltest.Op{begin, q, q, q, x, q, x, rollback}, nil,
 		},
 		"delete branch, a stale version": {
 			[]sqltest.Response{root(rootID), within(true), exec(0), stale}, branch,

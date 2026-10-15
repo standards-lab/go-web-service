@@ -146,14 +146,16 @@ func (s *Service) Content(ctx context.Context, organizationID, id string) (Conte
 }
 
 // DeleteFile removes the file at version, its row and its object; another
-// version is query.ErrVersionMismatch. A file deleting already is the
-// delete's retry, which converges at any version.
+// version is query.ErrVersionMismatch. The delete emits FileDeleted in the
+// transaction that begins it. A file deleting already is the delete's
+// retry, which converges at any version and emits nothing.
 func (s *Service) DeleteFile(ctx context.Context, organizationID, id string, version int64) error {
 	return s.store.deleteFile(ctx, organizationID, id, version)
 }
 
 // MoveFile is an action: it moves the file into a directory within the
-// same root, as the command's name, under the version guard.
+// same root, as the command's name, under the version guard. The move
+// emits FileMoved in its transaction.
 func (s *Service) MoveFile(ctx context.Context, organizationID, id string, version int64, m MoveFile) (Identity, error) {
 	if err := m.Validate(); err != nil {
 		return Identity{}, err

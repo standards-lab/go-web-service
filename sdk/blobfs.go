@@ -92,3 +92,64 @@ func WriteFile(ctx context.Context, fs *bfdata.Store, db *sqlate.DB, objects bfd
 	}
 	return done, nil
 }
+
+// RemoveFile is blobfs's two-phase delete, Store.RemoveFile, with one
+// change: deleted runs in the delete's first transaction once Files.Delete
+// has moved the row to deleting, so whatever it writes commits exactly
+// when the delete begins. A domain emits the event that reports the delete
+// there, through its recorder. It is bound for blobfs, as
+// Store.RemoveFile's delete hook, and this staging goes then.
+//
+// It reproduces Store.RemoveFile from the store's exported steps. pick,
+// Files.Hold, Files.Delete, and deleted run in one transaction on db,
+// where pick checks its caller's scope and removes its references to the
+// file; pick's error, or its transaction's, is returned as it came. The
+// hold under opts tells a delete that begins from its retry, which
+// Files.Delete alone returns alike: a row the hold finds deleting already
+// (a blobfs.DeletingError, the file's own delete or its branch's) is the
+// retry, which converges at any version, as Store.RemoveFile's does; it
+// skips deleted, the first delete having run it, and finishes the purge.
+// Any other refusal of the hold, blobfs.ErrNotFound or
+// query.ErrVersionMismatch, is the delete's, and deleted's error rolls the
+// transaction back with the row unchanged and purges nothing. After the
+// commit PurgeFile deletes the object and purges the row on db, outside
+// any transaction, and runs no hook; a purge that fails leaves the row
+// deleting, which a retry or the sweep's stale reclaim finishes. A retry
+// of a finished delete is blobfs.ErrNotFound.
+func RemoveFile(ctx context.Context, fs *bfdata.Store, db *sqlate.DB, objects bfdata.ObjectDeleter,
+	pick func(*sqlate.Tx) (string, error), deleted func(*sqlate.Tx, blobfs.File) error, opts ...bfdata.VersionOption,
+) (err error) {
+	var id string
+	picked := false
+	file, err := db.Transact(ctx, func(tx *sqlate.Tx) (blobfs.File, error) {
+		var err error
+		if id, err = pick(tx); err != nil {
+			return blobfs.File{}, err
+		}
+		picked = true
+		var retry *blobfs.DeletingError
+		switch err := fs.Files.Hold(ctx, tx, id, opts...); {
+		case errors.As(err, &retry):
+			return fs.Files.Delete(ctx, tx, id, opts...)
+		case err != nil:
+			return blobfs.File{}, err
+		}
+		file, err := fs.Files.Delete(ctx, tx, id, opts...)
+		if err != nil {
+			return blobfs.File{}, err
+		}
+		return file, deleted(tx, file)
+	})
+	if !picked {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("sdk: remove file %s: %w", id, err)
+		}
+	}()
+	if err != nil {
+		return err
+	}
+	return fs.PurgeFile(ctx, db, objects, file)
+}

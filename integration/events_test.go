@@ -252,6 +252,7 @@ var commandTypes = []string{
 	orgdomain.OrganizationTransferred.Type(), orgdomain.OrganizationDeleted.Type(),
 	logoUploaded, logoDeleted,
 	document.DirectoryCreated.Type(), document.DirectoryMoved.Type(), document.DirectoryDeleted.Type(),
+	document.FileMoved.Type(), document.FileDeleted.Type(),
 }
 
 // commandFixture is what a command case runs against: the client, the
@@ -268,6 +269,13 @@ type commandFixture struct {
 func (f commandFixture) mkdir(t *testing.T, parent, name string) identity {
 	t.Helper()
 	return webtest.Decode[identity](t, f.c.Post(t, f.docs+"/directories", map[string]string{"parent_id": parent, "name": name}), http.StatusCreated)
+}
+
+// upload uploads a file named name into the directory parent, the root
+// alias or a directory id, in the fixture's documents.
+func (f commandFixture) upload(t *testing.T, parent, name string) identity {
+	t.Helper()
+	return webtest.Decode[identity](t, f.c.Post(t, f.docs+"/directories/"+parent+"/files?name="+name, webtest.Raw{ContentType: "text/plain", Body: []byte(name)}), http.StatusCreated)
 }
 
 // commandCase is one command and the event it commits: run performs it,
@@ -331,6 +339,17 @@ var commandCases = []commandCase{
 		webtest.Decode[identity](t, f.c.Post(t, f.docs+"/directories/"+id.ID+"/move", map[string]string{"parent_id": to.ID, "name": "events-moved"}, webtest.IfMatch(id.Version)), http.StatusOK)
 		return document.DirectoryMoved.Type(), id.ID
 	}},
+	{"file move", func(t *testing.T, f commandFixture) (string, string) {
+		to := f.mkdir(t, "root", "events-file-destination")
+		id := f.upload(t, "root", "events-file-moved.txt")
+		webtest.Decode[identity](t, f.c.Post(t, f.docs+"/files/"+id.ID+"/move", map[string]string{"directory_id": to.ID, "name": "events-file-moved.txt"}, webtest.IfMatch(id.Version)), http.StatusOK)
+		return document.FileMoved.Type(), id.ID
+	}},
+	{"file delete", func(t *testing.T, f commandFixture) (string, string) {
+		id := f.upload(t, "root", "events-file-deleted.txt")
+		f.c.Delete(t, f.docs+"/files/"+id.ID, webtest.IfMatch(id.Version)).Expect(t, http.StatusNoContent)
+		return document.FileDeleted.Type(), id.ID
+	}},
 }
 
 // Each command commits exactly one event of its type about the entity the
@@ -362,6 +381,40 @@ func TestEvents_EachCommandEmitsItsEvent(t *testing.T) {
 				t.Errorf("event = %+v; want it from web-service, stamped", e)
 			}
 		})
+	}
+}
+
+// A file's delete delivers one web-service.document.file.deleted, and a
+// repeat of the delete delivers nothing more: the file is gone, so the
+// repeat is not found, as it always was, and commits no event. A marker
+// upload follows each delete, so every event either committed has arrived
+// by the marker's.
+func TestEvents_ARepeatedFileDeleteDeliversNothingMore(t *testing.T) {
+	s := integration.Start(t, integration.Options{Seed: integration.Default})
+	c := s.Client()
+	integration.Reset(t, c, integration.Default)
+	deleted := document.FileDeleted.Type()
+	events := integration.Subscribe(t, uploaded, deleted)
+	docs := "/api/documents/" + tree(t, c)[docsOrg].ID
+	id := webtest.Decode[identity](t, c.Post(t, docs+"/directories/root/files?name=deleted-twice.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("twice")}), http.StatusCreated)
+
+	deletes := func(t *testing.T, got []event.Event) int {
+		t.Helper()
+		n := 0
+		for _, e := range about(got, id.ID) {
+			if e.Type == deleted {
+				n++
+			}
+		}
+		return n
+	}
+	c.Delete(t, docs+"/files/"+id.ID, webtest.IfMatch(id.Version)).Expect(t, http.StatusNoContent)
+	if _, got := marker(t, c, events, docs, "after-first-delete.txt"); deletes(t, got) != 1 {
+		t.Fatalf("%s events about the file after its delete = %d (%v); want one", deleted, deletes(t, got), subjects(got))
+	}
+	_ = c.Delete(t, docs+"/files/"+id.ID, webtest.IfMatch(id.Version)).Problem(t, http.StatusNotFound)
+	if _, got := marker(t, c, events, docs, "after-second-delete.txt"); deletes(t, got) != 1 {
+		t.Errorf("%s events about the file after its repeated delete = %d (%v); want the first delete's alone", deleted, deletes(t, got), subjects(got))
 	}
 }
 

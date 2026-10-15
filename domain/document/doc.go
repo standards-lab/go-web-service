@@ -22,8 +22,11 @@
 //     directory commands emit, each in the transaction that makes its
 //     change true; the document root's DirectoryCreated commits in the
 //     transaction that creates the root on the organization's first write.
-//   - [FileUploaded], with [FileUploadedData]: the event an upload emits
-//     in the transaction that makes its file available.
+//   - [FileUploaded] and [FileMoved], with [FileUploadedData], and
+//     [FileDeleted], with [FileDeletedData]: the events the file commands
+//     emit: an upload's in the transaction that makes its file available,
+//     a move's in the move's, and a delete's in the transaction that
+//     begins the delete.
 //   - [Routes]: the route group the composition root mounts.
 //   - [Directory], [File], [Content], [Identity]: the read shapes, the
 //     download, and a command's result.

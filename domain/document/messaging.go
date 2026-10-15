@@ -41,6 +41,14 @@ var (
 	// upload raises it: a seed's file writes, which run blobfs's
 	// retry-safe write, emit nothing.
 	FileUploaded = event.Define[FileUploadedData]("web-service.document.file.uploaded")
+	// FileMoved is the event a file's move emits, its data the file as the
+	// move left it, under its new directory and name.
+	FileMoved = event.Define[FileUploadedData]("web-service.document.file.moved")
+	// FileDeleted is the event a file's delete emits, in the transaction
+	// that begins the delete, at the version that left the file deleting.
+	// A delete that finds the file deleting already, the delete's retry,
+	// emits nothing, and neither does the purge that finishes it.
+	FileDeleted = event.Define[FileDeletedData]("web-service.document.file.deleted")
 )
 
 // Recorder is the recorder the layer emits its events through, in the
@@ -79,12 +87,33 @@ func (s *store) emitUploaded(ctx context.Context, tx *sqlate.Tx, organizationID 
 	if f.Size == nil || f.ETag == nil {
 		return fmt.Errorf("file %s completed without its size or entity tag", f.ID)
 	}
+	return s.emit(ctx, tx, func(q *event.Queue) { FileUploaded.Raise(q, f.ID, fileData(organizationID, f)) })
+}
+
+// emitDeleted raises FileDeleted for the organization's file, just moved
+// to deleting, at the version its delete left it at, and writes it into
+// tx through the recorder.
+func (s *store) emitDeleted(ctx context.Context, tx *sqlate.Tx, organizationID string, f blobfs.File) error {
+	return s.emit(ctx, tx, func(q *event.Queue) {
+		FileDeleted.Raise(q, f.ID, FileDeletedData{FileID: f.ID, OrganizationID: organizationID, Version: f.Version})
+	})
+}
+
+// emit writes the events raise raises into tx through the recorder, for a
+// hook a protocol runs in its own transaction.
+func (s *store) emit(ctx context.Context, tx *sqlate.Tx, raise func(*event.Queue)) error {
 	_, err := s.events.Emit(ctx, func(_ *sqlate.Tx, q *event.Queue) (struct{}, error) {
-		FileUploaded.Raise(q, f.ID, FileUploadedData{
-			FileID: f.ID, OrganizationID: organizationID, DirectoryID: f.DirectoryID, Name: f.Name,
-			ContentType: f.ContentType, Size: *f.Size, ETag: *f.ETag, Version: f.Version,
-		})
+		raise(q)
 		return struct{}{}, nil
 	})(tx)
 	return err
+}
+
+// fileData is the organization's file f as FileUploaded and FileMoved
+// carry it: its stored state, as the command that wrote it returned it.
+func fileData(organizationID string, f blobfs.File) FileUploadedData {
+	return FileUploadedData{
+		FileID: f.ID, OrganizationID: organizationID, DirectoryID: f.DirectoryID, Name: f.Name,
+		ContentType: f.ContentType, Size: f.Size, ETag: f.ETag, Version: f.Version,
+	}
 }

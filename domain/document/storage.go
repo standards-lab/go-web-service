@@ -356,26 +356,34 @@ func (s *store) content(ctx context.Context, organizationID, id string) (Content
 	return Content{Name: file.Name, Object: dl.Object, Open: dl.Open}, nil
 }
 
-// deleteFile removes the file at version by blobfs's two-phase delete, its
-// scope checked in the transaction that begins the delete. No row of the
-// layer references a file, so no reference is removed before the delete.
-// A file deleting already is the delete's retry, which converges at any
-// version, so a delete is never refused as deleting.
+// deleteFile removes the file at version by blobfs's two-phase delete as
+// the sdk package stages it, its scope checked in the transaction that
+// begins the delete, which emits FileDeleted at the version that left the
+// file deleting. No row of the layer references a file, so no reference is
+// removed before the delete. A file deleting already is the delete's
+// retry, which converges at any version, so a delete is never refused as
+// deleting; the retry emits nothing and finishes the purge, and the purge
+// emits nothing. A refused delete, out of scope or at a stale version,
+// commits no event.
 func (s *store) deleteFile(ctx context.Context, organizationID, id string, version int64) error {
 	st := s.storage
-	return st.FS.RemoveFile(ctx, s.db.DB, st.Objects, func(tx *sqlate.Tx) (string, error) {
+	return sdk.RemoveFile(ctx, st.FS, s.db.DB, st.Objects, func(tx *sqlate.Tx) (string, error) {
 		_, file, err := s.fileScope(ctx, tx, organizationID, id)
 		return file.ID, err
+	}, func(tx *sqlate.Tx, f blobfs.File) error {
+		return s.emitDeleted(ctx, tx, organizationID, f)
 	}, bfdata.AtVersion(version))
 }
 
 // moveFile moves the file into a directory within the same root, guarded
-// by its version. The key is untouched, so no object moves. A move refused
-// as deleting is blobfs's blobfs.DeletingError, the file's own when its
-// delete began and the directory's when a directory it reaches is
-// deleting, which data.Status tells apart.
+// by its version, and emits FileMoved in the move's transaction, its data
+// the row the update returned. The key is untouched, so no object moves. A
+// move refused as deleting is blobfs's blobfs.DeletingError, the file's
+// own when its delete began and the directory's when a directory it
+// reaches is deleting, which data.Status tells apart. A refused move
+// commits no event.
 func (s *store) moveFile(ctx context.Context, organizationID, id string, version int64, m MoveFile) (Identity, error) {
-	file, err := s.db.Transact(ctx, func(tx *sqlate.Tx) (blobfs.File, error) {
+	file, err := s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (blobfs.File, error) {
 		root, _, err := s.fileScope(ctx, tx, organizationID, id)
 		if err != nil {
 			return blobfs.File{}, err
@@ -384,8 +392,13 @@ func (s *store) moveFile(ctx context.Context, organizationID, id string, version
 		if err != nil {
 			return blobfs.File{}, err
 		}
-		return s.storage.FS.Files.Move(ctx, tx, id, dir, m.Name, version)
-	})
+		file, err := s.storage.FS.Files.Move(ctx, tx, id, dir, m.Name, version)
+		if err != nil {
+			return blobfs.File{}, err
+		}
+		FileMoved.Raise(q, file.ID, fileData(organizationID, file))
+		return file, nil
+	}))
 	return Identity{ID: file.ID, Version: file.Version}, err
 }
 

@@ -35,7 +35,7 @@ const (
 	uploadedContent = "report"
 )
 
-// protocol is the write's dependencies over the scripted driver, blobfs's
+// protocol is the staged protocols' dependencies over the scripted driver, blobfs's
 // store in the returning dialect so each of its commands is one statement,
 // and the fake object store behind the data package's adapter, started as
 // the composition root starts the real one.
@@ -44,7 +44,7 @@ type protocol struct {
 	db   *sqlate.DB
 	rec  *sqltest.Recorder
 	fake *storagetest.Fake
-	// hooked is each file the completion hook was given.
+	// hooked is each file the protocol's hook was given.
 	hooked []blobfs.File
 }
 
@@ -262,6 +262,142 @@ func TestWriteFile_ACompletionTheSweepRefused(t *testing.T) {
 			p.sameOps(t, append(want, rollback)...)
 			if p.stored(t) != c.stored {
 				t.Errorf("object stored = %t; want %t", !c.stored, c.stored)
+			}
+		})
+	}
+}
+
+// remove runs the staged delete of the file at version, picked with no
+// statement of its own unless pickErr is set, with a deleted hook that
+// records the file it is given and writes one row on the delete's
+// transaction, failing with hookErr instead when that is set. The write's
+// object is stored first, for the purge to delete.
+func (p *protocol) remove(t *testing.T, version int64, pickErr, hookErr error) error {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := p.fake.Put(ctx, key, strings.NewReader(uploadedContent), storage.PutOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	st := p.st
+	return sdk.RemoveFile(ctx, st.FS, p.db, st.Objects,
+		func(*sqlate.Tx) (string, error) { return fileID, pickErr },
+		func(tx *sqlate.Tx, f blobfs.File) error {
+			p.hooked = append(p.hooked, f)
+			if hookErr != nil {
+				return hookErr
+			}
+			_, err := tx.ExecContext(ctx, hookStatement)
+			return err
+		}, bfdata.AtVersion(version))
+}
+
+// directoryRows is the write's directory, active or deleting.
+func directoryRows(status blobfs.DirectoryStatus) sqltest.Response {
+	return datatest.DirectoryRows(blobfs.Directory{ID: dirID, Name: "reports", Status: status, Version: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()})
+}
+
+// A delete that begins runs the hook in its first transaction, after the
+// hold and Files.Delete and before the commit, with the row deleting at
+// the version the delete advanced it to; after the commit the object is
+// deleted and the row purged on the pool, with no hook.
+func TestRemoveFile_TheHookRunsInTheDeletesFirstTransaction(t *testing.T) {
+	p := newProtocol(t, exec(1), datatest.FileRows(file(blobfs.StatusDeleting, 3)), exec(1), exec(1))
+	if err := p.remove(t, 2, nil, nil); err != nil {
+		t.Fatalf("RemoveFile = %v", err)
+	}
+	if len(p.hooked) != 1 || p.hooked[0].Status != blobfs.StatusDeleting || p.hooked[0].Version != 3 {
+		t.Errorf("the hook was given %+v; want the deleting row at version 3 once", p.hooked)
+	}
+	p.sameOps(t, begin, x, q, x, commit, x)
+	calls := p.rec.Calls()
+	if hold := calls[1]; !strings.Contains(hold.SQL, "SET updated_at = updated_at") || hold.Args[1] != int64(2) {
+		t.Errorf("hold = %q %v; want the row held at version 2", hold.SQL, hold.Args)
+	}
+	if calls[3].SQL != hookStatement {
+		t.Errorf("the delete's transaction ran %q before its commit; want the hook's row", calls[3].SQL)
+	}
+	if purge := calls[5]; !strings.HasPrefix(purge.SQL, "DELETE FROM blobfs_file") {
+		t.Errorf("the last statement is %q; want the purge", purge.SQL)
+	}
+	if p.stored(t) {
+		t.Error("the deleted file's object is still stored")
+	}
+}
+
+// A hook that fails fails the delete with it: the transaction rolls back,
+// so the row is never deleting nor the hook's writes committed, and
+// nothing is purged, the object kept.
+func TestRemoveFile_AFailedHookRollsBackAndPurgesNothing(t *testing.T) {
+	p := newProtocol(t, exec(1), datatest.FileRows(file(blobfs.StatusDeleting, 3)))
+	hookErr := errors.New("the hook refused")
+	if err := p.remove(t, 2, nil, hookErr); !errors.Is(err, hookErr) {
+		t.Fatalf("RemoveFile = %v; want the hook's error", err)
+	}
+	p.sameOps(t, begin, x, q, rollback)
+	if !p.stored(t) {
+		t.Error("a delete whose hook failed deleted the object")
+	}
+}
+
+// A delete that finds the row deleting already, the hold's
+// blobfs.DeletingError whether the file's own delete began or its
+// branch's mark, is the retry: at any version, it skips the hook, the
+// first delete having run it, takes the row Files.Delete returns as it is,
+// and still finishes the purge.
+func TestRemoveFile_ARetrySkipsTheHookAndPurges(t *testing.T) {
+	for name, dir := range map[string]blobfs.DirectoryStatus{
+		"its own delete":  blobfs.DirectoryStatusActive,
+		"a marked branch": blobfs.DirectoryStatusDeleting,
+	} {
+		t.Run(name, func(t *testing.T) {
+			deleting := datatest.FileRows(file(blobfs.StatusDeleting, 3))
+			p := newProtocol(t,
+				exec(0), deleting, directoryRows(dir), // the hold matches nothing; the reads tell whose delete began
+				datatest.FileRows(), deleting, // Files.Delete's retry leaves the row as it is
+				exec(1),
+			)
+			if err := p.remove(t, 1, nil, nil); err != nil {
+				t.Fatalf("RemoveFile = %v; want the retry accepted", err)
+			}
+			if len(p.hooked) != 0 {
+				t.Errorf("the hook ran on the retry: %+v", p.hooked)
+			}
+			p.sameOps(t, begin, x, q, q, q, q, commit, x)
+			if p.stored(t) {
+				t.Error("the retried delete's object is still stored")
+			}
+		})
+	}
+}
+
+// A delete refused before it begins, by pick, by a row that is gone, or by
+// the version guard, rolls back with the hook never run, purges nothing,
+// and returns the refusal: pick's as it came.
+func TestRemoveFile_ARefusedDeleteRunsNoHook(t *testing.T) {
+	pickErr := errors.New("out of scope")
+	cases := map[string]struct {
+		responses []sqltest.Response
+		pickErr   error
+		want      error
+		ops       []sqltest.Op
+	}{
+		"pick":  {nil, pickErr, pickErr, []sqltest.Op{begin, rollback}},
+		"gone":  {[]sqltest.Response{exec(0), datatest.FileRows()}, nil, blobfs.ErrNotFound, []sqltest.Op{begin, x, q, rollback}},
+		"stale": {[]sqltest.Response{exec(0), datatest.FileRows(file(blobfs.StatusAvailable, 3))}, nil, query.ErrVersionMismatch, []sqltest.Op{begin, x, q, rollback}},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			p := newProtocol(t, c.responses...)
+			err := p.remove(t, 2, c.pickErr, nil)
+			if !errors.Is(err, c.want) || (c.pickErr != nil && err != c.pickErr) {
+				t.Fatalf("RemoveFile = %v; want %v", err, c.want)
+			}
+			if len(p.hooked) != 0 {
+				t.Errorf("the hook ran on a refused delete: %+v", p.hooked)
+			}
+			p.sameOps(t, c.ops...)
+			if !p.stored(t) {
+				t.Error("a refused delete deleted the object")
 			}
 		})
 	}

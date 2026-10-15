@@ -495,7 +495,9 @@ event commits in the activation's transaction that follows.
    awaits the marker's event, and asserts it arrived alone, since the relay publishes in commit
    order (`marker` and `onlyMarkers` in `integration/events_test.go`).
 4. **Watch it** with `mise run slab -- events watch`, which prints each event as it arrives;
-   `--from-start` replays the stream first. See [`tools/slab/README.md`](tools/slab/README.md).
+   `--from-start` replays the stream first. `mise run slab -- scenario events`, run in another
+   terminal, runs one command for each event type, so the watcher prints every payload. See
+   [`tools/slab/README.md`](tools/slab/README.md).
 
 ## Tasks
 
@@ -532,7 +534,8 @@ mise. `serve`'s full command also needs a shell that understands `/dev/tcp` (bas
 
 `mise run slab -- scenario storage` narrates the storage end to end against the running service: the
 two migration sets, the seeded logos and document tree, the validators and refusals, and a
-recursive delete waited out through the sweep.
+recursive delete waited out through the sweep. `mise run slab -- scenario events` runs a
+command for every event type, for `events watch` ([Adding an event](#adding-an-event)) to print.
 
 ## Tests
 

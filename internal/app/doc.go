@@ -8,7 +8,8 @@
 //     the two the domains see the first two through, the sql session and
 //     the files store;
 //   - telemetry.go: defineTelemetry, the trace and meter providers, which
-//     start before the connections and flush after them;
+//     start before the connections and flush after them, and the
+//     sweeper's instruments, sweep.passes and sweep.backlogged;
 //   - admin.go: defineAdmin, the quiesce gate and the schema service, and
 //     the /admin mount;
 //   - domain.go: defineDomain, the domain services, and the /api mount;

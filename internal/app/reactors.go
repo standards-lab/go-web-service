@@ -9,6 +9,7 @@ import (
 	"github.com/standards-lab/go-database/sweep"
 	"github.com/standards-lab/go-messaging"
 	msgpg "github.com/standards-lab/go-messaging/postgres"
+	"go.opentelemetry.io/otel"
 )
 
 // defineReactors defines the reactors on g into n: the entry points that
@@ -81,7 +82,11 @@ func (n *Nudge) Nudge() {
 // than an interval later. Each pass holds the gate shared, so a schema verb
 // never meets one. The dialect is Postgres, a sqlate.TryLocker, so each
 // cycle claims "sweep.<name>" (data.LockSweepPrefix) and two replicas never
-// run one reclaimer's cycle at once. It binds the nudge node to the sweeper.
+// run one reclaimer's cycle at once. Each pass is reported to the hook
+// newSweepMetrics returns (telemetry.go), which counts it and records its
+// reclaimer's backlog on the otel global meter provider, and logs a failed
+// pass at warn as go-database's default report did. It binds the nudge
+// node to the sweeper.
 //
 // Its value is a lifecycle Subsystem, ReadinessChecker, and Monitored, so
 // the Coordinator starts it, drains it, reports it, and ends the run on its
@@ -108,11 +113,22 @@ func newSweeper(n *Nodes) func(*graph.Scope) (*sweep.Sweeper, error) {
 		}
 
 		policy := sweep.Policy{Interval: cfg.Sweep.Interval.Duration(), Budget: *cfg.Sweep.Batch}
-		sw, err := sweep.New(db, []sweep.Registration{
+		regs := []sweep.Registration{
 			{Name: reclaimFiles, Reclaimer: s.Use(n.Files).FilesReclaimer(db, cfg.Sweep.StaleAge.Duration(), logger), Policy: policy},
 			{Name: reclaimOutbox, Reclaimer: outbox, Policy: policy},
 			{Name: reclaimInbox, Reclaimer: inbox, Policy: policy},
-		}, cfg.ShutdownTimeout.Duration(), logger, sweep.Gated(s.Use(n.Gate)))
+		}
+		names := make([]string, len(regs))
+		for i, r := range regs {
+			names[i] = r.Name
+		}
+		hook, err := newSweepMetrics(otel.GetMeterProvider(), logger, names)
+		if err != nil {
+			return nil, err
+		}
+
+		sw, err := sweep.New(db, regs, cfg.ShutdownTimeout.Duration(), logger,
+			sweep.Gated(s.Use(n.Gate)), sweep.OnPass(hook))
 		if err != nil {
 			return nil, err
 		}

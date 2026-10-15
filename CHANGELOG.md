@@ -57,10 +57,10 @@ accumulate under [Unreleased] until the first cut.
   The root flags `--nats`, `--nats-stream`, and `--nats-prefix` (`SLAB_NATS`,
   `SLAB_NATS_STREAM`, `SLAB_NATS_PREFIX`) default to `config.json`'s `nats` block.
 - `slab scenario events`, a narrated run of one command for each event the service publishes,
-  every type at least once and twenty events in all, each step naming the events
-  `slab events watch` prints for it in another terminal. Its organizations are named for the
-  run, so it runs twice in a row; each run leaves its first organization behind with an empty
-  document root, which no API removes, so the organization delete it shows is a second one's.
+  every type at least once and nineteen events in all, each step naming the events
+  `slab events watch` prints for it in another terminal. It ends by deleting its organization's
+  document root recursively and then the organization, so it leaves nothing behind, and its
+  names are unique to the run, so it runs twice in a row.
 - NATS 2.15 with JetStream in the compose file (`compose/nats/`, on 4222, `NATS_PORT` to move
   it), started and stopped with the `db:` and `stack:` tasks; the integration task runs it on
   4223 in its own project, and its harness reaches the stream (`integration.Subscribe`), the

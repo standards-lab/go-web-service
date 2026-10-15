@@ -63,8 +63,8 @@ const (
 // publish, and organizationEvents the organization domain's share of them,
 // which its closing note states.
 const (
-	eventsTotal        = 20
-	organizationEvents = 8
+	eventsTotal        = 19
+	organizationEvents = 7
 )
 
 // events is what the events scenario's steps hand forward: the client, the
@@ -87,8 +87,8 @@ type events struct {
 // the service publishes, against the running service, each step naming
 // the events the watcher in another terminal prints for it. It writes no
 // reset and names what it creates for the run, so it runs twice in a row
-// without a reset between; each run leaves its first organization behind,
-// with an empty document root, which no API removes. It declares the
+// without a reset between, and it ends by deleting its document root and
+// then its organization, so a run leaves nothing behind. It declares the
 // service node, which it calls, the repo node, which locates the fixtures
 // its logo steps upload, and the no color node, which decides its blocks'
 // color; it points at no trace, so it declares no grafana up.
@@ -113,7 +113,7 @@ func Events(n Nodes) scenario.Scenario {
 			{Intent: "File Delete", Action: s.deleteFile},
 			{Intent: "Empty Directory Delete", Action: s.deleteEmptyDirectory},
 			{Intent: "Branch Delete", Action: s.deleteBranch},
-			{Intent: "Last Directory Delete", Action: s.deleteLastDirectory},
+			{Intent: "Document Root Delete", Action: s.deleteDocumentRoot},
 			{Intent: "Organization Delete", Action: s.deleteOrganization},
 		},
 	}
@@ -339,12 +339,13 @@ func (s *events) deleteBranch(ctx context.Context, inv *cli.Invocation, r *scena
 	return s.deleteRecursively(ctx, inv, r, s.scratch.ID)
 }
 
-func (s *events) deleteLastDirectory(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
-	r.Note("The same recursive delete for %s, empty now, waited out. The watcher prints web-service.document.directory.deleted. The organization's root stays: no API removes it.", reportsDir)
-	return s.deleteRecursively(ctx, inv, r, s.reports.ID)
+func (s *events) deleteDocumentRoot(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
+	r.Note("The same recursive delete for the document root itself, by the %q alias, waited out. The watcher prints one web-service.document.directory.deleted, its subject the root's id: %s beneath it emits nothing, the same rule a second time. With its root gone, the organization holds no documents, and its next document write would create a new root.", document.RootAlias, reportsDir)
+	return s.deleteRecursively(ctx, inv, r, document.RootAlias)
 }
 
-// deleteRecursively deletes the directory id with recursive=true, narrated,
+// deleteRecursively deletes the directory id, or the root alias, with
+// recursive=true, narrated,
 // expects 202, and waits for the sweep to remove it through
 // document.AwaitSweep. The directory's version is read first without
 // narration: it is bookkeeping, and a read emits no event.
@@ -376,48 +377,25 @@ func (s *events) deleteRecursively(ctx context.Context, inv *cli.Invocation, r *
 	if err != nil {
 		return err
 	}
-	r.Note("The sweep removed %s within %s.", d.Name, took.Round(time.Millisecond))
+	r.Note("The sweep removed the branch within %s.", took.Round(time.Millisecond))
 	return nil
 }
 
 func (s *events) deleteOrganization(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter) error {
-	st := styleOf(s.n, inv)
 	org, err := s.find(ctx)
 	if err != nil {
 		return err
 	}
-	r.Note("The organization this run created cannot be deleted: its document root and its logo history reference it, and no API removes the root. Its delete is 409 Conflict, and a command that fails commits no event, so the watcher prints nothing for it.")
+	r.Note("Last, the organization itself, at the version it now reads at: its logo was deleted and its document root swept, so nothing references it. The watcher prints web-service.organization.deleted.")
 	headers := []httpx.Header{httpx.IfMatch(org.Version)}
-	res, err := call(ctx, r, st, s.client, http.MethodDelete, organization.Organizations+"/"+org.ID, headers, nil)
-	if err != nil {
-		return err
-	}
-	if _, err := res.Problem(http.StatusConflict); err != nil {
-		return err
-	}
-	code := "events-" + s.stamp + "-deleted"
-	r.Note("So the delete runs on a second organization made for it, %s at the root, with no documents and no logo. The watcher prints web-service.organization.created, then web-service.organization.deleted.", code)
-	body := organization.CreateOrganization{Code: code, Name: "Events " + s.stamp + " (deleted)"}
-	res, err = call(ctx, r, st, s.client, http.MethodPost, organization.Organizations, nil, body)
-	if err != nil {
-		return err
-	}
-	if err := res.Expect(http.StatusCreated); err != nil {
-		return err
-	}
-	var created organization.Identity
-	if err := res.JSON(&created); err != nil {
-		return err
-	}
-	headers = []httpx.Header{httpx.IfMatch(created.Version)}
-	res, err = call(ctx, r, st, s.client, http.MethodDelete, organization.Organizations+"/"+created.ID, headers, nil)
+	res, err := call(ctx, r, styleOf(s.n, inv), s.client, http.MethodDelete, organization.Organizations+"/"+org.ID, headers, nil)
 	if err != nil {
 		return err
 	}
 	if err := res.Expect(http.StatusNoContent); err != nil {
 		return err
 	}
-	r.Note("That is all %d events the service's commands publish: %d from the organization domain (created twice, edited, transferred, logo.uploaded twice, logo.deleted, and deleted) and %d from the document domain (directory.created four times, file.uploaded twice, directory.moved, file.moved, file.deleted, and directory.deleted three times). The run leaves events-%s behind at the root, its document root empty; a state reset (mise run slab -- admin database state --state default --confirm) clears it, and publishes web-service.database.reset.", eventsTotal, organizationEvents, eventsTotal-organizationEvents, s.stamp)
+	r.Note("That is all %d events the service's commands publish, every type at least once: %d from the organization domain (created, edited, transferred, logo.uploaded twice, logo.deleted, and deleted) and %d from the document domain (directory.created four times, file.uploaded twice, directory.moved, file.moved, file.deleted, and directory.deleted three times). The run leaves nothing behind.", eventsTotal, organizationEvents, eventsTotal-organizationEvents)
 	return nil
 }
 

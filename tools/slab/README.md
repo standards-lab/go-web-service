@@ -165,13 +165,12 @@ nothing but the repository root and the color setting.
   creates `reports` (which first creates the organization's document root, so two
   `directory.created`), `scratch`, and `empty`, uploads a file into `reports` and one into
   `scratch`, moves `empty` into `reports` as `archive`, renames the `reports` file, deletes it,
-  and deletes `archive`; it deletes `scratch` and then `reports` recursively, waiting out each
-  sweep, one `directory.deleted` each for the marked directory alone. The organization's delete
-  is a 409, since its document root and logo history reference it and no API removes the root,
-  so it creates and deletes a second run-named organization. Twenty events in all. Each run
-  leaves its first organization behind at the root with an empty document root, until a state
-  reset; its names are unique to the run, so it runs twice in a row. Needs postgres, azurite,
-  NATS, and the service, not Grafana.
+  and deletes `archive`; it deletes `scratch` and then the document root (`root`) recursively,
+  waiting out each sweep, one `directory.deleted` each for the marked directory alone, so
+  `reports` beneath the root emits nothing. Last it deletes the organization, which nothing
+  references once its logo and root are gone. Nineteen events in all, every type at least once.
+  A run leaves nothing behind, and its names are unique to the run, so it runs twice in a row.
+  Needs postgres, azurite, NATS, and the service, not Grafana.
 
 Two of the nodes are needs, each checked when the run starts, before any step:
 

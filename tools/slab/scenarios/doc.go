@@ -16,9 +16,8 @@
 // the run, so it runs twice in a row without a reset between. The events
 // scenario sends one command for each event the service publishes, each
 // step naming the events "slab events watch" prints for it in another
-// terminal; it too names what it creates for the run, and leaves its
-// first organization behind with an empty document root, which no API
-// removes.
+// terminal; it too names what it creates for the run, and ends by deleting
+// its organization's document root and then the organization.
 //
 // The four scenarios against the running service declare the service
 // node, whose value is a [Service]; the two that point at traces declare

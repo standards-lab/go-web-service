@@ -23,31 +23,30 @@ import (
 // the service does, a problem document for every refusal, and logs the
 // event type each successful command would publish under the README's
 // Messaging rules, so a test can check that the scenario's sequence makes
-// the events its narration names. fault names one request line ("METHOD
-// path") the fake answers 500 instead, and deletable lets an organization
-// with documents or a logo history be deleted, for the unexpected-response
+// the events its narration names. A recursive delete of the root alias
+// marks the root, and its sweep removes it, so the organization holds no
+// documents until its next write; an organization with a root or an
+// active logo refuses its delete with 409. fault names one request line
+// ("METHOD path") the fake answers 500 instead, for the unexpected-response
 // tests.
 type eventsFake struct {
-	mu        sync.Mutex
-	orgs      map[string]*eventsOrg
-	nodes     map[string]*fakeNode
-	deleting  map[string]int
-	serial    int
-	requests  []string
-	emitted   []string
-	fault     string
-	deletable bool
-	err       error
+	mu       sync.Mutex
+	orgs     map[string]*eventsOrg
+	nodes    map[string]*fakeNode
+	deleting map[string]int
+	serial   int
+	requests []string
+	emitted  []string
+	fault    string
+	err      error
 }
 
 // eventsOrg is one organization the fake holds: its row, its document
-// root's id once a document write created it, and whether it ever had a
-// logo, whose history references it as the root does.
+// root's id while it has one, and its active logo.
 type eventsOrg struct {
-	row     organization.Organization
-	root    string
-	logo    []byte
-	hadLogo bool
+	row  organization.Organization
+	root string
+	logo []byte
 }
 
 func newEventsFake() *eventsFake {
@@ -177,7 +176,7 @@ func (f *eventsFake) serveOrg(w http.ResponseWriter, r *http.Request, o *eventsO
 		if !storageIfMatch(w, r, o.row.Version) {
 			return
 		}
-		if !f.deletable && (o.root != "" || o.hadLogo) {
+		if o.root != "" || o.logo != nil {
 			writeProblem(w, http.StatusConflict, "the request conflicts with the current state")
 			return
 		}
@@ -194,7 +193,7 @@ func (f *eventsFake) serveOrg(w http.ResponseWriter, r *http.Request, o *eventsO
 			writeProblem(w, http.StatusUnsupportedMediaType, "")
 			return
 		}
-		o.logo, o.hadLogo = body, true
+		o.logo = body
 		f.emit("organization.logo.uploaded")
 		writeJSON(w, http.StatusCreated, map[string]string{"id": f.newID()})
 	case len(rest) == 1 && rest[0] == "logo" && r.Method == http.MethodDelete:
@@ -286,13 +285,20 @@ func (f *eventsFake) serveDirectory(w http.ResponseWriter, r *http.Request, o *e
 		if left, ok := f.deleting[n.id]; ok {
 			if left == 0 {
 				f.sweep(n.id)
+				if o.root == n.id {
+					o.root = ""
+				}
 				writeProblem(w, http.StatusNotFound, "")
 				return
 			}
 			f.deleting[n.id] = left - 1
 		}
-		parent := n.parent
-		writeJSON(w, http.StatusOK, document.Directory{ID: n.id, ParentID: &parent, Name: n.name, Status: n.status, Version: n.version})
+		d := document.Directory{ID: n.id, Name: n.name, Status: n.status, Version: n.version}
+		if n.parent != "" {
+			parent := n.parent
+			d.ParentID = &parent
+		}
+		writeJSON(w, http.StatusOK, d)
 	case len(rest) == 0 && r.Method == http.MethodDelete:
 		if !storageIfMatch(w, r, n.version) {
 			return
@@ -301,7 +307,9 @@ func (f *eventsFake) serveDirectory(w http.ResponseWriter, r *http.Request, o *e
 			n.status, n.version = document.DirectoryDeleting, n.version+1
 			f.deleting[n.id] = sweepReads
 			f.emit("document.directory.deleted")
-			w.Header().Set("Location", r.URL.Path)
+			// The Location names the marked directory by its id, the root's
+			// too, as the service's does.
+			w.Header().Set("Location", document.Documents+"/"+o.row.ID+"/directories/"+n.id)
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
@@ -421,12 +429,12 @@ var eventsSteps = []string{
 	"[4/16] Logo Upload", "[5/16] Logo Replacement", "[6/16] Logo Delete",
 	"[7/16] First Directory", "[8/16] More Directories", "[9/16] File Uploads",
 	"[10/16] Directory Move", "[11/16] File Move", "[12/16] File Delete",
-	"[13/16] Empty Directory Delete", "[14/16] Branch Delete", "[15/16] Last Directory Delete",
+	"[13/16] Empty Directory Delete", "[14/16] Branch Delete", "[15/16] Document Root Delete",
 	"[16/16] Organization Delete",
 }
 
 // eventsByStep is the event types each step's commands publish under the
-// README's rules, in order: the twenty the scenario makes in all.
+// README's rules, in order: the nineteen the scenario makes in all.
 var eventsByStep = [][]string{
 	{"organization.created"},
 	{"organization.edited"},
@@ -443,7 +451,7 @@ var eventsByStep = [][]string{
 	{"document.directory.deleted"},
 	{"document.directory.deleted"},
 	{"document.directory.deleted"},
-	{"organization.created", "organization.deleted"},
+	{"organization.deleted"},
 }
 
 // The events scenario builds the service node, with the base setting it
@@ -465,7 +473,7 @@ func TestScenario_EventsRunsSixteenStepsInOrder(t *testing.T) {
 }
 
 // The scenario's commands make every event type the service publishes, in
-// the order and number its steps name, twenty in all.
+// the order and number its steps name, nineteen in all.
 func TestScenario_EventsMakesEveryEventTypeInOrder(t *testing.T) {
 	fake := newEventsFake()
 	runEventsOK(t, fake)
@@ -478,8 +486,8 @@ func TestScenario_EventsMakesEveryEventTypeInOrder(t *testing.T) {
 	if !slices.Equal(fake.emitted, want) {
 		t.Errorf("the run made the events\n%s\nwant\n%s", strings.Join(fake.emitted, "\n"), strings.Join(want, "\n"))
 	}
-	if got := len(fake.emitted); got != 20 {
-		t.Errorf("the run made %d events, want the twenty the closing note states", got)
+	if got := len(fake.emitted); got != 19 {
+		t.Errorf("the run made %d events, want the nineteen the closing note states", got)
 	}
 	types := slices.Clone(fake.emitted)
 	slices.Sort(types)
@@ -505,15 +513,15 @@ func TestScenario_EventsNamesEachStepsEvents(t *testing.T) {
 }
 
 // The first step tells the reader to start the watcher, by the command the
-// README gives, and the last says the run's first organization stays.
-func TestScenario_EventsOpensWithTheWatcherAndClosesWithWhatItLeaves(t *testing.T) {
+// README gives, and the last deletes the organization and tallies the run.
+func TestScenario_EventsOpensWithTheWatcherAndClosesWithTheTally(t *testing.T) {
 	out := runEventsOK(t, newEventsFake())
 	first := strings.Join(strings.Fields(step(t, out, "[1/16]")), " ")
 	if !strings.Contains(first, `Run "mise run slab -- events watch" in another terminal first`) {
 		t.Errorf("the first step does not open with the watcher:\n%s", first)
 	}
 	last := strings.Join(strings.Fields(step(t, out, "[16/16]")), " ")
-	for _, want := range []string{"HTTP 409 Conflict", "That is all 20 events", "behind at the root, its document root empty"} {
+	for _, want := range []string{"HTTP 204 No Content", "That is all 19 events", "The run leaves nothing behind."} {
 		if !strings.Contains(last, want) {
 			t.Errorf("the last step lacks %q:\n%s", want, last)
 		}
@@ -531,26 +539,26 @@ func TestScenario_EventsUploadsTwoFixturesSummarized(t *testing.T) {
 	}
 }
 
-// Every name the run creates is its own, so a second run against the same
-// fake, which refuses a taken code, succeeds, and leaves a second
-// organization behind beside the first.
+// Every name the run creates is its own, and the run deletes what it
+// creates, so a second run against the same fake, which refuses a taken
+// code, succeeds, and the two leave only acme.
 func TestScenario_EventsRunsTwiceAgainstTheSameFake(t *testing.T) {
 	fake := newEventsFake()
 	for run := 1; run <= 2; run++ {
 		t.Logf("run %d", run)
 		runEventsOK(t, fake)
 	}
-	if got := len(fake.orgs); got != 3 {
-		t.Errorf("the runs left %d organizations, want acme and one per run", got)
+	if got := len(fake.orgs); got != 1 {
+		t.Errorf("the runs left %d organizations, want acme alone", got)
 	}
-	if got := len(fake.emitted); got != 40 {
-		t.Errorf("the runs made %d events, want twenty each", got)
+	if got := len(fake.emitted); got != 38 {
+		t.Errorf("the runs made %d events, want nineteen each", got)
 	}
 }
 
 // A run fails at the step whose response is not the one it expects, naming
-// the step, and goes no further: an unexpected status, and an organization
-// delete the service does not refuse.
+// the step, and goes no further: a failed logo delete, and a failed
+// organization delete.
 func TestScenario_EventsFailsNamingTheStep(t *testing.T) {
 	for name, tc := range map[string]struct {
 		setup func(*eventsFake)
@@ -564,9 +572,11 @@ func TestScenario_EventsFailsNamingTheStep(t *testing.T) {
 			},
 			"slab scenario events: step 6 (Logo Delete): status = 500", "[7/16]",
 		},
-		"an organization delete not refused": {
-			func(f *eventsFake) { f.deletable = true },
-			"slab scenario events: step 16 (Organization Delete): status = 204", "That is all",
+		"a failed organization delete": {
+			func(f *eventsFake) {
+				f.fault = http.MethodDelete + " " + organization.Organizations + "/00000000-0000-7000-8000-000000000001"
+			},
+			"slab scenario events: step 16 (Organization Delete): status = 500", "That is all",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -591,7 +601,7 @@ func TestScenario_EventsFailsNamingTheStep(t *testing.T) {
 
 // The recursive deletes wait out the sweep, which the fake runs after
 // sweepReads reads of the marked directory, so each read is sent and the
-// branch with its file is gone.
+// scratch branch with its file, then the root with reports, are gone.
 func TestScenario_EventsWaitsOutEachSweep(t *testing.T) {
 	fake := newEventsFake()
 	out := runEventsOK(t, fake)
@@ -601,11 +611,6 @@ func TestScenario_EventsWaitsOutEachSweep(t *testing.T) {
 		}
 	}
 	for _, n := range fake.nodes {
-		if n.parent != "" {
-			t.Errorf("the run left %s under the root", n.name)
-		}
-	}
-	if got := len(fake.nodes); got != 1 {
-		t.Errorf("the run left %d document nodes, want the root alone", got)
+		t.Errorf("the run left the document entry %q", n.name)
 	}
 }

@@ -345,10 +345,9 @@ func (s *events) deleteDocumentRoot(ctx context.Context, inv *cli.Invocation, r 
 }
 
 // deleteRecursively deletes the directory id, or the root alias, with
-// recursive=true, narrated,
-// expects 202, and waits for the sweep to remove it through
-// document.AwaitSweep. The directory's version is read first without
-// narration: it is bookkeeping, and a read emits no event.
+// recursive=true, narrated, expects 202, and waits for the sweep to remove
+// it through document.AwaitSweep. The directory's version is read first
+// without narration: it is bookkeeping, and a read emits no event.
 func (s *events) deleteRecursively(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter, id string) error {
 	res, err := s.client.Get(ctx, directoryRoute(s.org.ID, id))
 	if err != nil {

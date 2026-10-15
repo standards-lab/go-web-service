@@ -122,8 +122,19 @@ func (f *eventsFake) route(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// createOrg validates the code and refuses one a sibling carries, as the
-// unique constraint does.
+// taken reports whether an organization other than except carries code
+// under parent, which the unique constraint on (parent_id, code), nulls not
+// distinct, refuses on every write: a create, an edit, and a transfer.
+func (f *eventsFake) taken(code string, parent *string, except string) bool {
+	for _, o := range f.orgs {
+		if o.row.ID != except && o.row.Code == code && sameParent(o.row.ParentID, parent) {
+			return true
+		}
+	}
+	return false
+}
+
+// createOrg validates the code and refuses one a sibling carries.
 func (f *eventsFake) createOrg(w http.ResponseWriter, r *http.Request) {
 	var body organization.CreateOrganization
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -134,11 +145,9 @@ func (f *eventsFake) createOrg(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadRequest, "")
 		return
 	}
-	for _, o := range f.orgs {
-		if o.row.Code == body.Code && sameParent(o.row.ParentID, body.ParentID) {
-			writeProblem(w, http.StatusConflict, "")
-			return
-		}
+	if f.taken(body.Code, body.ParentID, "") {
+		writeProblem(w, http.StatusConflict, "")
+		return
 	}
 	o := &eventsOrg{row: organization.Organization{ID: f.newID(), ParentID: body.ParentID, Code: body.Code, Name: body.Name, Version: 1}}
 	f.orgs[o.row.ID] = o
@@ -156,6 +165,10 @@ func (f *eventsFake) serveOrg(w http.ResponseWriter, r *http.Request, o *eventsO
 			f.fail(w, r)
 			return
 		}
+		if f.taken(body.Code, o.row.ParentID, o.row.ID) {
+			writeProblem(w, http.StatusConflict, "")
+			return
+		}
 		if storageIfMatch(w, r, o.row.Version) {
 			o.row.Code, o.row.Name, o.row.Version = body.Code, body.Name, o.row.Version+1
 			f.emit("organization.edited")
@@ -165,6 +178,10 @@ func (f *eventsFake) serveOrg(w http.ResponseWriter, r *http.Request, o *eventsO
 		var body organization.TransferOrganization
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			f.fail(w, r)
+			return
+		}
+		if f.taken(o.row.Code, body.ParentID, o.row.ID) {
+			writeProblem(w, http.StatusConflict, "")
 			return
 		}
 		if storageIfMatch(w, r, o.row.Version) {
@@ -539,21 +556,38 @@ func TestScenario_EventsUploadsTwoFixturesSummarized(t *testing.T) {
 	}
 }
 
-// Every name the run creates is its own, and the run deletes what it
-// creates, so a second run against the same fake, which refuses a taken
-// code, succeeds, and the two leave only acme.
+// A run deletes what it creates, so two complete runs against the same
+// fake leave acme alone. Every name it creates is its own, so a run after
+// one that failed before its organization's delete succeeds against the
+// same fake, which refuses a code a sibling carries, at the root as under
+// acme.
 func TestScenario_EventsRunsTwiceAgainstTheSameFake(t *testing.T) {
-	fake := newEventsFake()
-	for run := 1; run <= 2; run++ {
-		t.Logf("run %d", run)
+	t.Run("after a complete run", func(t *testing.T) {
+		fake := newEventsFake()
+		for run := 1; run <= 2; run++ {
+			t.Logf("run %d", run)
+			runEventsOK(t, fake)
+		}
+		if got := len(fake.orgs); got != 1 {
+			t.Errorf("the runs left %d organizations, want acme alone", got)
+		}
+		if got := len(fake.emitted); got != 38 {
+			t.Errorf("the runs made %d events, want nineteen each", got)
+		}
+	})
+	t.Run("after a run that left its organization", func(t *testing.T) {
+		fake := newEventsFake()
+		// The first run's organization is the first id the fake mints.
+		fake.fault = http.MethodDelete + " " + organization.Organizations + "/00000000-0000-7000-8000-000000000001"
+		if r := runEventsScenario(t, fake); r.code != process.ExitFailure {
+			t.Fatalf("the first run's code = %d, want %d; stderr = %q", r.code, process.ExitFailure, r.stderr)
+		}
+		fake.fault = ""
 		runEventsOK(t, fake)
-	}
-	if got := len(fake.orgs); got != 1 {
-		t.Errorf("the runs left %d organizations, want acme alone", got)
-	}
-	if got := len(fake.emitted); got != 38 {
-		t.Errorf("the runs made %d events, want nineteen each", got)
-	}
+		if got := len(fake.orgs); got != 2 {
+			t.Errorf("the runs left %d organizations, want acme and the first run's", got)
+		}
+	})
 }
 
 // A run fails at the step whose response is not the one it expects, naming

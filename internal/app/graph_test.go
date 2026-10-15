@@ -17,6 +17,7 @@ import (
 	libconfig "github.com/standards-lab/go-core/config"
 	"github.com/standards-lab/go-core/graph"
 	"github.com/standards-lab/go-core/lifecycle"
+	"github.com/standards-lab/go-core/process/processtest"
 	"github.com/standards-lab/go-web-sdk"
 
 	"github.com/standards-lab/go-web-service/internal/app"
@@ -319,7 +320,7 @@ func TestGraph_RelayHeldOffByTheGate(t *testing.T) {
 func TestGraph_SweeperCancelsWithinTheShutdownTimeout(t *testing.T) {
 	cfg := configtest.Config(t)
 	cfg.ShutdownTimeout = libconfig.Duration(200 * time.Millisecond)
-	port := silentPort(t)
+	port, dialled := silentPort(t)
 	cfg.Database.Port = &port
 	a := app.New(cfg, io.Discard)
 	n := a.Nodes()
@@ -332,18 +333,13 @@ func TestGraph_SweeperCancelsWithinTheShutdownTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Every reclaimer is due at start, so the files cycle begins at once
-	// and its claim dials the silent database; the pause lets it reach the
-	// dial before the drain begins. A pause that fell short would leave no
-	// cycle in flight, and the drain's nil fails the test rather than
-	// passing it.
-	deadline := time.Now().Add(5 * time.Second)
-	for !sweeper.Ready() {
-		if time.Now().After(deadline) {
-			t.Fatal("the sweeper never became ready")
-		}
-		time.Sleep(time.Millisecond)
+	// and its claim dials the silent database: once the dial is accepted,
+	// the cycle is in flight, waiting on an answer that never comes.
+	select {
+	case <-dialled:
+	case <-time.After(failsafe):
+		t.Fatal("the sweeper's claim never dialled the database")
 	}
-	time.Sleep(20 * time.Millisecond)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -355,13 +351,16 @@ func TestGraph_SweeperCancelsWithinTheShutdownTimeout(t *testing.T) {
 
 // silentPort listens on a loopback port that accepts each connection and
 // never answers it, so a client's handshake waits until its context ends.
-// The listener and its connections close at cleanup.
-func silentPort(t *testing.T) int {
+// The channel is closed once the first connection is accepted. The
+// listener and its connections close at cleanup.
+func silentPort(t *testing.T) (int, <-chan struct{}) {
 	t.Helper()
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
+	accepted := make(chan struct{})
+	first := sync.OnceFunc(func() { close(accepted) })
 	var mu sync.Mutex
 	var conns []net.Conn
 	go func() {
@@ -373,6 +372,7 @@ func silentPort(t *testing.T) int {
 			mu.Lock()
 			conns = append(conns, c)
 			mu.Unlock()
+			first()
 		}
 	}()
 	t.Cleanup(func() {
@@ -383,16 +383,53 @@ func silentPort(t *testing.T) int {
 			_ = c.Close()
 		}
 	})
+	return lis.Addr().(*net.TCPAddr).Port, accepted
+}
+
+// closingPort listens on a loopback port that closes each connection as it
+// accepts it, so a client's handshake fails at once. The listener closes at
+// cleanup.
+func closingPort(t *testing.T) int {
+	t.Helper()
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	go func() {
+		for {
+			c, err := lis.Accept()
+			if err != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+	t.Cleanup(func() { _ = lis.Close() })
 	return lis.Addr().(*net.TCPAddr).Port
 }
 
+// claimFailures counts the sweeper's records, in log, of a failed claim of
+// the lock of the reclaimer named.
+func claimFailures(log, reclaimer string) int {
+	re := regexp.MustCompile(`sweep claim failed.*reclaimer\W+` + regexp.QuoteMeta(reclaimer) + `\b`)
+	return len(re.FindAllStringIndex(log, -1))
+}
+
 // The nudge the document layer gives after each branch it marks reaches
-// the sweeper's files reclaimer: in the graph Run builds, the nudge node is
-// bound to the sweeper, which panics on a nudge of a name it was not built
-// with, so a nudge that reached no reclaimer, or the wrong one, fails here.
-// Unbound, as in a graph built without the sweeper, a nudge does nothing.
+// the sweeper's files reclaimer and no other. The database closes every
+// connection, so each cycle's claim fails and is logged under its
+// reclaimer's name; with an interval of an hour, a cycle after the start's
+// runs only on a nudge. The nudge node the document layer is built with
+// then earns the files reclaimer, alone, a second cycle: a nudge left
+// unbound, or bound to another reclaimer, never logs one. Unbound, as in a
+// graph built without the sweeper, a nudge does nothing and never panics.
 func TestGraph_TheDocumentNudgeReachesTheFilesReclaimer(t *testing.T) {
-	a := app.New(configtest.Config(t), io.Discard)
+	cfg := configtest.Config(t)
+	cfg.Sweep.Interval = libconfig.Duration(time.Hour)
+	port := closingPort(t)
+	cfg.Database.Port = &port
+	log := &syncBuffer{}
+	a := app.New(cfg, log)
 	n := a.Nodes()
 
 	alone, err := a.Graph().Build(n.Document)
@@ -401,17 +438,33 @@ func TestGraph_TheDocumentNudgeReachesTheFilesReclaimer(t *testing.T) {
 	}
 	alone.Get(n.Nudge).Nudge()
 
-	sys := buildAsRun(t, a)
-	if layerOf(sys, n.Nudge.Name()) >= layerOf(sys, n.Document.Name()) {
-		t.Errorf("nudge in layer %d, document in layer %d; want the nudge beneath the document it serves",
-			layerOf(sys, n.Nudge.Name()), layerOf(sys, n.Document.Name()))
+	sys, err := a.Graph().Build(n.Document, n.Sweeper)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
 	}
-	defer func() {
-		if r := recover(); r != nil {
-			t.Errorf("the nudge panicked, reaching no registered reclaimer: %v", r)
+	sweeper := sys.Get(n.Sweeper)
+	if err := sweeper.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := sweeper.Shutdown(ctx); err != nil {
+			t.Errorf("Shutdown = %v", err)
 		}
-	}()
+	})
+	// The start's cycles run in the list's order, inbox last.
+	processtest.WaitFor(t, "the start's cycles", func() bool {
+		return claimFailures(log.String(), "inbox") == 1
+	})
+
 	sys.Get(n.Nudge).Nudge()
+	processtest.WaitFor(t, "the nudged files cycle", func() bool {
+		return claimFailures(log.String(), "files") == 2
+	})
+	if o, i := claimFailures(log.String(), "outbox"), claimFailures(log.String(), "inbox"); o != 1 || i != 1 {
+		t.Errorf("outbox and inbox cycles = %d and %d, want the start's alone:\n%s", o, i, log)
+	}
 }
 
 // The sweeper registers the three reclaimers the service runs, files,

@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"time"
 
 	"github.com/standards-lab/go-core/event"
 	"github.com/standards-lab/go-core/graph"
@@ -13,6 +12,7 @@ import (
 	"github.com/standards-lab/go-core/reactor"
 	"github.com/standards-lab/go-database"
 	"github.com/standards-lab/go-database/admin"
+	"github.com/standards-lab/go-database/sweep"
 	"github.com/standards-lab/go-messaging"
 	"github.com/standards-lab/go-messaging/nats"
 	"github.com/standards-lab/go-storage"
@@ -64,8 +64,8 @@ type Nodes struct {
 	Document     *graph.Node[*document.Service]     // "document"
 
 	// Reactors (reactors.go).
-	Wake    *graph.Node[*Wake]                         // "wake"
-	Sweeper *graph.Node[*reactor.Reactor[time.Time]]   // "sweeper"
+	Nudge   *graph.Node[*Nudge]                        // "nudge"
+	Sweeper *graph.Node[*sweep.Sweeper]                // "sweeper"
 	Runtime *graph.Node[*messaging.Runtime]            // "runtime"
 	Relay   *graph.Node[*reactor.Reactor[event.Event]] // "relay"
 

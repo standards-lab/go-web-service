@@ -6,27 +6,38 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/standards-lab/go-core/process/processtest"
+	"github.com/standards-lab/go-database/sweep"
 	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-web-sdk/webtest"
+	pgdialect "github.com/standards-lab/sqlate/postgres"
 
+	"github.com/standards-lab/go-web-service/data"
 	"github.com/standards-lab/go-web-service/integration"
 )
 
-// refusedRecord is the sweep reactor's record of a pass that returned
-// refusals, as the JSON log carries it.
-const refusedRecord = `"msg":"sweep pass refused"`
+// refusedRecord is the sweeper's record of a files pass that returned
+// refusals, as the JSON log carries it: go-database's default report of a
+// pass's error, at warn.
+var refusedRecord = regexp.MustCompile(`"msg":"sweep pass failed".*"reclaimer":"files"`)
 
-// The sweep reactor removes what a recursive delete marks, through the
-// real API and the real stores. The service sweeps in passes of two
-// records, so one wake runs several passes while each reports More, and
-// its object store is relayed through a forwarder a case severs to have
-// the sweep refused. Every wake here is the delete's own nudge, or a
+// refused counts the refused files passes in a process's output.
+func refused(output string) int { return len(refusedRecord.FindAllStringIndex(output, -1)) }
+
+// The sweeper's files reclaimer removes what a recursive delete marks,
+// through the real API and the real stores. The service sweeps in passes of
+// two records, so one cycle runs several passes while each reports More,
+// and its object store is relayed through a forwarder a case severs to have
+// the sweep refused. Every cycle here is the delete's own nudge, or a
 // repeated delete's, never the interval.
 func TestDocumentSweep(t *testing.T) {
 	f := processtest.Forward(t, integration.StorageAddr())
@@ -96,7 +107,7 @@ func TestDocumentSweep(t *testing.T) {
 			}
 		}
 
-		// Seven records in passes of two: one wake finishes them in four.
+		// Seven records in passes of two: one cycle finishes them in four.
 		markBranch(t, c, docs, reports.ID)
 		paths := []string{docs + "/directories/" + reports.ID, docs + "/directories/" + archive.ID, docs + "/directories/" + old.ID}
 		for _, k := range keys {
@@ -119,7 +130,7 @@ func TestDocumentSweep(t *testing.T) {
 		reports := mkdir(t, docs, "root", "reports")
 		archive := mkdir(t, docs, reports.ID, "archive")
 		key := put(t, docs, reports.ID, "q3.txt")
-		refusals := strings.Count(s.Output(), refusedRecord)
+		refusals := refused(s.Output())
 
 		// The store severed, the pass the mark nudges is refused q3's
 		// object: the refusal is logged, not a failure, so the service
@@ -134,7 +145,7 @@ func TestDocumentSweep(t *testing.T) {
 		})
 		markBranch(t, c, docs, reports.ID)
 		s.Await(t, "the sweep's refusal logged", func() bool {
-			return strings.Count(s.Output(), refusedRecord) > refusals
+			return refused(s.Output()) > refusals
 		})
 		c.Get(t, "/healthz").Expect(t, http.StatusOK)
 		if d := webtest.Decode[directory](t, c.Get(t, docs+"/directories/"+reports.ID), http.StatusOK); d.Status != "deleting" {
@@ -174,11 +185,11 @@ func TestDocumentSweep(t *testing.T) {
 }
 
 // A branch a process marked but never swept is swept at the next
-// process's start, not an interval later: the sweep's wake is nudged at
-// construction. The first process marks the branch with its object store
+// process's start, not an interval later: every reclaimer is due at the
+// sweeper's start. The first process marks the branch with its object store
 // severed, so its sweep is refused and leaves the branch deleting, and
 // stops. The second starts with the store back and an interval of an
-// hour, so only the startup wake can sweep the branch within the wait.
+// hour, so only the startup cycle can sweep the branch within the wait.
 func TestSweepAtStartup(t *testing.T) {
 	f := processtest.Forward(t, integration.StorageAddr())
 	opts := integration.Options{
@@ -193,7 +204,7 @@ func TestSweepAtStartup(t *testing.T) {
 	reports := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)
 	file := webtest.Decode[identity](t, c.Post(t, docs+"/directories/"+reports.ID+"/files?name=q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("q3")}), http.StatusCreated)
 	key := file.ID + "/q3.txt"
-	refusals := strings.Count(first.Output(), refusedRecord)
+	refusals := refused(first.Output())
 
 	f.Sever()
 	restored := false
@@ -204,7 +215,7 @@ func TestSweepAtStartup(t *testing.T) {
 	})
 	markBranch(t, c, docs, reports.ID)
 	first.Await(t, "the sweep's refusal logged", func() bool {
-		return strings.Count(first.Output(), refusedRecord) > refusals
+		return refused(first.Output()) > refusals
 	})
 	if code := first.Stop(t); code != 0 {
 		t.Fatalf("first process exit = %d:\n%s", code, first.Output())
@@ -240,7 +251,7 @@ func TestSweepUnderReset(t *testing.T) {
 		Env:  []string{"APP_SWEEP_BATCH=5", "APP_RATE_LIMIT_REQUESTS=100000"},
 	})
 	c := s.Client()
-	refusals := strings.Count(s.Output(), refusedRecord)
+	refusals := refused(s.Output())
 	for round := range 15 {
 		integration.Reset(t, c, integration.Default)
 		docs := "/api/documents/" + tree(t, c)[docsOrg].ID
@@ -253,7 +264,110 @@ func TestSweepUnderReset(t *testing.T) {
 		// The reset under test: Reset fails the round on anything but 200.
 		integration.Reset(t, c, integration.Default)
 	}
-	if n := strings.Count(s.Output(), refusedRecord) - refusals; n != 0 {
+	if n := refused(s.Output()) - refusals; n != 0 {
 		t.Errorf("%d sweep passes were refused across the resets; want none to run under one", n)
+	}
+}
+
+// holding is a reclaimer that records its passes: each pass counts itself,
+// waits until hold is closed, and notes any pass of another holding
+// reclaimer on the same active count that ran at the same time.
+type holding struct {
+	hold    <-chan struct{}
+	active  *atomic.Int32
+	overlap *atomic.Bool
+	passes  atomic.Int32
+}
+
+func (r *holding) Pass(ctx context.Context, _ int) (bool, error) {
+	if r.active.Add(1) > 1 {
+		r.overlap.Store(true)
+	}
+	defer r.active.Add(-1)
+	r.passes.Add(1)
+	select {
+	case <-r.hold:
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+	// Long enough for a pass of the other replica's, were it unclaimed,
+	// to land inside this one.
+	time.Sleep(5 * time.Millisecond)
+	return false, nil
+}
+
+// Two replicas on one database never run the files reclaimer's cycle at
+// once: each sweeper, as the service builds it on Postgres, claims
+// "sweep.files" (the lock registry's data.LockSweepPrefix) for its cycle,
+// and a replica that finds the claim held runs no pass. The first
+// sweeper's pass holds until the test releases it; while it does, the
+// second, nudged every tick, runs none, and a third session is refused the
+// lock. Released, the second takes its turn, and the two then cycle on a
+// short interval with no pass of one inside a pass of the other. Each
+// sweeper has its own pool, as each replica would.
+func TestSweepClaimAcrossReplicas(t *testing.T) {
+	const interval = 50 * time.Millisecond
+	var active atomic.Int32
+	var overlap atomic.Bool
+	holdFirst := make(chan struct{})
+	released := make(chan struct{})
+	close(released)
+	first := &holding{hold: holdFirst, active: &active, overlap: &overlap}
+	second := &holding{hold: released, active: &active, overlap: &overlap}
+
+	// Each shutdown releases the first's pass first, so a failed assertion
+	// leaves no pass holding the drain.
+	releaseFirst := sync.OnceFunc(func() { close(holdFirst) })
+	start := func(r sweep.Reclaimer) *sweep.Sweeper {
+		t.Helper()
+		sw, err := sweep.New(integration.Database(t), []sweep.Registration{
+			{Name: "files", Reclaimer: r, Policy: sweep.Policy{Interval: interval, Budget: 1}},
+		}, 10*time.Second, slog.New(slog.DiscardHandler))
+		if err != nil {
+			t.Fatalf("sweep.New: %v", err)
+		}
+		if err := sw.Start(context.Background()); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		t.Cleanup(func() {
+			releaseFirst()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := sw.Shutdown(ctx); err != nil {
+				t.Errorf("Shutdown: %v", err)
+			}
+		})
+		return sw
+	}
+	start(first)
+	processtest.WaitFor(t, "the first replica's pass", func() bool { return first.passes.Load() > 0 })
+
+	other := start(second)
+	for range 10 {
+		other.Nudge("files")
+		time.Sleep(interval)
+	}
+	if n := second.passes.Load(); n != 0 {
+		t.Fatalf("the second replica ran %d passes while the first held the claim; want none", n)
+	}
+	ctx := context.Background()
+	conn, err := integration.Database(t).Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	took, err := pgdialect.Dialect{}.TryLock(ctx, conn, data.LockSweepPrefix+"files")
+	_ = conn.Close()
+	if err != nil || took {
+		t.Fatalf("a third session's TryLock of the claim = (%v, %v); want it refused while the first holds it", took, err)
+	}
+
+	releaseFirst()
+	processtest.WaitFor(t, "the second replica's pass", func() bool { return second.passes.Load() > 0 })
+	for range 10 {
+		other.Nudge("files")
+		time.Sleep(interval)
+	}
+	if overlap.Load() {
+		t.Error("a pass of one replica ran inside a pass of the other")
 	}
 }

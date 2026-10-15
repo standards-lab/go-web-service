@@ -6,73 +6,47 @@ import (
 	"time"
 
 	bfdata "github.com/standards-lab/blobfs/data"
-	"github.com/standards-lab/go-core/reactor"
 	"github.com/standards-lab/sqlate"
 )
 
-// sweepPass is one bounded pass of blobfs's sweep with the service's
-// options, the unit bfdata.SweepUntilDone repeats.
-type sweepPass func(ctx context.Context) (bfdata.SweepResult, error)
-
-// SweepGate is what the worker asks of the process before each pass: its
-// turn while no schema change runs. Shared waits out a schema change that
-// holds the gate or waits for it and returns the release, or returns ctx's
-// error, holding nothing, if ctx ends first. The composition root injects
-// the process's quiesce gate, which the database admin domain holds
-// exclusively around every verb that changes the schema; its SchemaGate
-// says why a pass must not run under one.
-type SweepGate interface {
-	Shared(ctx context.Context) (release func(), err error)
+// FilesReclaimer is blobfs's sweep as one reclaimer of go-database's
+// general sweeper (package sweep), which it satisfies structurally: each
+// Pass is one bounded pass of the store's sweep over the database and the
+// object store, finishing what a recursive delete marked and reclaiming
+// the stale file rows. The sweeper decides when a pass runs, holds the
+// process's quiesce gate around it, and claims the reclaimer's lock; the
+// reclaimer owns only the pass and its counts.
+type FilesReclaimer struct {
+	storage  *Storage
+	db       *sqlate.DB
+	staleAge time.Duration
+	logger   *slog.Logger
 }
 
-// SweepWorker returns the sweep as a reactor's Func: on each wake it runs
-// blobfs's sweep over db and the object store with opts, in passes while a
-// pass reports More, each pass holding gate shared and logged to logger.
-// Once the reactor's drain begins (reactor.Draining) it runs no further pass,
-// so a backlog never holds a drain; the next start's wake finds the rest.
+// FilesReclaimer returns blobfs's sweep over db and the object store as a
+// reclaimer, each pass reclaiming the pending and deleting file rows older
+// than staleAge (blobfs's StaleOlderThan) and logging its counts to logger.
+func (s *Storage) FilesReclaimer(db *sqlate.DB, staleAge time.Duration, logger *slog.Logger) *FilesReclaimer {
+	return &FilesReclaimer{storage: s, db: db, staleAge: staleAge, logger: logger}
+}
+
+// Pass runs one pass of blobfs's sweep handling at most budget records
+// (blobfs's Batch), and reports the pass's More and its error, which
+// gathers the refusals the pass met. Every step of the sweep is idempotent
+// and its work is found in the database, so a refused record is left for a
+// later pass, and the sweeper reports the error at warn.
 //
-// A pass's error never fails the worker: every step of the sweep is
-// idempotent and its work is found in the database, so the worker logs the
-// error at warn with the pass's counts and the next wake retries. An
-// outage shows on the database's and the store's readiness checks instead.
-// The one error it returns is its context's, once the drain cancels a pass
-// in flight or a wait on the gate past the reactor's CancelAfter period.
-func (s *Storage) SweepWorker(db *sqlate.DB, gate SweepGate, logger *slog.Logger, opts ...bfdata.SweepOption) reactor.Func[time.Time] {
-	pass := gated(gate, func(ctx context.Context) (bfdata.SweepResult, error) {
-		return s.FS.Sweep(ctx, db, s.Objects, opts...)
-	})
-	report := logPass(logger)
-	return func(ctx context.Context, _ time.Time) error {
-		return bfdata.SweepUntilDone(ctx, reactor.Draining(ctx), pass, report)
+// A pass that did work is logged at info as "sweep pass" with its counts:
+// the files, directories, and stale rows it removed, and whether it
+// reported More, whether or not it also met refusals. A pass with nothing
+// to do is not logged, and the error is left to the sweeper's report, so
+// a refusal is logged once.
+func (r *FilesReclaimer) Pass(ctx context.Context, budget int) (bool, error) {
+	res, err := r.storage.FS.Sweep(ctx, r.db, r.storage.Objects,
+		bfdata.Batch(budget), bfdata.StaleOlderThan(r.staleAge))
+	if res.Files+res.Directories+res.Stale > 0 {
+		r.logger.InfoContext(ctx, "sweep pass",
+			"files", res.Files, "directories", res.Directories, "stale", res.Stale, "more", res.More)
 	}
-}
-
-// gated runs pass holding gate shared, so a pass waits out a schema change
-// and a schema change waits for the pass in flight. A wait that ctx ends
-// runs no pass and returns ctx's error, which ends the worker's loop as
-// the drain's cancellation.
-func gated(gate SweepGate, pass sweepPass) sweepPass {
-	return func(ctx context.Context) (bfdata.SweepResult, error) {
-		release, err := gate.Shared(ctx)
-		if err != nil {
-			return bfdata.SweepResult{}, err
-		}
-		defer release()
-		return pass(ctx)
-	}
-}
-
-// logPass is the worker's logging policy: a pass that returned refusals
-// at warn with its error and counts, a pass that did work at info, and a
-// pass with nothing to do not at all.
-func logPass(logger *slog.Logger) func(bfdata.SweepResult, error) {
-	return func(res bfdata.SweepResult, err error) {
-		counts := []any{"files", res.Files, "directories", res.Directories, "stale", res.Stale, "more", res.More}
-		switch {
-		case err != nil:
-			logger.Warn("sweep pass refused", append(counts, "error", err)...)
-		case res.Files+res.Directories+res.Stale > 0:
-			logger.Info("sweep pass", counts...)
-		}
-	}
+	return res.More, err
 }

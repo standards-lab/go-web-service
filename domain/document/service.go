@@ -23,7 +23,8 @@ type Service struct {
 // its delete is marked: a nudge that work is waiting, which returns at
 // once and never fails the request, since the sweep finds its work in the
 // database and a missed nudge only delays it. The layer declares it and
-// the composition root injects it; the sweep's wake source satisfies it.
+// the composition root injects it, a nudge of the general sweeper's files
+// reclaimer.
 // The sweep asks nothing of the layer in turn: a root's owner row goes
 // with the directory through its cascading foreign key.
 type Sweeper interface {

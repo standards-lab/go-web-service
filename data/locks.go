@@ -17,6 +17,13 @@ const (
 	// tree: a transfer's cycle check reads one node's lineage while the
 	// update moves another.
 	LockOrganizationTree = "organization.tree"
+
+	// LockSweepPrefix begins the names go-database's sweeper claims, one
+	// per reclaimer, "sweep.<name>" ("sweep.files"), so no name declared
+	// here may begin with it. The sweeper takes them itself, without Lock:
+	// each is a session lock its cycle tries without waiting on a pinned
+	// connection, so two replicas never run one reclaimer's cycle at once.
+	LockSweepPrefix = "sweep."
 )
 
 // Lock takes the named advisory lock for the rest of the transaction s

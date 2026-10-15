@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -11,19 +12,17 @@ import (
 	"time"
 
 	"github.com/standards-lab/blobfs"
-	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/blobfs/data/datatest"
-	"github.com/standards-lab/go-core/reactor"
+	"github.com/standards-lab/go-database/sweep"
 	"github.com/standards-lab/sqlate/sqltest"
 
 	"github.com/standards-lab/go-web-service/data"
 )
 
-// waitFor bounds every wait for a pass that should run, so a broken
-// worker fails the test instead of hanging it.
-const waitFor = 2 * time.Second
+// The files reclaimer is one of go-database's sweeper's, structurally.
+var _ sweep.Reclaimer = (*data.FilesReclaimer)(nil)
 
-// logBuffer serializes the worker's log writes and the test's reads.
+// logBuffer serializes the reclaimer's log writes and the test's reads.
 type logBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -47,43 +46,9 @@ func logged() (*slog.Logger, *logBuffer) {
 	return slog.New(slog.NewTextHandler(buf, nil)), buf
 }
 
-// gate is the process's gate as the worker sees it, scripted: shared runs
-// on each acquisition, before the pass, with the handler's context and the
-// acquisition's number from 1, and released on its release.
-type gate struct {
-	shared   func(ctx context.Context, n int)
-	released func(n int)
-
-	mu sync.Mutex
-	n  int
-}
-
-var _ data.SweepGate = (*gate)(nil)
-
-func (g *gate) Shared(ctx context.Context) (func(), error) {
-	g.mu.Lock()
-	g.n++
-	n := g.n
-	g.mu.Unlock()
-	if g.shared != nil {
-		g.shared(ctx, n)
-	}
-	return func() {
-		if g.released != nil {
-			g.released(n)
-		}
-	}, nil
-}
-
-func (g *gate) acquisitions() int {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.n
-}
-
-// The sweep's options in the scripts: a batch of one record, so each pass
-// is a few statements, and the stale reclaim, whose rows the scripts use.
-var sweepOpts = []bfdata.SweepOption{bfdata.Batch(1), bfdata.StaleOlderThan(time.Hour)}
+// staleAge is the reclaimer's stale age in the scripts, whose stale rows
+// are older.
+const staleAge = time.Hour
 
 // noRoots scripts a read of the deleting branches' roots that finds none.
 func noRoots() sqltest.Response { return datatest.DirectoryRows() }
@@ -122,272 +87,110 @@ var (
 	idleOps = []sqltest.Op{q, q}
 )
 
-func script(passes ...[]sqltest.Response) []sqltest.Response {
-	var out []sqltest.Response
-	for _, p := range passes {
-		out = append(out, p...)
-	}
-	return out
-}
-
-func ops(passes ...[]sqltest.Op) []sqltest.Op {
-	var out []sqltest.Op
-	for _, p := range passes {
-		out = append(out, p...)
-	}
-	return out
-}
-
-// A wake runs passes while one reports More and stops at the first that
-// does not, logging each pass that did work.
-func TestSweepWorker_LoopsWhileMore(t *testing.T) {
-	st, db, rec, _ := protocols(t, script(morePass(stale1, stale2), lastPass(stale2))...)
+// A pass that did work and found more beyond its budget reports more, and
+// is logged at info with its counts. The budget is the pass's batch: a
+// budget of one reclaims one stale row and reads the next as more.
+func TestFilesReclaimer_APassWithMore(t *testing.T) {
+	st, db, rec, _ := protocols(t, morePass(stale1, stale2)...)
 	logger, out := logged()
-	g := &gate{}
-	if err := st.SweepWorker(db, g, logger, sweepOpts...)(context.Background(), time.Now()); err != nil {
-		t.Fatalf("worker = %v, want nil", err)
-	}
-	if g.acquisitions() != 2 {
-		t.Errorf("passes = %d, want 2: one with More, then the last", g.acquisitions())
-	}
-	if n := strings.Count(out.String(), "msg=\"sweep pass\""); n != 2 {
-		t.Errorf("logged %d passes, want each pass that did work:\n%s", n, out)
-	}
-	sameOps(t, rec, ops(moreOps, moreOps)...)
-}
-
-// A pass with nothing to do is one pass and no record.
-func TestSweepWorker_NothingToDo(t *testing.T) {
-	st, db, rec, _ := protocols(t, idlePass()...)
-	logger, out := logged()
-	g := &gate{}
-	if err := st.SweepWorker(db, g, logger, sweepOpts...)(context.Background(), time.Now()); err != nil {
-		t.Fatalf("worker = %v, want nil", err)
-	}
-	if g.acquisitions() != 1 || out.String() != "" {
-		t.Errorf("passes = %d, log %q; want one pass and no record", g.acquisitions(), out)
-	}
-	sameOps(t, rec, idleOps...)
-}
-
-// A pass's refusals are logged at warn with the error and the counts and
-// never returned: the loop goes on while the pass reports More, and ends
-// with nil when it does not, so a stuck row cannot end the reactor that
-// runs the worker.
-func TestSweepWorker_RefusalsAreLoggedNotFailed(t *testing.T) {
-	refused := sqltest.Response{Err: errors.New("the purge was refused")}
-	st, db, rec, _ := protocols(t,
-		// A pass with More: the first row refused, the next reclaimed, a
-		// third beyond the batch.
-		noRoots(), stale(stale1), refused, stale(stale2), exec(1), noRoots(), stale(stale3),
-		// A pass without: the third row refused, nothing beyond it.
-		noRoots(), stale(stale3), refused, datatest.FileRows(),
-	)
-	logger, out := logged()
-	g := &gate{}
-	if err := st.SweepWorker(db, g, logger, sweepOpts...)(context.Background(), time.Now()); err != nil {
-		t.Fatalf("worker = %v, want nil despite the refusals", err)
-	}
-	if g.acquisitions() != 2 {
-		t.Errorf("passes = %d, want 2: a refusal does not stop a pass with More", g.acquisitions())
+	more, err := st.FilesReclaimer(db, staleAge, logger).Pass(context.Background(), 1)
+	if !more || err != nil {
+		t.Fatalf("Pass = (%v, %v), want (true, nil)", more, err)
 	}
 	log := out.String()
-	if n := strings.Count(log, "level=WARN msg=\"sweep pass refused\""); n != 2 {
-		t.Errorf("logged %d refusals at warn, want 2:\n%s", n, log)
-	}
-	if !strings.Contains(log, "the purge was refused") || !strings.Contains(log, "stale=1") {
-		t.Errorf("a refusal's record lacks the error or the counts:\n%s", log)
-	}
-	sameOps(t, rec, q, q, x, q, x, q, q, q, q, x, q)
-}
-
-// The context is checked before each pass: once it ends, no further pass
-// runs and the worker returns its error, the drain's cancellation.
-func TestSweepWorker_ContextStopsTheLoop(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	st, db, rec, _ := protocols(t, script(morePass(stale1, stale2))...)
-	logger, _ := logged()
-	// The second acquisition ends the context, so the second pass reaches
-	// no statement.
-	g := &gate{shared: func(_ context.Context, n int) {
-		if n == 2 {
-			cancel()
-		}
-	}}
-	if err := st.SweepWorker(db, g, logger, sweepOpts...)(ctx, time.Now()); !errors.Is(err, context.Canceled) {
-		t.Fatalf("worker = %v, want the context's cancellation", err)
-	}
-	if g.acquisitions() != 2 {
-		t.Errorf("passes begun = %d, want 2: none after the context ended", g.acquisitions())
+	if !strings.Contains(log, `level=INFO msg="sweep pass" files=0 directories=0 stale=1 more=true`) {
+		t.Errorf("the pass's counts were not logged at info:\n%s", log)
 	}
 	sameOps(t, rec, moreOps...)
-
-	st, db, rec, _ = protocols(t)
-	g = &gate{}
-	if err := st.SweepWorker(db, g, logger, sweepOpts...)(ctx, time.Now()); !errors.Is(err, context.Canceled) || g.acquisitions() != 0 {
-		t.Errorf("worker on an ended context = %v after %d passes, want no pass", err, g.acquisitions())
-	}
-	sameOps(t, rec)
 }
 
-// Under the reactor the composition root runs it on, a refused pass
-// leaves the reactor running: Err yields nothing, and the next nudge runs
-// the next pass.
-func TestSweepWorker_ARefusalKeepsTheReactor(t *testing.T) {
-	st, db, rec, _ := protocols(t,
-		sqltest.Response{Err: errors.New("the read was refused")}, // the first pass's roots
-		noRoots(), // the second pass's
-	)
-	ran := make(chan struct{}, 2)
-	g := &gate{released: func(int) { ran <- struct{}{} }}
-	logger, _ := logged()
-	wake := reactor.Wake(time.Hour)
-	r := reactor.New(wake, st.SweepWorker(db, g, logger))
-	if err := r.Start(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	for i := range 2 {
-		wake.Nudge()
-		select {
-		case <-ran:
-		case <-time.After(waitFor):
-			t.Fatalf("pass %d did not run on its nudge", i+1)
-		}
-	}
-	select {
-	case err := <-r.Err():
-		t.Errorf("Err yielded %v after a refusal, want the reactor running", err)
-	default:
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), waitFor)
-	defer cancel()
-	if err := r.Shutdown(ctx); err != nil {
-		t.Errorf("Shutdown = %v", err)
-	}
-	sameOps(t, rec, q, q)
-}
-
-// Once the drain begins, the pass in flight finishes and no further pass
-// runs, though it reported More: the worker returns nil, and the drain
-// ends clean rather than when its CancelAfter period cancels it.
-func TestSweepWorker_TheDrainStopsBetweenPasses(t *testing.T) {
-	st, db, rec, _ := protocols(t, script(morePass(stale1, stale2))...)
-	wake := reactor.Wake(time.Hour)
-	var r *reactor.Reactor[time.Time]
-	drained := make(chan error, 1)
-	// The first pass begins the drain and waits for its signal before it
-	// runs, so the drain begins while the pass is in flight.
-	g := &gate{shared: func(ctx context.Context, n int) {
-		if n != 1 {
-			return
-		}
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), waitFor)
-			defer cancel()
-			drained <- r.Shutdown(ctx)
-		}()
-		select {
-		case <-reactor.Draining(ctx):
-		case <-time.After(waitFor):
-			t.Error("the drain signal never reached the pass")
-		}
-	}}
+// The last pass of a backlog reports no more, and is logged with its
+// counts.
+func TestFilesReclaimer_TheLastPass(t *testing.T) {
+	st, db, rec, _ := protocols(t, lastPass(stale1)...)
 	logger, out := logged()
-	r = reactor.New(wake, st.SweepWorker(db, g, logger, sweepOpts...))
-	if err := r.Start(context.Background()); err != nil {
-		t.Fatal(err)
+	more, err := st.FilesReclaimer(db, staleAge, logger).Pass(context.Background(), 1)
+	if more || err != nil {
+		t.Fatalf("Pass = (%v, %v), want (false, nil)", more, err)
 	}
-	wake.Nudge()
-	select {
-	case err := <-drained:
-		if err != nil {
-			t.Errorf("Shutdown = %v, want a clean drain", err)
-		}
-	case <-time.After(waitFor):
-		t.Fatal("the drain did not finish")
-	}
-	if g.acquisitions() != 1 {
-		t.Errorf("passes = %d, want the one in flight alone", g.acquisitions())
-	}
-	if !strings.Contains(out.String(), "more=true") {
-		t.Errorf("the pass in flight was not finished and logged:\n%s", out)
+	if !strings.Contains(out.String(), `msg="sweep pass" files=0 directories=0 stale=1 more=false`) {
+		t.Errorf("the pass's counts were not logged:\n%s", out)
 	}
 	sameOps(t, rec, moreOps...)
 }
 
-// A pass waits out a schema change: while the gate is held exclusively no
-// pass runs, and once it is released the wake's passes run.
-func TestSweepWorker_APassWaitsOutASchemaChange(t *testing.T) {
+// A pass with nothing to do reports no more and logs nothing.
+func TestFilesReclaimer_NothingToDo(t *testing.T) {
 	st, db, rec, _ := protocols(t, idlePass()...)
-	g := new(reactor.Gate)
-	change, err := g.Exclusive(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	logger, _ := logged()
-	done := make(chan error, 1)
-	go func() { done <- st.SweepWorker(db, g, logger, sweepOpts...)(context.Background(), time.Now()) }()
-
-	time.Sleep(50 * time.Millisecond)
-	if calls := rec.Calls(); len(calls) != 0 {
-		t.Fatalf("a pass ran under the schema change: %v", rec.Ops())
-	}
-	change()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Errorf("worker = %v, want nil", err)
-		}
-	case <-time.After(waitFor):
-		t.Fatal("no pass ran once the schema change released the gate")
+	logger, out := logged()
+	more, err := st.FilesReclaimer(db, staleAge, logger).Pass(context.Background(), 1)
+	if more || err != nil || out.String() != "" {
+		t.Errorf("Pass = (%v, %v), log %q; want (false, nil) and no record", more, err, out)
 	}
 	sameOps(t, rec, idleOps...)
 }
 
-// Each pass runs whole inside its hold of the gate: none of its statements
-// runs before the acquisition or after the release, so a schema change,
-// which holds the gate exclusively, waits for the pass in flight.
-func TestSweepWorker_APassRunsInsideItsHold(t *testing.T) {
-	st, db, rec, _ := protocols(t, script(morePass(stale1, stale2), lastPass(stale2))...)
-	var mu sync.Mutex
-	var at []int
-	record := func() {
-		mu.Lock()
-		defer mu.Unlock()
-		at = append(at, len(rec.Calls()))
+// A pass's refusals are its error, returned beside its more for the
+// sweeper to report and to go on by; the reclaimer logs the counts of the
+// work the pass did all the same, at info, and leaves the error to the
+// sweeper's report, so a refusal is logged once.
+func TestFilesReclaimer_RefusalsAreTheError(t *testing.T) {
+	refused := sqltest.Response{Err: errors.New("the purge was refused")}
+	st, db, rec, _ := protocols(t,
+		// The first row refused, the next reclaimed, a third beyond the
+		// budget.
+		noRoots(), stale(stale1), refused, stale(stale2), exec(1), noRoots(), stale(stale3),
+	)
+	logger, out := logged()
+	more, err := st.FilesReclaimer(db, staleAge, logger).Pass(context.Background(), 1)
+	if !more || err == nil || !strings.Contains(err.Error(), "the purge was refused") {
+		t.Fatalf("Pass = (%v, %v), want more and the refusal", more, err)
 	}
-	g := &gate{shared: func(context.Context, int) { record() }, released: func(int) { record() }}
-	logger, _ := logged()
-	if err := st.SweepWorker(db, g, logger, sweepOpts...)(context.Background(), time.Now()); err != nil {
-		t.Fatalf("worker = %v", err)
+	log := out.String()
+	if !strings.Contains(log, `level=INFO msg="sweep pass" files=0 directories=0 stale=1 more=true`) {
+		t.Errorf("the refused pass's counts were not logged at info:\n%s", log)
 	}
-	// The statements recorded at each acquisition and release: each pass's
-	// five between its own two.
-	if want := []int{0, 5, 5, 10}; len(at) != len(want) || at[0] != want[0] || at[1] != want[1] || at[2] != want[2] || at[3] != want[3] {
-		t.Errorf("statements at each acquisition and release = %v, want %v", at, want)
+	if strings.Contains(log, "the purge was refused") {
+		t.Errorf("the reclaimer logged the error the sweeper reports:\n%s", log)
 	}
-	sameOps(t, rec, ops(moreOps, moreOps)...)
+	sameOps(t, rec, q, q, x, q, x, q, q)
 }
 
-// A drain that ends the wake while a pass waits on the gate runs no pass,
-// and the worker returns the cancellation.
-func TestSweepWorker_TheDrainEndsAWaitingPass(t *testing.T) {
-	st, db, rec, _ := protocols(t)
-	g := new(reactor.Gate)
-	change, err := g.Exclusive(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer change()
+// A refused pass that did nothing reports its error and logs nothing.
+func TestFilesReclaimer_ARefusalAloneLogsNothing(t *testing.T) {
+	st, db, rec, _ := protocols(t, sqltest.Response{Err: errors.New("the read was refused")})
 	logger, out := logged()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
-	defer cancel()
-	if err := st.SweepWorker(db, g, logger, sweepOpts...)(ctx, time.Now()); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("worker = %v, want the context's end", err)
+	more, err := st.FilesReclaimer(db, staleAge, logger).Pass(context.Background(), 1)
+	if more || err == nil || out.String() != "" {
+		t.Errorf("Pass = (%v, %v), log %q; want (false, the refusal) and no record", more, err, out)
 	}
-	if out.String() != "" {
-		t.Errorf("log %q; want no record", out)
+	sameOps(t, rec, q)
+}
+
+// A pass reads at most its budget of records, blobfs's batch, and reclaims
+// only the rows older than the stale age: the pass's reads carry the
+// budget as their limit and the stale read the cutoff an age ago.
+func TestFilesReclaimer_TheBudgetAndTheStaleAge(t *testing.T) {
+	st, db, rec, _ := protocols(t, idlePass()...)
+	logger, _ := logged()
+	before := time.Now()
+	if _, err := st.FilesReclaimer(db, staleAge, logger).Pass(context.Background(), 7); err != nil {
+		t.Fatalf("Pass = %v", err)
 	}
-	sameOps(t, rec)
+	after := time.Now()
+	calls := rec.Calls()
+	if len(calls) != 2 {
+		t.Fatalf("calls = %v, want the roots' read and the stale read", rec.Ops())
+	}
+	if args := calls[0].Args; len(args) == 0 || fmt.Sprint(args[len(args)-1]) != "7" {
+		t.Errorf("the roots' read args = %v, want the budget, 7, as its limit", args)
+	}
+	args := calls[1].Args
+	if len(args) == 0 || fmt.Sprint(args[len(args)-1]) != "7" {
+		t.Errorf("the stale read args = %v, want the budget, 7, as its limit", args)
+	}
+	cutoff, ok := args[0].(time.Time)
+	if !ok || cutoff.Before(before.Add(-staleAge)) || cutoff.After(after.Add(-staleAge)) {
+		t.Errorf("the stale read's cutoff = %v, want the stale age, %v, before the pass", args[0], staleAge)
+	}
 }

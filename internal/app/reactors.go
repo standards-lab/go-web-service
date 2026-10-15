@@ -1,23 +1,24 @@
 package app
 
 import (
-	"time"
+	"sync/atomic"
 
-	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/go-core/event"
 	"github.com/standards-lab/go-core/graph"
 	"github.com/standards-lab/go-core/reactor"
+	"github.com/standards-lab/go-database/sweep"
 	"github.com/standards-lab/go-messaging"
 	msgpg "github.com/standards-lab/go-messaging/postgres"
 )
 
 // defineReactors defines the reactors on g into n: the entry points that
 // run for the process lifetime, driven by an occurrence rather than a
-// caller. The sweep is one: its wake, and the sweeper that receives from
-// it. The messaging is the other: the runtime, and the relay it builds,
-// which publishes the outbox's committed events. No node Uses a reactor,
-// so each is listed in n.Reactors, which Run builds as roots and the
-// server orders itself after. It constructs nothing.
+// caller. The sweeper is one: go-database's general sweeper, running each
+// reclaimer the service registers, and the nudge the document layer reaches
+// its files reclaimer through. The messaging is the other: the runtime, and
+// the relay it builds, which publishes the outbox's committed events. No
+// node Uses a reactor, so each is listed in n.Reactors, which Run builds as
+// roots and the server orders itself after. It constructs nothing.
 //
 // The relay's last pass publishes what was committed while the producers
 // drained, so every producer must drain before it. A node that commits
@@ -26,59 +27,74 @@ import (
 // every domain service is, needs no edge: its commands run in the server's
 // requests, and the server, ordered after every reactor, drains first.
 func defineReactors(g *graph.Graph, n *Nodes) {
-	n.Wake = g.Define("wake", newWake(n))
+	n.Nudge = g.Define("nudge", func(*graph.Scope) (*Nudge, error) { return new(Nudge), nil })
 	n.Sweeper = g.Define("sweeper", newSweeper(n))
 	n.Runtime = g.Define("runtime", newRuntime(n))
 	n.Relay = g.Define("relay", newRelay(n))
 	n.Reactors = []graph.Ref{n.Sweeper, n.Relay}
 }
 
-// Wake is the wake node's value, where the sweep's two halves meet: the
-// document layer nudges it after each branch it marks, so it is that
-// layer's document.Sweeper, and the sweeper receives from its source. It
-// has no Ready method: the source's own readiness is the sweeper's to
-// report, so the probe gains no "wake" check.
-type Wake struct {
-	source *reactor.Waker
+// reclaimFiles is the name the sweeper registers blobfs's sweep under: the
+// name a nudge takes, and the lock "sweep.files" its cycle claims.
+const reclaimFiles = "files"
+
+// Nudge is the nudge node's value, the document layer's document.Sweeper:
+// the layer nudges it after each branch it marks, and it marks the
+// sweeper's files reclaimer due. It is a node of its own, bound by the
+// sweeper's constructor, because the document layer cannot Use the
+// sweeper: the schema Uses the domain nodes for their seeds, and the
+// sweeper orders itself after the schema. It has no Ready, so the probe
+// gains no "nudge" check.
+type Nudge struct {
+	sweeper atomic.Pointer[sweep.Sweeper]
 }
 
-// Nudge asks the sweeper for a pass as soon as it is free.
-func (w *Wake) Nudge() { w.source.Nudge() }
-
-// newWake constructs the sweep's source from the config node's sweep
-// block. The interval is the backstop for a nudge that never came and the
-// schedule of the stale rows' reclaim. The wake is nudged once here, which
-// the source delivers as soon as it starts, so a branch marked by a process
-// that stopped before its sweep ran is swept at this process's start rather
-// than an interval later.
-func newWake(n *Nodes) func(*graph.Scope) (*Wake, error) {
-	return func(s *graph.Scope) (*Wake, error) {
-		w := &Wake{source: reactor.Wake(s.Use(n.Config).Sweep.Interval.Duration())}
-		w.Nudge()
-		return w, nil
+// Nudge asks the sweeper for a pass of its files reclaimer as soon as it
+// is free. Before the sweeper is built, or in a graph built without it, it
+// does nothing: every reclaimer is due at the sweeper's start, so a branch
+// marked before then is swept at once all the same.
+func (n *Nudge) Nudge() {
+	if s := n.sweeper.Load(); s != nil {
+		s.Nudge(reclaimFiles)
 	}
 }
 
-// newSweeper constructs the sweep's reactor over the wake's source, the
-// files node's sweep worker, and the gate. Its value is a lifecycle
-// Subsystem, ReadinessChecker, and Monitored, so the Coordinator starts it,
-// drains it, reports it, and ends the run on its failure with no
-// registration here. It orders itself after the schema, so it starts once
-// every table it touches is verified, and stops before the schema's layer
-// beneath it. Its reactor.CancelWithin option cancels a pass still running
-// at half the shutdown timeout, so the sweeper reports the cancellation
-// before the coordinator's deadline drops it.
-func newSweeper(n *Nodes) func(*graph.Scope) (*reactor.Reactor[time.Time], error) {
-	return func(s *graph.Scope) (*reactor.Reactor[time.Time], error) {
+// newSweeper constructs go-database's sweeper over the sql node's session,
+// registering one reclaimer, files: the files node's blobfs sweep, every
+// interval of the config node's sweep block, in passes of its batch, and
+// reclaiming the file rows older than its stale age. The interval is the
+// backstop for a nudge that never came and the schedule of the stale rows'
+// reclaim; every reclaimer is due at start, so a branch marked by a process
+// that stopped before its sweep ran is swept at this process's start rather
+// than an interval later. Each pass holds the gate shared, so a schema verb
+// never meets one. The dialect is Postgres, a sqlate.TryLocker, so each
+// cycle claims "sweep.<name>" (data.LockSweepPrefix) and two replicas never
+// run one reclaimer's cycle at once. It binds the nudge node to the sweeper.
+//
+// Its value is a lifecycle Subsystem, ReadinessChecker, and Monitored, so
+// the Coordinator starts it, drains it, reports it, and ends the run on its
+// failure with no registration here. It orders itself after the schema, so
+// it starts once every table it touches is verified, and stops before the
+// schema's layer beneath it. Given the shutdown timeout, it cancels a pass
+// still running at half of it (go-core's reactor.CancelWithin), so the
+// sweeper reports the cancellation before the coordinator's deadline drops
+// it.
+func newSweeper(n *Nodes) func(*graph.Scope) (*sweep.Sweeper, error) {
+	return func(s *graph.Scope) (*sweep.Sweeper, error) {
 		s.After(n.Schema)
 		cfg := s.Use(n.Config)
+		db := s.Use(n.SQL).DB
+		logger := s.Use(n.Logger)
 
-		sweep := s.Use(n.Files).SweepWorker(s.Use(n.SQL).DB, s.Use(n.Gate), s.Use(n.Logger),
-			bfdata.Batch(*cfg.Sweep.Batch),
-			bfdata.StaleOlderThan(cfg.Sweep.StaleAge.Duration()),
-		)
-		return reactor.New(s.Use(n.Wake).source, sweep,
-			reactor.CancelWithin(cfg.ShutdownTimeout.Duration())), nil
+		policy := sweep.Policy{Interval: cfg.Sweep.Interval.Duration(), Budget: *cfg.Sweep.Batch}
+		sw, err := sweep.New(db, []sweep.Registration{
+			{Name: reclaimFiles, Reclaimer: s.Use(n.Files).FilesReclaimer(db, cfg.Sweep.StaleAge.Duration(), logger), Policy: policy},
+		}, cfg.ShutdownTimeout.Duration(), logger, sweep.Gated(s.Use(n.Gate)))
+		if err != nil {
+			return nil, err
+		}
+		s.Use(n.Nudge).sweeper.Store(sw)
+		return sw, nil
 	}
 }
 
@@ -99,7 +115,7 @@ func newRuntime(n *Nodes) func(*graph.Scope) (*messaging.Runtime, error) {
 }
 
 // newRelay constructs the relay over the sql node's session. Its value is a
-// lifecycle Subsystem, ReadinessChecker, and Monitored, as the sweeper's
+// lifecycle Subsystem, ReadinessChecker, and Monitored, as the sweeper
 // is. It orders itself after the schema, so its first pass finds the
 // messaging set migrated and verified. The runtime gives it go-messaging's
 // drain: a last pass bounded at a quarter of the shutdown timeout, and the

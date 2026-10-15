@@ -17,12 +17,12 @@ const (
 	defaultSweepStaleAge = time.Hour
 )
 
-// SweepConfig is the sweep's block: Interval is how often it
-// wakes when nothing nudges it, Batch the records one pass of blobfs's
-// sweep handles, and StaleAge the age past which a pending or deleting
-// file row counts as stale and is reclaimed. StaleAge must exceed the
-// longest upload the service lets run, counted from its first step. A
-// zero duration and a nil Batch are unset.
+// SweepConfig is the sweep's block, the policy of the general sweeper's
+// reclaimers: Interval is how often a reclaimer runs when nothing nudges
+// it, Batch the records one pass of blobfs's sweep handles, and StaleAge
+// the age past which a pending or deleting file row counts as stale and is
+// reclaimed. StaleAge must exceed the longest upload the service lets run,
+// counted from its first step. A zero duration and a nil Batch are unset.
 type SweepConfig struct {
 	Interval libconfig.Duration `json:"interval"`
 	Batch    *int               `json:"batch"`

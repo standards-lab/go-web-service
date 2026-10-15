@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -72,19 +73,6 @@ func collect(t *testing.T, reader *sdkmetric.ManualReader) (passes, backlogged m
 	return passes, backlogged
 }
 
-// equal reports whether got and want hold the same entries.
-func equal(got, want map[string]int64) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	for k, v := range want {
-		if g, ok := got[k]; !ok || g != v {
-			return false
-		}
-	}
-	return true
-}
-
 // Each pass is counted once under its reclaimer and outcome: error when it
 // returned an error, even one that reported more; more when it reported
 // more; drained otherwise.
@@ -106,7 +94,7 @@ func TestSweepMetrics_CountsPassesByOutcome(t *testing.T) {
 		"outbox/more":   1,
 		"inbox/error":   1,
 	}
-	if !equal(passes, want) {
+	if !maps.Equal(passes, want) {
 		t.Errorf("sweep.passes = %v, want %v", passes, want)
 	}
 }
@@ -118,18 +106,18 @@ func TestSweepMetrics_GaugesBacklogPerReclaimer(t *testing.T) {
 	hook, reader, _ := sweepMeter(t)
 	ctx := context.Background()
 
-	if _, got := collect(t, reader); !equal(got, map[string]int64{"files": 0, "outbox": 0, "inbox": 0}) {
+	if _, got := collect(t, reader); !maps.Equal(got, map[string]int64{"files": 0, "outbox": 0, "inbox": 0}) {
 		t.Errorf("before any pass, sweep.backlogged = %v, want every reclaimer 0", got)
 	}
 
 	hook(ctx, sweep.Pass{Name: "files", More: true})
 	hook(ctx, sweep.Pass{Name: "inbox", More: true, Err: errors.New("refused")})
-	if _, got := collect(t, reader); !equal(got, map[string]int64{"files": 1, "outbox": 0, "inbox": 1}) {
+	if _, got := collect(t, reader); !maps.Equal(got, map[string]int64{"files": 1, "outbox": 0, "inbox": 1}) {
 		t.Errorf("after files and inbox reported more, sweep.backlogged = %v, want files and inbox 1", got)
 	}
 
 	hook(ctx, sweep.Pass{Name: "files", More: false})
-	if _, got := collect(t, reader); !equal(got, map[string]int64{"files": 0, "outbox": 0, "inbox": 1}) {
+	if _, got := collect(t, reader); !maps.Equal(got, map[string]int64{"files": 0, "outbox": 0, "inbox": 1}) {
 		t.Errorf("after files drained, sweep.backlogged = %v, want inbox alone 1", got)
 	}
 }

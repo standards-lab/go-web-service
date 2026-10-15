@@ -105,7 +105,7 @@ returned by a method of its service (`Seed`, `LogoSeed`). A contribution of rows
 applied in the seed's one transaction. A contribution of stored files is a `data.FileSeed`: blobfs's
 two-phase write puts an object outside any transaction, so the seeder runs it after the row
 transaction commits. Each file goes through blobfs's `Store.EnsureFile`, the two-phase write's
-retry-safe form, or its staging `sdk.EnsureFile` where the file's event commits in the completion,
+retry-safe form, with an `OnComplete` hook where the file's event commits in the completion,
 under a fixed id the state file carries. A rerun then finds the file, and a reset,
 which leaves the container's objects in place, writes it again under the same key. A file seed
 leaves alone what it does not own. `admin.go` hands every contribution to `data.NewSeeder` in the
@@ -122,10 +122,9 @@ Library promotion candidates stage in the base `sdk` package: flat, a package me
 accumulates no sub-packages, with each file named for the library its contents are bound for.
 Staging is cheap and deliberate; the `v1.data.evaluation` task rules on every tenant. `Command`,
 bound for go-web-sdk, is the guarded-command read composing the SDK's `PathUUID` (promoted from
-here in go-web-sdk v0.13.0), `IfMatch`, and `DecodeJSON`. `WriteFile`, `EnsureFile`, and
-`RemoveFile`, bound for blobfs, are blobfs's file protocols, each with a hook in the transaction
-that makes its change true (the README's "The staged file protocols"); the task
-`blobfs-write-protocol` promotes them.
+here in go-web-sdk v0.13.0), `IfMatch`, and `DecodeJSON`. The file protocols with a hook in the
+transaction that makes their change true staged here until blobfs v0.7.0 promoted them as
+`OnComplete` and `OnDelete` (the README's "The file protocols' hooks").
 
 ## The operation-shape principle
 

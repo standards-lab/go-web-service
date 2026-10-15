@@ -72,8 +72,8 @@ surfaces, routes, constraint names, and enum vocabularies are settled per task.
 ## Evaluation evidence (`v1.data.evaluation`)
 
 The `v1.data.evaluation` task weighs this evidence. The `sdk` package stages `Command`, for
-go-web-sdk, whose path parse is already promoted as go-web-sdk v0.13.0's `PathUUID`, and
-`WriteFile`, `EnsureFile`, and `RemoveFile`, for blobfs. The `data`
+go-web-sdk, whose path parse is already promoted as go-web-sdk v0.13.0's `PathUUID`; its file
+protocols with hooks were promoted to blobfs v0.7.0. The `data`
 package holds the shared status matcher and the directives lowering, which the template cannot
 scaffold while it stays engine-free. A generic seed helper is a fit question for the evaluation: it
 promotes to go-database when its shape is the library's own, not when a second service repeats the

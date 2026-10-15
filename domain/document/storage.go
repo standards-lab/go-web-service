@@ -16,7 +16,6 @@ import (
 	"github.com/standards-lab/sqlate"
 
 	"github.com/standards-lab/go-web-service/data"
-	"github.com/standards-lab/go-web-service/sdk"
 )
 
 // listing reads one page of blobfs's listing l, Directories' or Files',
@@ -488,10 +487,10 @@ func (s *store) seedEntries(ctx context.Context, organizationID, root, parent st
 }
 
 // seedEntry ensures one entry under the entry's id: a directory by
-// seedDirectory, then its entries, and a file by blobfs's retry-safe write
-// as the sdk package stages it, sdk.EnsureFile, whose completion's
-// transaction emits FileUploaded when this call completes the file, as an
-// upload's does. An entry the seed does not own is left as it stands and
+// seedDirectory, then its entries, and a file by blobfs's retry-safe write,
+// whose completion's transaction emits FileUploaded, by its OnComplete
+// hook, when this call completes the file, as an upload's does; a file
+// found complete, or completed by another writer, emits nothing. An entry the seed does not own is left as it stands and
 // counts nothing: one there by name under another id (its directory's
 // contents are still ensured), one whose id a row carries under another
 // name, and one whose delete is under way.
@@ -517,12 +516,12 @@ func (s *store) seedEntry(ctx context.Context, organizationID, root, parent stri
 		}
 		return n, err
 	}
-	_, stored, err := sdk.EnsureFile(ctx, st.FS, s.db.DB, st.Objects, e.ID, strings.NewReader(e.Content), int64(len(e.Content)),
+	_, stored, err := st.FS.EnsureFile(ctx, s.db.DB, st.Objects, e.ID, strings.NewReader(e.Content), int64(len(e.Content)),
 		func(tx *sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
 			return st.FS.Files.Ensure(ctx, tx, st.Objects, parent, e.Name, e.ContentType, bfdata.WithID(e.ID))
-		}, func(tx *sqlate.Tx, f blobfs.File) error {
+		}, bfdata.OnComplete(func(ctx context.Context, tx *sqlate.Tx, f blobfs.File) error {
 			return s.emitUploaded(ctx, tx, organizationID, f)
-		})
+		}))
 	switch {
 	case errors.Is(err, blobfs.ErrIDTaken), errors.Is(err, blobfs.ErrNameTaken), errors.Is(err, blobfs.ErrDeleting):
 		return 0, nil

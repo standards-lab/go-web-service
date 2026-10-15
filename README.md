@@ -442,20 +442,23 @@ domain's `messaging.go` and their data in its `entities.go`.
 The document routes sit under `/api/documents/{org}`. A logo `PUT` that replaces a logo commits
 `logo.uploaded` alone, no `logo.deleted` for the logo it replaces.
 
-### The staged file protocols
+### The file protocols' hooks
 
-A command whose change becomes true inside one of blobfs's file protocols runs that protocol as
-the `sdk` package stages it (`sdk/blobfs.go`), bound for blobfs: the library's steps, with one
-hook in the transaction that makes the change true, where the domain commits its event.
+A command whose change becomes true inside one of blobfs's file protocols passes the protocol a
+hook, which runs in the transaction that makes the change true, where the domain commits its
+event. A hook's error rolls that transaction back, so the change and the event commit together
+or not at all.
 
-- `sdk.WriteFile`, blobfs's two-phase write: its hook runs in the completion's transaction once
-  the row is available, and never on a refused completion. The document upload runs it.
-- `sdk.EnsureFile`, the two-phase write's retry-safe form under a fixed id: its hook runs as
-  `WriteFile`'s does, and only when this call completes the file; a file found complete runs
-  none. The document seed's files run it.
-- `sdk.RemoveFile`, blobfs's two-phase delete: its hook runs in the delete's first
-  transaction once the row is deleting; a retry that finds the row deleting already skips it
-  and finishes the purge, and the purge runs no hook. The document file delete runs it.
+- `Store.WriteFile`, blobfs's two-phase write, with `OnComplete`: the hook runs in the
+  completion's transaction once the row is available, and never on a refused completion. The
+  document upload runs it.
+- `Store.EnsureFile`, the two-phase write's retry-safe form under a fixed id, with
+  `OnComplete`: the hook runs as `WriteFile`'s does, and only when this call completes the file;
+  a file found complete, or completed by another writer, runs none. The document seed's files
+  run it.
+- `Store.RemoveFile`, blobfs's two-phase delete, with `OnDelete`: the hook runs in the delete's
+  first transaction once the row is deleting; a retry that finds the row deleting already skips
+  it and finishes the purge, and the purge runs no hook. The document file delete runs it.
 
 The logo needs none: its write and its seed complete through blobfs's own protocols, and its
 event commits in the activation's transaction that follows.
@@ -473,8 +476,8 @@ event commits in the activation's transaction that follows.
    on the transaction that changes the state and raises the kind there with its subject
    (`emitUploaded`). The write is one more statement on that transaction, so an event that fails
    to write fails the command. A command whose state becomes true inside a blobfs file protocol
-   runs it as the `sdk` package stages it and emits in its hook ([The staged file
-   protocols](#the-staged-file-protocols)). A seed write that creates an entity emits as its
+   passes it a hook and emits there ([The file protocols'
+   hooks](#the-file-protocols-hooks)). A seed write that creates an entity emits as its
    command does. A domain service runs in the server's requests and needs no graph edge to the
    relay; a producer outside a request Uses the relay's node ([Adding a
    service](#adding-a-service)).

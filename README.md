@@ -386,6 +386,11 @@ the passes:
 | `sweep.passes` | counter | `sweep.reclaimer` (`files`, `outbox`, `inbox`), `sweep.outcome` (`drained`, `more`, `error`) | The passes run; `error` when the pass failed, whatever it reported, `more` when it reported more, `drained` otherwise |
 | `sweep.backlogged` | gauge | `sweep.reclaimer` | 1 while the reclaimer's last pass reported more, else 0 |
 
+The collector writes them to Mimir under Prometheus names, labelled `job="go-web-service"`:
+`sweep.passes` is `sweep_passes_total`, by `sweep_reclaimer` and `sweep_outcome`, and
+`sweep.backlogged` is `sweep_backlogged_ratio`, by `sweep_reclaimer`, since a gauge whose unit is
+`1` gains `_ratio`. `mise run slab -- scenario sweeper` reads both there.
+
 ## Messaging
 
 The service publishes events through [go-messaging](https://github.com/standards-lab/go-messaging)'s
@@ -580,7 +585,8 @@ a loopback forwarder (`Options.Database`, `Options.Storage`, `Options.NATS`) tha
 for an outage. go-web-sdk's `webtest` drives the service through its API; beneath it,
 `integration.Objects` reads the container, `integration.Database` opens a session on the
 database, and `integration.Subscribe` reads the service's stream ([Adding an
-event](#adding-an-event)). A failing test prints each service process's output, so a 500 comes with the
+event](#adding-an-event)). `sweep_metrics_test.go` points the service's OTLP exporter at a
+gRPC receiver in the test and reads the sweep's metrics from what it exports. A failing test prints each service process's output, so a 500 comes with the
 service's own record of it. The service adds only its configuration and state control through
 the admin mount; nothing in the service exists for the tests' sake.
 
@@ -599,7 +605,8 @@ Configuration layers in a fixed precedence, later sources winning:
 1. `config.json`, the base file, every knob at its default.
 2. `config.<APP_ENV>.json`, the environment overlay; `mise.toml` sets `APP_ENV=local`, which
    activates the committed `config.local.json` (loopback host, debug logging, the `default`
-   seed set).
+   seed set, and a `sweep.outbox_age` and `sweep.inbox_age` of `2m`, so the local outbox
+   reclaimer has work).
 3. `secrets.json` and `secrets.<APP_ENV>.json`, gitignored secret layers; the database password
    and the object store's key go here.
 4. `APP_*` environment variables, the final override: the log, server, and shutdown variables,

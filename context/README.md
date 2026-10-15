@@ -27,9 +27,11 @@ with its admin service (startup migration, the configured seed set, the named st
 admin mount), observability (a telemetry node beneath every lifecycle participant, tracing and
 metrics over OTLP, and structured logs correlated to them by trace id), and object storage (an
 organization's logo and its document hierarchy on blobfs over go-storage, proxied through the
-service, with the sweep that finishes a recursive delete), and messaging (NATS JetStream through
+service), messaging (NATS JetStream through
 go-messaging, with every public command, seed write, and state reset emitting its event through
-the outbox and relay, cataloged in the README's Messaging section), all wired over the SDKs,
+the outbox and relay, cataloged in the README's Messaging section), and the sweep (go-database's
+general sweeper, running blobfs's sweep, which finishes a recursive delete, and go-messaging's
+outbox and inbox retention, described in the README's Sweep section), all wired over the SDKs,
 go-observability, go-storage, blobfs, go-messaging, and sqlate at pinned releases; the root `integration`
 package is the integration tier that asserts the running service through its API. The remaining layers are the
 `v1` goals in the workspace roadmap, which sequences them; each is named here with the note

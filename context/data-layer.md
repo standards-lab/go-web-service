@@ -81,14 +81,6 @@ service repeats the per-table loop. It also decides whether a linter (`depguard`
 provider modules outside the composition root) enforces the provider import boundary the
 README's Stack section states.
 
-## When to build a general sweeper
-
-The sweep worker (`data.Storage.SweepWorker`) is a standalone sweeper for blobfs's deletes and the
-only reclamation the service runs. When another layer first needs sweeper-like reclamation
-(outbox cleanup, expired sessions, soft-delete purge, or any cascade beyond pruning SQL rows),
-that task builds a general sweeper and moves blobfs's sweep onto it as its first reclaimer. It
-never builds a second standalone worker.
-
 ## Prior R&D
 
 Prior R&D in the organization's private references annex is the input for the CQRS shape, the

@@ -338,28 +338,53 @@ read included, and takes the storage check on `/readyz` down; the rows are untou
 file's row now names an object that no longer exists, and its download answers 404. In
 development, a reset to a seeded state (`mise run db:state default`) writes the seeded files
 again; anything else is uploaded again. The service does not reconcile rows against the store:
-blobfs defers that reconciler to the event flow `v1.messaging` brings.
+blobfs defers that reconciler until an orphaned object is observed or a consumer stores at
+volume, and it would join the [sweep](#sweep) as a reclaimer.
 
 ## Sweep
 
-The sweep finishes the rows that a recursive directory delete, a write that stops partway, and a
-delete that stops partway leave for later: a branch marked deleting, a pending upload, a file
-whose delete began. It removes each file's object and then its row, and each directory once it
-is empty. The sweep is the `data` package's background worker (`data.Storage.SweepWorker`),
-which runs blobfs's sweep in bounded passes while a pass reports more. Once the service begins to
-drain, the sweep finishes the pass in flight and runs no further one, whatever remains, so a
-large backlog never holds the drain; the next start's wake finds what is left.
+The sweep reclaims what the service leaves behind. It is go-database's general sweeper
+(`sweep.Sweeper`), one node, `sweeper`, that runs three reclaimers, each a library's own:
+
+- `files` is blobfs's sweep. It finishes the rows that a recursive directory delete, a write
+  that stops partway, and a delete that stops partway leave for later: a branch marked deleting,
+  a pending upload, a file whose delete began. It removes each file's object and then its row,
+  and each directory once it is empty, and reclaims the uploads and deletes left unfinished past
+  `sweep.stale_age` (an hour). Each recursive delete nudges it, so a marked branch is swept at
+  once.
+- `outbox` is go-messaging's outbox retention. It deletes the published outbox rows published
+  more than `sweep.outbox_age` (7 days) ago; an unpublished or quarantined row is never deleted.
+- `inbox` is go-messaging's inbox retention. It deletes the inbox rows handled more than
+  `sweep.inbox_age` (7 days) ago.
+
+Every reclaimer shares one policy: it is due every `sweep.interval` (30 seconds) and at
+startup, so a branch marked before a restart is swept at the next start, and each of its
+passes handles at most `sweep.batch` (100) records. A due reclaimer runs a cycle: passes while
+a pass reports more, for at most one interval, after which it yields to the reclaimers behind
+it and stays due, so one large backlog never starves the others. A cycle first claims the
+session advisory lock `sweep.<name>` (`sweep.files`, `sweep.outbox`, `sweep.inbox`) without
+waiting; a reclaimer whose lock another replica holds skips the cycle, so two replicas on one
+database never run the same reclaimer's cycle at once. Each pass holds the quiesce gate shared,
+so a schema verb never meets one. A pass the store or the database refuses never ends its
+cycle or fails the service: every pass is idempotent, so a later pass finds what it left. Once the service begins to drain, the sweeper finishes
+the pass in flight and runs no further one, whatever remains, so a large backlog never holds the
+drain; the next start finds what is left.
 
 The sweep is a Reactor in the architecture's sense, one that dispatches to no Domain Service: the
 composition root runs it on a reactor, the process's one runner for work driven by an
-occurrence for the process lifetime.
+occurrence for the process lifetime. `/readyz` reports it as the `sweeper` check; a backlog never
+makes the service unready.
 
-It wakes on each recursive delete, on an interval (`sweep.interval`, 30 seconds) for work no
-delete announced, and once at startup, so a branch marked before a restart is swept at the
-next start. A pass reclaims uploads and deletes left unfinished past `sweep.stale_age` (an
-hour), and handles at most `sweep.batch` (100) records. A pass the store or the database
-refuses is logged at warn and retried on the next wake; it never fails the service. `/readyz`
-reports the reactor as the `sweeper` check.
+A `files` pass that did work is logged at info as `"sweep pass"`, with the files, directories,
+and stale rows it removed and whether it reported more. A pass that failed, any reclaimer's, is
+logged at warn as `"sweep pass failed"`, with the reclaimer, whether it reported more, its
+duration, and the error; the sweep worker's `"sweep pass refused"` is gone. Two metrics report
+the passes:
+
+| Metric | Kind | Attributes | Meaning |
+|--------|------|------------|---------|
+| `sweep.passes` | counter | `sweep.reclaimer` (`files`, `outbox`, `inbox`), `sweep.outcome` (`drained`, `more`, `error`) | The passes run; `error` when the pass failed, whatever it reported, `more` when it reported more, `drained` otherwise |
+| `sweep.backlogged` | gauge | `sweep.reclaimer` | 1 while the reclaimer's last pass reported more, else 0 |
 
 ## Messaging
 

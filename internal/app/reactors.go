@@ -16,10 +16,11 @@ import (
 // run for the process lifetime, driven by an occurrence rather than a
 // caller. The sweeper is one: go-database's general sweeper, running each
 // reclaimer the service registers (files, outbox, and inbox), and the nudge
-// the document layer reaches its files reclaimer through. The messaging is the other: the runtime, and
-// the relay it builds, which publishes the outbox's committed events. No
-// node Uses a reactor, so each is listed in n.Reactors, which Run builds as
-// roots and the server orders itself after. It constructs nothing.
+// the document layer reaches its files reclaimer through. The messaging is
+// the other: the runtime, and the relay it builds, which publishes the
+// outbox's committed events. No node Uses a reactor, so each is listed in
+// n.Reactors, which Run builds as roots and the server orders itself after.
+// It constructs nothing.
 //
 // The relay's last pass publishes what was committed while the producers
 // drained, so every producer must drain before it. A node that commits

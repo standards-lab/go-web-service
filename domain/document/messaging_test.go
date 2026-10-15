@@ -195,11 +195,11 @@ func TestCommands_EmitTheirEventInTheirTransaction(t *testing.T) {
 		"delete file": {
 			[]sqltest.Response{
 				root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), within(true),
-				exec(1), datatest.FileRows(file(fileID, dirID, blobfs.StatusDeleting, 4)), written(),
+				datatest.FileRows(file(fileID, dirID, blobfs.StatusDeleting, 4)), written(),
 				exec(1), // the purge, after the commit
 			},
 			func(s *document.Service) error { return s.DeleteFile(ctx, orgID, fileID, 3) },
-			[]sqltest.Op{begin, q, q, q, x, q, x, commit, x},
+			[]sqltest.Op{begin, q, q, q, q, x, commit, x},
 			document.FileDeleted.Type(), fileID,
 			map[string]any{"file_id": fileID, "organization_id": orgID, "version": float64(4)},
 		},
@@ -361,40 +361,33 @@ func TestDeleteBranch_ARetryThatMarksAStragglerEmitsNothing(t *testing.T) {
 
 // A delete that finds the file deleting already, the delete's retry, is
 // accepted at any version, as it always was, and commits no event: the
-// hold reports the delete begun, so the delete's first transaction runs no
-// hook, the first delete having emitted the file's event. The retry still
-// finishes the delete, the object deleted and the row purged, and the
-// purge emits nothing. A file in a marked branch is deleting by its
-// branch's mark, which emitted the directory's event alone, and its
-// delete is the retry too.
+// delete statement changes nothing, which tells blobfs the delete began
+// before, so the delete's first transaction runs no hook, the first delete
+// having emitted the file's event. The retry still finishes the delete,
+// the object deleted and the row purged, and the purge emits nothing. A
+// file in a marked branch is deleting by its branch's mark, which emitted
+// the directory's event alone, and its delete is the retry too: blobfs
+// tells the retry from the file's row alone, never reading its directory,
+// so one script stands for both.
 func TestDeleteFile_ARetryEmitsNothingAndPurges(t *testing.T) {
-	cases := map[string]sqltest.Response{
-		"its own delete":  datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)),
-		"a marked branch": datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))),
+	deletingRow := datatest.FileRows(file(fileID, dirID, blobfs.StatusDeleting, 4))
+	s, rec, fake := serviceOver(t,
+		root(rootID), deletingRow, within(true),
+		datatest.FileRows(), deletingRow, // the delete's retry leaves the row as it is
+		exec(1), // the purge
+	)
+	ctx := context.Background()
+	key := fileID + "/report.txt"
+	if _, err := fake.Put(ctx, key, strings.NewReader("report"), storage.PutOptions{}); err != nil {
+		t.Fatal(err)
 	}
-	for name, dir := range cases {
-		t.Run(name, func(t *testing.T) {
-			deletingRow := datatest.FileRows(file(fileID, dirID, blobfs.StatusDeleting, 4))
-			s, rec, fake := serviceOver(t,
-				root(rootID), deletingRow, within(true),
-				exec(0), deletingRow, dir, // the hold matches nothing; the reads tell whose delete began
-				datatest.FileRows(), deletingRow, // the delete's retry leaves the row as it is
-				exec(1), // the purge
-			)
-			ctx := context.Background()
-			key := fileID + "/report.txt"
-			if _, err := fake.Put(ctx, key, strings.NewReader("report"), storage.PutOptions{}); err != nil {
-				t.Fatal(err)
-			}
-			if err := s.DeleteFile(ctx, orgID, fileID, 1); err != nil {
-				t.Fatalf("DeleteFile = %v; want the retry accepted", err)
-			}
-			sameOps(t, rec, begin, q, q, q, x, q, q, q, q, commit, x)
-			noEvent(t, rec)
-			if _, err := fake.Get(ctx, key, storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
-				t.Errorf("the retried delete's object is still stored: %v", err)
-			}
-		})
+	if err := s.DeleteFile(ctx, orgID, fileID, 1); err != nil {
+		t.Fatalf("DeleteFile = %v; want the retry accepted", err)
+	}
+	sameOps(t, rec, begin, q, q, q, q, q, commit, x)
+	noEvent(t, rec)
+	if _, err := fake.Get(ctx, key, storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
+		t.Errorf("the retried delete's object is still stored: %v", err)
 	}
 }
 
@@ -512,8 +505,8 @@ func TestCommands_AFailedCommandCommitsNoEvent(t *testing.T) {
 			[]sqltest.Op{begin, q, q, q, q, q, x, rollback}, nil,
 		},
 		"delete file, a stale version": {
-			[]sqltest.Response{root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), within(true), exec(0), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3))},
-			deleteFile, []sqltest.Op{begin, q, q, q, x, q, rollback}, query.ErrVersionMismatch,
+			[]sqltest.Response{root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), within(true), datatest.FileRows(), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3))},
+			deleteFile, []sqltest.Op{begin, q, q, q, q, q, rollback}, query.ErrVersionMismatch,
 		},
 		"delete file, outside the root": {
 			[]sqltest.Response{root(rootID), datatest.FileRows(file(fileID, otherID, blobfs.StatusAvailable, 2)), within(false)},
@@ -526,9 +519,9 @@ func TestCommands_AFailedCommandCommitsNoEvent(t *testing.T) {
 		"delete file, the event's write refused": {
 			[]sqltest.Response{
 				root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), within(true),
-				exec(1), datatest.FileRows(file(fileID, dirID, blobfs.StatusDeleting, 3)), refused,
+				datatest.FileRows(file(fileID, dirID, blobfs.StatusDeleting, 3)), refused,
 			},
-			deleteFile, []sqltest.Op{begin, q, q, q, x, q, x, rollback}, nil,
+			deleteFile, []sqltest.Op{begin, q, q, q, q, x, rollback}, nil,
 		},
 		"delete branch, a stale version": {
 			[]sqltest.Response{root(rootID), within(true), stale, exec(0), stale}, branch,

@@ -328,28 +328,28 @@ func (s *store) moveDirectory(ctx context.Context, organizationID, id string, ve
 
 // uploadFile stores the upload as a new file named name in the directory,
 // ensuring the root when the directory is its alias, by blobfs's two-phase
-// write as the sdk package stages it, whose first transaction runs the
-// scope check with the pending row's insert and whose completion's
-// transaction emits FileUploaded. A put or completion that fails, the
-// event's write among them, abandons the row and commits no event, and the
-// sweep finishes one whose abandon fails too. A completion refused as
-// deleting (a blobfs.DeletingError, which names whose delete it was)
-// deletes the object just put.
+// write, whose first transaction runs the scope check with the pending
+// row's insert and whose completion's transaction emits FileUploaded, by
+// its OnComplete hook. A put or completion that fails, the event's write
+// among them, abandons the row and commits no event, and the sweep
+// finishes one whose abandon fails too. A completion refused as deleting
+// (a blobfs.DeletingError, which names whose delete it was) deletes the
+// object just put.
 func (s *store) uploadFile(ctx context.Context, organizationID, directoryID, name string, u web.Upload) (Identity, error) {
 	st := s.storage
 	directoryID, err := s.writable(ctx, organizationID, directoryID)
 	if err != nil {
 		return Identity{}, err
 	}
-	file, err := sdk.WriteFile(ctx, st.FS, s.db.DB, st.Objects, u.Body, u.Size, func(tx *sqlate.Tx) (blobfs.File, error) {
+	file, err := st.FS.WriteFile(ctx, s.db.DB, st.Objects, u.Body, u.Size, func(tx *sqlate.Tx) (blobfs.File, error) {
 		_, dir, err := s.scope(ctx, tx, organizationID, directoryID)
 		if err != nil {
 			return blobfs.File{}, err
 		}
 		return st.FS.Files.Create(ctx, tx, st.Objects, dir, name, u.ContentType)
-	}, func(tx *sqlate.Tx, f blobfs.File) error {
+	}, bfdata.OnComplete(func(ctx context.Context, tx *sqlate.Tx, f blobfs.File) error {
 		return s.emitUploaded(ctx, tx, organizationID, f)
-	})
+	}))
 	return Identity{ID: file.ID, Version: file.Version}, err
 }
 
@@ -376,10 +376,10 @@ func (s *store) content(ctx context.Context, organizationID, id string) (Content
 	return Content{Name: file.Name, Object: dl.Object, Open: dl.Open}, nil
 }
 
-// deleteFile removes the file at version by blobfs's two-phase delete as
-// the sdk package stages it, its scope checked in the transaction that
-// begins the delete, which emits FileDeleted at the version that left the
-// file deleting. No row of the layer references a file, so no reference is
+// deleteFile removes the file at version by blobfs's two-phase delete, its
+// scope checked in the transaction that begins the delete, which emits
+// FileDeleted, by its OnDelete hook, at the version that left the file
+// deleting. No row of the layer references a file, so no reference is
 // removed before the delete. A file deleting already is the delete's
 // retry, which converges at any version, so a delete is never refused as
 // deleting; the retry emits nothing and finishes the purge, and the purge
@@ -387,12 +387,12 @@ func (s *store) content(ctx context.Context, organizationID, id string) (Content
 // commits no event.
 func (s *store) deleteFile(ctx context.Context, organizationID, id string, version int64) error {
 	st := s.storage
-	return sdk.RemoveFile(ctx, st.FS, s.db.DB, st.Objects, func(tx *sqlate.Tx) (string, error) {
+	return st.FS.RemoveFile(ctx, s.db.DB, st.Objects, func(tx *sqlate.Tx) (string, error) {
 		_, file, err := s.fileScope(ctx, tx, organizationID, id)
 		return file.ID, err
-	}, func(tx *sqlate.Tx, f blobfs.File) error {
+	}, bfdata.AtVersion(version), bfdata.OnDelete(func(ctx context.Context, tx *sqlate.Tx, f blobfs.File) error {
 		return s.emitDeleted(ctx, tx, organizationID, f)
-	}, bfdata.AtVersion(version))
+	}))
 }
 
 // moveFile moves the file into a directory within the same root, guarded

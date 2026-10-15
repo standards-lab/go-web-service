@@ -69,10 +69,10 @@ func TestStore_FileProtocols(t *testing.T) {
 		// MoveFile to the root by its alias, and its event.
 		root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), within(true),
 		datatest.FileRows(file(fileID, rootID, blobfs.StatusAvailable, 3)), written(),
-		// DeleteFile: the scope, the hold, the delete begun, and its event in
-		// one transaction, the object deleted, the purge on the pool.
+		// DeleteFile: the scope, the delete begun, and its event in one
+		// transaction, the object deleted, the purge on the pool.
 		root(rootID), datatest.FileRows(file(fileID, rootID, blobfs.StatusAvailable, 3)),
-		exec(1), datatest.FileRows(file(fileID, rootID, blobfs.StatusDeleting, 4)), written(),
+		datatest.FileRows(file(fileID, rootID, blobfs.StatusDeleting, 4)), written(),
 		exec(1),
 	)
 	id, err := s.UploadFile(ctx, orgID, dirID, "report.txt", textUpload(t))
@@ -114,7 +114,7 @@ func TestStore_FileProtocols(t *testing.T) {
 		begin, q, q, q, commit, begin, q, x, commit,
 		q, q, q,
 		begin, q, q, q, q, x, commit,
-		begin, q, q, x, q, x, commit, x,
+		begin, q, q, q, x, commit, x,
 	)
 }
 
@@ -455,7 +455,7 @@ func TestStore_DeleteBranchAtAStaleVersion(t *testing.T) {
 func TestStore_DeletesAtAStaleVersion(t *testing.T) {
 	s, _, fake := serviceOver(t,
 		root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), within(true),
-		exec(0), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), // the guarded hold matches nothing; the read tells the version
+		datatest.FileRows(), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), // the guarded delete matches nothing; the read tells the version
 		root(rootID), within(true), exec(0), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2)),
 	)
 	ctx := context.Background()

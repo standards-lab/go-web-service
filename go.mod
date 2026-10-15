@@ -6,19 +6,19 @@ require (
 	github.com/standards-lab/blobfs v0.7.0
 	github.com/standards-lab/blobfs/postgres v0.5.0
 	github.com/standards-lab/go-core v0.10.0
-	github.com/standards-lab/go-database v0.9.0
+	github.com/standards-lab/go-database v0.10.0
 	github.com/standards-lab/go-database/postgres v0.5.0
 	github.com/standards-lab/go-messaging v0.2.0
 	github.com/standards-lab/go-messaging/nats v0.2.0
-	github.com/standards-lab/go-messaging/postgres v0.1.0
+	github.com/standards-lab/go-messaging/postgres v0.2.0
 	github.com/standards-lab/go-observability v0.2.0
 	github.com/standards-lab/go-observability/otlp v0.2.0
 	github.com/standards-lab/go-storage v0.6.0
 	github.com/standards-lab/go-storage/azureblob v0.5.0
 	github.com/standards-lab/go-web-sdk v0.15.2
 	github.com/standards-lab/go-web-sdk/middleware/rate-limit v0.3.0
-	github.com/standards-lab/sqlate v0.5.0
-	github.com/standards-lab/sqlate/postgres v0.5.0
+	github.com/standards-lab/sqlate v0.6.0
+	github.com/standards-lab/sqlate/postgres v0.6.0
 	go.opentelemetry.io/otel/sdk/metric v1.47.0
 )
 

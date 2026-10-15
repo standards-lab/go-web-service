@@ -585,8 +585,9 @@ Configuration layers in a fixed precedence, later sources winning:
    `APP_OBSERVABILITY_SAMPLE_RATIO`, the rate limit (`APP_RATE_LIMIT_REQUESTS`,
    `APP_RATE_LIMIT_WINDOW`), the reads paging policy
    (`APP_READS_DEFAULT_SIZE`, `APP_READS_MAX_SIZE`), the admin seed set (`APP_ADMIN_SEED`, a
-   state name), and the sweep's interval, pass size, and stale age (`APP_SWEEP_INTERVAL`,
-   `APP_SWEEP_BATCH`, `APP_SWEEP_STALE_AGE`). An empty value counts as unset, as it does for every
+   state name), and the sweep's interval, pass size, stale age, and retention ages
+   (`APP_SWEEP_INTERVAL`, `APP_SWEEP_BATCH`, `APP_SWEEP_STALE_AGE`, `APP_SWEEP_OUTBOX_AGE`,
+   `APP_SWEEP_INBOX_AGE`). An empty value counts as unset, as it does for every
    override, so only a file's `"seed": ""` clears a configured seed set.
 
 Every file is optional: a deployment can run on the base file and environment variables alone,
@@ -628,8 +629,12 @@ is allowed. The body's size counts up to the route's limit (10 MiB for a documen
 logo). An upload slower than that pace answers 408; a download slower than that ends short.
 
 The `sweep` block schedules the [sweep](#sweep): `interval` (`APP_SWEEP_INTERVAL`, `30s`), the
-backstop wake; `batch` (`APP_SWEEP_BATCH`, 100), the records one pass handles; and `stale_age`
-(`APP_SWEEP_STALE_AGE`, `1h`), the age past which a pass reclaims an unfinished upload or delete.
+backstop wake; `batch` (`APP_SWEEP_BATCH`, 100), the records one pass handles; `stale_age`
+(`APP_SWEEP_STALE_AGE`, `1h`), the age past which a pass reclaims an unfinished upload or delete;
+`outbox_age` (`APP_SWEEP_OUTBOX_AGE`, `168h`, 7 days), the age past which a pass deletes a
+published outbox row; and `inbox_age` (`APP_SWEEP_INBOX_AGE`, `168h`), the age past which a pass
+deletes a handled inbox row, which must outlast every redelivery the broker can make. The interval
+and the batch apply to every reclaimer, and a non-positive age fails startup, naming the key.
 
 The `messaging` block is go-messaging's: `source` (`APP_MESSAGING_SOURCE`, `web-service` in
 `config.json`, required), the CloudEvents source of every event the service emits;

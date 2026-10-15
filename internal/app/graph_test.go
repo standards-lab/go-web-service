@@ -414,6 +414,30 @@ func TestGraph_TheDocumentNudgeReachesTheFilesReclaimer(t *testing.T) {
 	sys.Get(n.Nudge).Nudge()
 }
 
+// The sweeper registers the three reclaimers the service runs, files,
+// outbox, and inbox: go-database's Sweeper panics on a nudge of a name it
+// was not built with, so a reclaimer missing from the registration, or
+// registered under another name, fails here. A name it was not built with
+// is refused, which shows a nudge of a missing name does fail.
+func TestGraph_SweeperRegistersTheReclaimers(t *testing.T) {
+	a := app.New(configtest.Config(t), io.Discard)
+	sweeper := buildAsRun(t, a).Get(a.Nodes().Sweeper)
+
+	nudge := func(name string) (panicked bool) {
+		defer func() { panicked = recover() != nil }()
+		sweeper.Nudge(name)
+		return false
+	}
+	for _, name := range []string{"files", "outbox", "inbox"} {
+		if nudge(name) {
+			t.Errorf("Nudge(%q) panicked; want %s registered", name, name)
+		}
+	}
+	if !nudge("sessions") {
+		t.Error(`Nudge("sessions") did not panic; want a name the sweeper was not built with refused`)
+	}
+}
+
 // Each lifecycle participant is the value of one node only: the same value
 // in two nodes would start twice, stop twice, and, as a ReadyStarter, be
 // reported twice. The admin storage routes read the storage node's

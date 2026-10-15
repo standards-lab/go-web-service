@@ -14,8 +14,8 @@ import (
 // defineReactors defines the reactors on g into n: the entry points that
 // run for the process lifetime, driven by an occurrence rather than a
 // caller. The sweeper is one: go-database's general sweeper, running each
-// reclaimer the service registers, and the nudge the document layer reaches
-// its files reclaimer through. The messaging is the other: the runtime, and
+// reclaimer the service registers (files, outbox, and inbox), and the nudge
+// the document layer reaches its files reclaimer through. The messaging is the other: the runtime, and
 // the relay it builds, which publishes the outbox's committed events. No
 // node Uses a reactor, so each is listed in n.Reactors, which Run builds as
 // roots and the server orders itself after. It constructs nothing.
@@ -34,9 +34,15 @@ func defineReactors(g *graph.Graph, n *Nodes) {
 	n.Reactors = []graph.Ref{n.Sweeper, n.Relay}
 }
 
-// reclaimFiles is the name the sweeper registers blobfs's sweep under: the
-// name a nudge takes, and the lock "sweep.files" its cycle claims.
-const reclaimFiles = "files"
+// The names the sweeper registers its reclaimers under: the name a nudge
+// takes, and the lock "sweep.<name>" its cycle claims. reclaimFiles is
+// blobfs's sweep, reclaimOutbox and reclaimInbox go-messaging's retention
+// of the outbox and the inbox.
+const (
+	reclaimFiles  = "files"
+	reclaimOutbox = "outbox"
+	reclaimInbox  = "inbox"
+)
 
 // Nudge is the nudge node's value, the document layer's document.Sweeper:
 // the layer nudges it after each branch it marks, and it marks the
@@ -60,9 +66,15 @@ func (n *Nudge) Nudge() {
 }
 
 // newSweeper constructs go-database's sweeper over the sql node's session,
-// registering one reclaimer, files: the files node's blobfs sweep, every
-// interval of the config node's sweep block, in passes of its batch, and
-// reclaiming the file rows older than its stale age. The interval is the
+// registering three reclaimers, each every interval of the config node's
+// sweep block and in passes of its batch: files, the files node's blobfs
+// sweep, reclaiming the file rows older than the block's stale age; outbox,
+// go-messaging's outbox retention, deleting the published outbox rows older
+// than its outbox age; and inbox, the inbox retention, deleting the handled
+// inbox rows older than its inbox age. A retention that refuses its age is a
+// construction error, so it fails startup, though the config's validation
+// refuses a non-positive age first. Only files is nudged, by the document
+// layer; the retentions run at start and on the interval. The interval is the
 // backstop for a nudge that never came and the schedule of the stale rows'
 // reclaim; every reclaimer is due at start, so a branch marked by a process
 // that stopped before its sweep ran is swept at this process's start rather
@@ -86,9 +98,20 @@ func newSweeper(n *Nodes) func(*graph.Scope) (*sweep.Sweeper, error) {
 		db := s.Use(n.SQL).DB
 		logger := s.Use(n.Logger)
 
+		outbox, err := msgpg.OutboxRetention(db, cfg.Sweep.OutboxAge.Duration())
+		if err != nil {
+			return nil, err
+		}
+		inbox, err := msgpg.InboxRetention(db, cfg.Sweep.InboxAge.Duration())
+		if err != nil {
+			return nil, err
+		}
+
 		policy := sweep.Policy{Interval: cfg.Sweep.Interval.Duration(), Budget: *cfg.Sweep.Batch}
 		sw, err := sweep.New(db, []sweep.Registration{
 			{Name: reclaimFiles, Reclaimer: s.Use(n.Files).FilesReclaimer(db, cfg.Sweep.StaleAge.Duration(), logger), Policy: policy},
+			{Name: reclaimOutbox, Reclaimer: outbox, Policy: policy},
+			{Name: reclaimInbox, Reclaimer: inbox, Policy: policy},
 		}, cfg.ShutdownTimeout.Duration(), logger, sweep.Gated(s.Use(n.Gate)))
 		if err != nil {
 			return nil, err

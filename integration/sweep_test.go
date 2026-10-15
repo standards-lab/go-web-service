@@ -19,6 +19,7 @@ import (
 	"github.com/standards-lab/go-database/sweep"
 	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-web-sdk/webtest"
+	"github.com/standards-lab/sqlate"
 	pgdialect "github.com/standards-lab/sqlate/postgres"
 
 	"github.com/standards-lab/go-web-service/data"
@@ -369,5 +370,116 @@ func TestSweepClaimAcrossReplicas(t *testing.T) {
 	}
 	if overlap.Load() {
 		t.Error("a pass of one replica ran inside a pass of the other")
+	}
+}
+
+// exec runs one statement on db beneath the API, failing the test on its
+// error.
+func exec(t *testing.T, db *sqlate.DB, query string, args ...any) {
+	t.Helper()
+	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
+		t.Fatalf("%s: %v", query, err)
+	}
+}
+
+// holds reports whether db holds a row the query, a SELECT 1 over one
+// table, finds.
+func holds(t *testing.T, db *sqlate.DB, query string, args ...any) bool {
+	t.Helper()
+	rows, err := db.QueryContext(context.Background(), query, args...)
+	if err != nil {
+		t.Fatalf("%s: %v", query, err)
+	}
+	defer func() { _ = rows.Close() }()
+	held := rows.Next()
+	if err := rows.Err(); err != nil {
+		t.Fatalf("%s: %v", query, err)
+	}
+	return held
+}
+
+// The sweeper's outbox and inbox reclaimers delete the messaging rows past
+// their ages on the running service, and no other. The service runs with
+// both ages at an hour and an interval of 100ms, so a row the test
+// backdates two hours with SQL is reclaimed within a few intervals while
+// every row it leaves younger, or never published, outlives many. Rows are
+// told apart by event id, or, in the inbox, by a consumer of the test's
+// own. Each case waits for its aged row to go, so the pass that removed it
+// ran with the rows it must keep in place; one statement weighs them all.
+func TestSweepRetention(t *testing.T) {
+	f := processtest.Forward(t, integration.NATSAddr())
+	s := integration.Start(t, integration.Options{
+		Seed: integration.Default,
+		NATS: f.Addr(),
+		Env: []string{
+			"APP_SWEEP_INTERVAL=100ms", "APP_SWEEP_OUTBOX_AGE=1h", "APP_SWEEP_INBOX_AGE=1h",
+			// A publish to the severed broker gives up within a second.
+			"APP_MESSAGING_RELAY_TIMEOUT=1s",
+		},
+	})
+	db := integration.Database(t)
+	drained(t, db)
+
+	t.Run("handled inbox rows past the inbox age are deleted", func(t *testing.T) {
+		const consumer = "integration-sweep-retention"
+		t.Cleanup(func() { exec(t, db, "DELETE FROM messaging_inbox WHERE consumer = $1", consumer) })
+		held := func(id string) bool {
+			return holds(t, db, "SELECT 1 FROM messaging_inbox WHERE consumer = $1 AND id = $2", consumer, id)
+		}
+		insert := "INSERT INTO messaging_inbox (consumer, source, id, handled_at) VALUES ($1, 'web-service', $2, now() - $3::interval)"
+		exec(t, db, insert, consumer, "recent", "1 minute")
+		exec(t, db, insert, consumer, "aged", "2 hours")
+
+		processtest.WaitFor(t, "the aged inbox row deleted", func() bool { return !held("aged") })
+		if !held("recent") {
+			t.Error("the inbox row handled a minute ago was deleted; want it kept until the inbox age")
+		}
+	})
+
+	t.Run("published outbox rows past the outbox age are deleted", func(t *testing.T) {
+		// Published: the relay publishes both, then the test backdates
+		// one's publication past the age.
+		aged, recent := emitProbe(t, db), emitProbe(t, db)
+		drained(t, db)
+
+		// Unpublished: NATS severed, the relay cannot publish the probe,
+		// whose row is created two hours ago.
+		f.Sever()
+		restored := false
+		t.Cleanup(func() {
+			if !restored {
+				f.Restore(t)
+			}
+		})
+		unpublished := emitProbe(t, db)
+		exec(t, db, "UPDATE messaging_outbox SET created_at = now() - interval '2 hours' WHERE id = $1", unpublished)
+
+		// Quarantined: a row the relay set aside two hours ago, written
+		// directly, as no route can make one.
+		quarantined := fmt.Sprintf("quarantined-%d", time.Now().UnixNano())
+		exec(t, db, `INSERT INTO messaging_outbox (source, id, header, created_at, quarantined_at, quarantine_reason)
+			VALUES ('web-service', $1, '{}', now() - interval '2 hours', now() - interval '2 hours', 'integration: quarantined')`, quarantined)
+		t.Cleanup(func() {
+			exec(t, db, "DELETE FROM messaging_outbox WHERE id IN ($1, $2)", unpublished, quarantined)
+		})
+
+		exec(t, db, "UPDATE messaging_outbox SET published_at = now() - interval '2 hours' WHERE id = $1", aged)
+		processtest.WaitFor(t, "the aged published outbox row deleted", func() bool { return !outboxHolds(t, db, aged) })
+
+		if !outboxHolds(t, db, recent) {
+			t.Error("the outbox row published just now was deleted; want it kept until the outbox age")
+		}
+		if !holds(t, db, "SELECT 1 FROM messaging_outbox WHERE id = $1 AND published_at IS NULL", unpublished) {
+			t.Error("the unpublished outbox row is gone or published; want it kept, awaiting publication")
+		}
+		if !outboxHolds(t, db, quarantined) {
+			t.Error("the quarantined outbox row was deleted; want it kept")
+		}
+		f.Restore(t)
+		restored = true
+	})
+
+	if code := s.Stop(t); code != 0 {
+		t.Fatalf("exit = %d:\n%s", code, s.Output())
 	}
 }

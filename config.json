@@ -50,7 +50,9 @@
   "sweep": {
     "interval": "30s",
     "batch": 100,
-    "stale_age": "1h"
+    "stale_age": "1h",
+    "outbox_age": "168h",
+    "inbox_age": "168h"
   },
   "shutdown_timeout": "10s"
 }

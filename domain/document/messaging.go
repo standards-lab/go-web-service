@@ -16,8 +16,8 @@ import (
 // or the file's. A seed that creates a root, a directory, or a file emits
 // the event its creation's command emits, with the same data, in the
 // transaction that creates it. Reads, the sweep's reclamation of a marked
-// branch, and the purges that finish a delete emit nothing. Their types and their data are
-// public API: a consumer in another service binds both.
+// branch, and the purges that finish a delete emit nothing. Their types
+// and their data are public API: a consumer in another service binds both.
 var (
 	// DirectoryCreated is the event a directory's create emits, its data
 	// the directory as the insert stored it. The organization's document

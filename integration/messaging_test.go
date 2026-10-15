@@ -124,10 +124,10 @@ func unreadyChecks(t *testing.T, c *webtest.Client) (status int, unready []strin
 // probe commits is published once, the service logging the event it sent,
 // and then marked published, so the outbox holds nothing pending. The
 // reset commits its own event and its seed's first, so the case waits for
-// them to drain before it commits the probe, and the probe's row is then the only
-// one the relay has to publish. The relay logs the publish before it marks
-// the row in the same pass, so the case waits for the mark rather than
-// reading the outbox the moment the log appears.
+// them to drain before it commits the probe, and the probe's row is then
+// the only one the relay has to publish. The relay logs the publish before
+// it marks the row in the same pass, so the case waits for the mark rather
+// than reading the outbox the moment the log appears.
 func TestMessaging_RelayPublishesCommittedEvents(t *testing.T) {
 	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	c := s.Client()
@@ -197,8 +197,9 @@ func TestMessaging_BrokerOutage(t *testing.T) {
 // own web-service.database.reset, then its seed its creations' events,
 // every seed event type, to the outbox applied again, and their publishes
 // fail too while NATS is severed. From the reset's start the relay reports
-// no failure but those refused publishes, a database error among them, and once NATS returns the
-// service is ready, the relay check with it, with nothing pending.
+// no failure but those refused publishes, a database error among them,
+// and once NATS returns the service is ready, the relay check with it,
+// with nothing pending.
 func TestMessaging_StateResetUnderTheRelay(t *testing.T) {
 	f := processtest.Forward(t, integration.NATSAddr())
 	s := integration.Start(t, integration.Options{

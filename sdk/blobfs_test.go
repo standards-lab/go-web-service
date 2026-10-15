@@ -35,10 +35,10 @@ const (
 	uploadedContent = "report"
 )
 
-// protocol is the staged protocols' dependencies over the scripted driver, blobfs's
-// store in the returning dialect so each of its commands is one statement,
-// and the fake object store behind the data package's adapter, started as
-// the composition root starts the real one.
+// protocol is the staged protocols' dependencies over the scripted
+// driver, blobfs's store in the returning dialect so each of its commands
+// is one statement, and the fake object store behind the data package's
+// adapter, started as the composition root starts the real one.
 type protocol struct {
 	st   *data.Storage
 	db   *sqlate.DB

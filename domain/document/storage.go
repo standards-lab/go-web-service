@@ -268,14 +268,22 @@ func (s *store) deleteDirectory(ctx context.Context, organizationID, id string, 
 // Whether the mark is the first is the directory's own status, read in the
 // mark's transaction before the mark, not blobfs's count: a retry descends
 // through the deleting branch and counts a straggler a create raced into
-// it after the first mark, which is no new delete of the directory. A
-// directory read active whose mark counts nothing was marked by a
-// concurrent first mark, which committed between the read and the mark
-// and emits the event itself.
+// it after the first mark, which is no new delete of the directory. The
+// read follows blobfs's tree lock, which the mark takes again, so on the
+// Postgres engine the service runs, whose lock is held to the end of the
+// transaction and re-entrant, no other mark commits between the read and
+// the mark: a directory read active is the first mark's. The count guard
+// serves the baseline variant alone, whose lock is a no-op: there a
+// concurrent first mark can commit between the read and the mark, which
+// then counts nothing and leaves the event to the first mark. A straggler
+// that mark races in beside it still counts, and only the lock closes that.
 func (s *store) markBranch(ctx context.Context, organizationID, id string, version int64) (string, error) {
 	return s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (string, error) {
 		_, id, err := s.scope(ctx, tx, organizationID, id)
 		if err != nil {
+			return "", err
+		}
+		if err := s.storage.FS.Directories.LockTree(ctx, tx); err != nil {
 			return "", err
 		}
 		anchor, err := s.storage.FS.Directories.Find(ctx, tx, id)

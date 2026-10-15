@@ -306,12 +306,31 @@ func TestEnsureRoot_TheTransactionThatCreatesTheRootEmitsIt(t *testing.T) {
 
 // A mark that finds the directory deleting already, the mark's retry, is
 // accepted as it always was, and commits no event: the directory reads
-// deleting before the mark, and the first mark emitted the directory's.
+// deleting under the tree lock, before the mark, and the first mark
+// emitted the directory's.
 func TestDeleteBranch_ARetryOfTheMarkEmitsNothing(t *testing.T) {
 	marked := datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1)))
+	s, rec, _, _ := serviceOnPostgres(t,
+		root(rootID), within(true), exec(0), marked, // the tree locked; deleting already
+		exec(0), exec(0), marked, // nothing marked; the mark's read finds it deleting
+		exec(0),
+	)
+	if id, err := s.DeleteBranch(context.Background(), orgID, dirID, 1); err != nil || id != dirID {
+		t.Fatalf("DeleteBranch = %q, %v; want the retry accepted", id, err)
+	}
+	sameOps(t, rec, begin, q, q, x, q, x, x, q, x, commit)
+	noEvent(t, rec)
+}
+
+// On the baseline variant, whose tree lock is a no-op, a first mark can
+// commit between the directory's read and this mark: the directory reads
+// active, but the mark counts nothing and finds it deleting, so the mark
+// is accepted as the retry and commits no event, the first mark having
+// emitted it. The count guard serves this case alone.
+func TestDeleteBranch_AMarkOvertakenOnTheBaselineEmitsNothing(t *testing.T) {
 	s, rec, _ := serviceOver(t,
-		root(rootID), within(true), marked, // deleting already
-		exec(0), marked, // nothing marked; the mark's read finds it deleting
+		root(rootID), within(true), datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)), // read active
+		exec(0), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 2))), // marked meanwhile; nothing counted
 		exec(0),
 	)
 	if id, err := s.DeleteBranch(context.Background(), orgID, dirID, 1); err != nil || id != dirID {
@@ -327,15 +346,16 @@ func TestDeleteBranch_ARetryOfTheMarkEmitsNothing(t *testing.T) {
 // so its delete began with the first mark, which emitted its event, and
 // the straggler beneath it has none of its own.
 func TestDeleteBranch_ARetryThatMarksAStragglerEmitsNothing(t *testing.T) {
-	s, rec, _ := serviceOver(t,
-		root(rootID), within(true), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), // deleting already
+	s, rec, _, _ := serviceOnPostgres(t,
+		root(rootID), within(true), exec(0), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), // the tree locked; deleting already
+		exec(0), // the mark's own lock, held already
 		exec(1), // the straggler beneath it marked
 		exec(2), // the straggler's files marked
 	)
 	if id, err := s.DeleteBranch(context.Background(), orgID, dirID, 1); err != nil || id != dirID {
 		t.Fatalf("DeleteBranch = %q, %v; want the retry accepted", id, err)
 	}
-	sameOps(t, rec, begin, q, q, q, x, x, commit)
+	sameOps(t, rec, begin, q, q, x, q, x, x, x, commit)
 	noEvent(t, rec)
 }
 

@@ -34,8 +34,8 @@ accumulate under [Unreleased] until the first cut.
   delete and a branch's mark both, for the marked directory alone), and
   `web-service.document.file.uploaded`, `.moved`, and `.deleted`; a file move's `size` and
   `etag` are null for a pending file. A command that fails commits no event, and neither does a
-  retry that changes nothing (a repeated file delete or branch mark), a read, the sweep's
-  reclamation, or a purge. The organization's document root emits `directory.created` in the
+  retry of a delete already under way (a repeated file delete or branch mark), a read, the
+  sweep's reclamation, or a purge. The organization's document root emits `directory.created` in the
   transaction of the first write that creates it, a seed's among them. Every seed write that
   creates an entity emits its command's event, and a rerun over a seeded schema emits nothing.
   A state reset emits one `web-service.database.reset`, its data the state's name, after its apply

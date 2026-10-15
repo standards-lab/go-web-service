@@ -12,6 +12,7 @@ import (
 	"github.com/standards-lab/blobfs"
 	bfdata "github.com/standards-lab/blobfs/data"
 	"github.com/standards-lab/blobfs/data/datatest"
+	blobfspg "github.com/standards-lab/blobfs/postgres"
 	"github.com/standards-lab/go-messaging/outbox"
 	msgpg "github.com/standards-lab/go-messaging/postgres"
 	"github.com/standards-lab/go-storage"
@@ -57,10 +58,24 @@ func (n *nudges) Nudge() { n.seen = append(n.seen, n.rec.Ops()) }
 // serviceNudged is serviceOver with the sweeper the service nudges.
 func serviceNudged(t *testing.T, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *storagetest.Fake, *nudges) {
 	t.Helper()
+	return serviceOn(t, nil, responses...)
+}
+
+// serviceOnPostgres is serviceNudged with blobfs on the Postgres engine the
+// composition root gives it, whose tree lock is a statement the script
+// answers, where the baseline's is a no-op that runs none.
+func serviceOnPostgres(t *testing.T, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *storagetest.Fake, *nudges) {
+	t.Helper()
+	return serviceOn(t, []bfdata.Option{bfdata.WithEngine(blobfspg.Engine)}, responses...)
+}
+
+// serviceOn is serviceNudged with blobfs built with opts.
+func serviceOn(t *testing.T, opts []bfdata.Option, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *storagetest.Fake, *nudges) {
+	t.Helper()
 	dialect := sqltest.ReturningDialect{}
 	pool, rec := sqltest.Open(t, responses...)
 	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
-	fs, err := bfdata.New(catalog, dialect)
+	fs, err := bfdata.New(catalog, dialect, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}

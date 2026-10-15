@@ -388,10 +388,11 @@ service](#adding-a-service) gives the rule a new producer follows.
 
 - **One event per command.** Every public command that changes state commits exactly one event,
   in the transaction that makes that state true, so the event commits exactly when the state
-  does. A command that fails commits none, and so does a retry that changes nothing: a repeated
-  file delete, which finds the file deleting already, or a repeated branch mark. A read commits
-  none, and neither do the sweep's reclamation of a marked branch or an abandoned write and the
-  purges that finish a delete.
+  does. A command that fails commits none, and so does a retry of a delete already under way: a
+  repeated file delete, which finds the file deleting already, or a repeated branch mark, which
+  finds the directory deleting already, even when it marks a straggler. A read commits none, and
+  neither do the sweep's reclamation of a marked branch or an abandoned write and the purges that
+  finish a delete.
 - **Seeds emit.** Every seed write that creates an entity commits the event its command
   commits, with the same data, in the transaction that creates it: an organization's
   `organization.created`, a logo's `organization.logo.uploaded` in its activation's, a

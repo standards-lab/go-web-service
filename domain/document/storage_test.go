@@ -384,6 +384,7 @@ func takenName() error {
 func TestStore_DeleteBranchMarksThenNudges(t *testing.T) {
 	s, rec, _, sweep := serviceNudged(t,
 		root(rootID), within(true),
+		datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)), // the directory read active before its mark
 		exec(2), // the directory and one beneath it marked
 		exec(3), // their files marked
 		datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), exec(1), // the directory read for its event, written
@@ -392,8 +393,8 @@ func TestStore_DeleteBranchMarksThenNudges(t *testing.T) {
 	if err != nil || id != dirID {
 		t.Fatalf("DeleteBranch = %q, %v", id, err)
 	}
-	sameOps(t, rec, begin, q, q, x, x, q, x, commit)
-	mark := rec.Calls()[3]
+	sameOps(t, rec, begin, q, q, q, x, x, q, x, commit)
+	mark := rec.Calls()[4]
 	if !strings.HasPrefix(mark.SQL, "UPDATE blobfs_directory") || fmt.Sprint(mark.Args) != fmt.Sprint([]any{dirID, int64(1)}) {
 		t.Errorf("mark = %q %v; want the directory at the If-Match version", mark.SQL, mark.Args)
 	}
@@ -408,14 +409,14 @@ func TestStore_DeleteBranchMarksThenNudges(t *testing.T) {
 func TestStore_DeleteBranchRetryConverges(t *testing.T) {
 	marked := deleting(directory(dirID, rootID, "reports", 1))
 	s, rec, _, sweep := serviceNudged(t,
-		root(rootID), within(true),
+		root(rootID), within(true), datatest.DirectoryRows(marked),
 		exec(0), datatest.DirectoryRows(marked), // nothing newly marked; the read finds it deleting
 		exec(0),
 	)
 	if _, err := s.DeleteBranch(context.Background(), orgID, dirID, 1); err != nil {
 		t.Fatalf("DeleteBranch = %v; want the retry accepted", err)
 	}
-	sameOps(t, rec, begin, q, q, x, q, x, commit)
+	sameOps(t, rec, begin, q, q, q, x, q, x, commit)
 	if len(sweep.seen) != 1 {
 		t.Errorf("nudges = %d; want one", len(sweep.seen))
 	}
@@ -425,8 +426,8 @@ func TestStore_DeleteBranchRetryConverges(t *testing.T) {
 // is marked like any directory, by its alias.
 func TestStore_DeleteBranchAtAStaleVersion(t *testing.T) {
 	s, rec, _, sweep := serviceNudged(t,
-		root(rootID), within(true), exec(0), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2)),
-		root(rootID), exec(1), exec(0), datatest.DirectoryRows(deleting(directory(rootID, blobfs.RootID, orgID, 1))), exec(1),
+		root(rootID), within(true), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2)), exec(0), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2)),
+		root(rootID), datatest.DirectoryRows(directory(rootID, blobfs.RootID, orgID, 1)), exec(1), exec(0), datatest.DirectoryRows(deleting(directory(rootID, blobfs.RootID, orgID, 1))), exec(1),
 	)
 	ctx := context.Background()
 	if _, err := s.DeleteBranch(ctx, orgID, dirID, 1); !errors.Is(err, query.ErrVersionMismatch) {
@@ -438,7 +439,7 @@ func TestStore_DeleteBranchAtAStaleVersion(t *testing.T) {
 	if id, err := s.DeleteBranch(ctx, orgID, document.RootAlias, 1); err != nil || id != rootID {
 		t.Fatalf("DeleteBranch(root) = %q, %v; want the root marked", id, err)
 	}
-	sameOps(t, rec, begin, q, q, x, q, sqltest.OpRollback, begin, q, x, x, q, x, commit)
+	sameOps(t, rec, begin, q, q, q, x, q, sqltest.OpRollback, begin, q, q, x, x, q, x, commit)
 }
 
 // The deletes guard on the If-Match version: a file or an empty directory

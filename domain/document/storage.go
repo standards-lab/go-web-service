@@ -262,16 +262,28 @@ func (s *store) deleteDirectory(ctx context.Context, organizationID, id string, 
 // scope check and DirectoryDeleted for the directory alone, and returns
 // the directory's id. The sweep removes the branch after the commit and
 // emits nothing. A directory deleting already is the mark's retry, which
-// converges at any version: blobfs's mark counts no directory, so it emits
-// nothing, the first mark having emitted the directory's event.
+// converges at any version and emits nothing, the first mark having
+// emitted the directory's event.
+//
+// Whether the mark is the first is the directory's own status, read in the
+// mark's transaction before the mark, not blobfs's count: a retry descends
+// through the deleting branch and counts a straggler a create raced into
+// it after the first mark, which is no new delete of the directory. A
+// directory read active whose mark counts nothing was marked by a
+// concurrent first mark, which committed between the read and the mark
+// and emits the event itself.
 func (s *store) markBranch(ctx context.Context, organizationID, id string, version int64) (string, error) {
 	return s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (string, error) {
 		_, id, err := s.scope(ctx, tx, organizationID, id)
 		if err != nil {
 			return "", err
 		}
+		anchor, err := s.storage.FS.Directories.Find(ctx, tx, id)
+		if err != nil {
+			return "", err
+		}
 		marked, err := s.storage.FS.Directories.MarkDeleting(ctx, tx, id, bfdata.AtVersion(version))
-		if err != nil || marked.Directories == 0 {
+		if err != nil || anchor.Status != blobfs.DirectoryStatusActive || marked.Directories == 0 {
 			return id, err
 		}
 		return id, s.raiseMarked(ctx, tx, q, organizationID, id)

@@ -410,12 +410,12 @@ func TestDeleteDirectory_RecursiveIs202(t *testing.T) {
 		responses []sqltest.Response
 		id, want  string
 	}{
-		"a directory": {[]sqltest.Response{root(rootID), within(true), exec(1), exec(1), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), exec(1)}, dirID, dirID},
+		"a directory": {[]sqltest.Response{root(rootID), within(true), datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)), exec(1), exec(1), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), exec(1)}, dirID, dirID},
 		"a retry": {
-			[]sqltest.Response{root(rootID), within(true), exec(0), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), exec(0)},
+			[]sqltest.Response{root(rootID), within(true), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), exec(0), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), exec(0)},
 			dirID, dirID,
 		},
-		"the root": {[]sqltest.Response{root(rootID), exec(1), exec(0), datatest.DirectoryRows(deleting(directory(rootID, blobfs.RootID, orgID, 1))), exec(1)}, document.RootAlias, rootID},
+		"the root": {[]sqltest.Response{root(rootID), datatest.DirectoryRows(directory(rootID, blobfs.RootID, orgID, 1)), exec(1), exec(0), datatest.DirectoryRows(deleting(directory(rootID, blobfs.RootID, orgID, 1))), exec(1)}, document.RootAlias, rootID},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -440,7 +440,7 @@ func TestDeletes_GuardOnIfMatch(t *testing.T) {
 			"/directories/" + dirID, `"1"`, 412,
 		},
 		"stale branch": {
-			[]sqltest.Response{root(rootID), within(true), exec(0), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2))},
+			[]sqltest.Response{root(rootID), within(true), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2)), exec(0), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2))},
 			"/directories/" + dirID + "?recursive=true", `"1"`, 412,
 		},
 		"stale file": {

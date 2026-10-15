@@ -205,7 +205,7 @@ func TestCommands_EmitTheirEventInTheirTransaction(t *testing.T) {
 		},
 		"delete branch": {
 			[]sqltest.Response{
-				root(rootID), within(true),
+				root(rootID), within(true), datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)),
 				exec(3), exec(5), // the directory and two beneath it marked, and their files
 				datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), written(),
 			},
@@ -213,7 +213,7 @@ func TestCommands_EmitTheirEventInTheirTransaction(t *testing.T) {
 				_, err := s.DeleteBranch(ctx, orgID, dirID, 1)
 				return err
 			},
-			[]sqltest.Op{begin, q, q, x, x, q, x, commit},
+			[]sqltest.Op{begin, q, q, q, x, x, q, x, commit},
 			document.DirectoryDeleted.Type(), dirID,
 			map[string]any{"directory_id": dirID, "organization_id": orgID, "version": float64(2)},
 		},
@@ -305,18 +305,37 @@ func TestEnsureRoot_TheTransactionThatCreatesTheRootEmitsIt(t *testing.T) {
 }
 
 // A mark that finds the directory deleting already, the mark's retry, is
-// accepted as it always was, and commits no event: blobfs's mark counts no
-// directory, and the first mark emitted the directory's.
+// accepted as it always was, and commits no event: the directory reads
+// deleting before the mark, and the first mark emitted the directory's.
 func TestDeleteBranch_ARetryOfTheMarkEmitsNothing(t *testing.T) {
+	marked := datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1)))
 	s, rec, _ := serviceOver(t,
-		root(rootID), within(true),
-		exec(0), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), // nothing marked; deleting already
+		root(rootID), within(true), marked, // deleting already
+		exec(0), marked, // nothing marked; the mark's read finds it deleting
 		exec(0),
 	)
 	if id, err := s.DeleteBranch(context.Background(), orgID, dirID, 1); err != nil || id != dirID {
 		t.Fatalf("DeleteBranch = %q, %v; want the retry accepted", id, err)
 	}
-	sameOps(t, rec, begin, q, q, x, q, x, commit)
+	sameOps(t, rec, begin, q, q, q, x, q, x, commit)
+	noEvent(t, rec)
+}
+
+// A retry whose mark reaches a straggler, a directory a create raced into
+// the branch after the first mark, commits no event either: the mark
+// counts the straggler, but the directory read deleting before the mark,
+// so its delete began with the first mark, which emitted its event, and
+// the straggler beneath it has none of its own.
+func TestDeleteBranch_ARetryThatMarksAStragglerEmitsNothing(t *testing.T) {
+	s, rec, _ := serviceOver(t,
+		root(rootID), within(true), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), // deleting already
+		exec(1), // the straggler beneath it marked
+		exec(2), // the straggler's files marked
+	)
+	if id, err := s.DeleteBranch(context.Background(), orgID, dirID, 1); err != nil || id != dirID {
+		t.Fatalf("DeleteBranch = %q, %v; want the retry accepted", id, err)
+	}
+	sameOps(t, rec, begin, q, q, q, x, x, commit)
 	noEvent(t, rec)
 }
 
@@ -492,16 +511,16 @@ func TestCommands_AFailedCommandCommitsNoEvent(t *testing.T) {
 			deleteFile, []sqltest.Op{begin, q, q, q, x, q, x, rollback}, nil,
 		},
 		"delete branch, a stale version": {
-			[]sqltest.Response{root(rootID), within(true), exec(0), stale}, branch,
-			[]sqltest.Op{begin, q, q, x, q, rollback}, query.ErrVersionMismatch,
+			[]sqltest.Response{root(rootID), within(true), stale, exec(0), stale}, branch,
+			[]sqltest.Op{begin, q, q, q, x, q, rollback}, query.ErrVersionMismatch,
 		},
 		"delete branch, outside the root": {
 			[]sqltest.Response{root(rootID), within(false)}, branch,
 			[]sqltest.Op{begin, q, q, rollback}, blobfs.ErrNotFound,
 		},
 		"delete branch, the event's write refused": {
-			[]sqltest.Response{root(rootID), within(true), exec(1), exec(0), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), refused}, branch,
-			[]sqltest.Op{begin, q, q, x, x, q, x, rollback}, nil,
+			[]sqltest.Response{root(rootID), within(true), datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)), exec(1), exec(0), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), refused}, branch,
+			[]sqltest.Op{begin, q, q, q, x, x, q, x, rollback}, nil,
 		},
 	}
 	for name, c := range cases {

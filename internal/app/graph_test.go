@@ -421,8 +421,10 @@ func claimFailures(log, reclaimer string) int {
 // reclaimer's name; with an interval of an hour, a cycle after the start's
 // runs only on a nudge. The nudge node the document layer is built with
 // then earns the files reclaimer, alone, a second cycle: a nudge left
-// unbound, or bound to another reclaimer, never logs one. Unbound, as in a
-// graph built without the sweeper, a nudge does nothing and never panics.
+// unbound, or bound to another reclaimer, never logs one. The records also
+// show the service's sweeper claims each reclaimer's lock: one built
+// sweep.Unlocked would log no claim. Unbound, as in a graph built without
+// the sweeper, a nudge does nothing and never panics.
 func TestGraph_TheDocumentNudgeReachesTheFilesReclaimer(t *testing.T) {
 	cfg := configtest.Config(t)
 	cfg.Sweep.Interval = libconfig.Duration(time.Hour)

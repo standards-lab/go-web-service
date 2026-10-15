@@ -297,15 +297,26 @@ func (r *holding) Pass(ctx context.Context, _ int) (bool, error) {
 	return false, nil
 }
 
+// counting is a reclaimer whose passes only count themselves.
+type counting struct{ passes atomic.Int32 }
+
+func (r *counting) Pass(context.Context, int) (bool, error) {
+	r.passes.Add(1)
+	return false, nil
+}
+
 // Two replicas on one database never run the files reclaimer's cycle at
-// once: each sweeper, as the service builds it on Postgres, claims
+// once: each sweeper over Postgres, as the service builds it, claims
 // "sweep.files" (the lock registry's data.LockSweepPrefix) for its cycle,
 // and a replica that finds the claim held runs no pass. The first
 // sweeper's pass holds until the test releases it; while it does, the
-// second, nudged every tick, runs none, and a third session is refused the
-// lock. Released, the second takes its turn, and the two then cycle on a
-// short interval with no pass of one inside a pass of the other. Each
-// sweeper has its own pool, as each replica would.
+// second runs none, and a third session is refused the lock. Released, the
+// second takes its turn, and the two then cycle with no pass of one inside
+// a pass of the other. Each sweeper has its own pool, as each replica
+// would. A cycle whose claim is refused reports nothing, so the second
+// sweeper also runs a probe reclaimer listed after files: a delivery that
+// nudged both runs files' cycle before the probe's pass, so each probe pass
+// the test waits for marks a files cycle the second replica attempted.
 func TestSweepClaimAcrossReplicas(t *testing.T) {
 	const interval = 50 * time.Millisecond
 	var active atomic.Int32
@@ -315,15 +326,15 @@ func TestSweepClaimAcrossReplicas(t *testing.T) {
 	close(released)
 	first := &holding{hold: holdFirst, active: &active, overlap: &overlap}
 	second := &holding{hold: released, active: &active, overlap: &overlap}
+	probe := new(counting)
 
 	// Each shutdown releases the first's pass first, so a failed assertion
 	// leaves no pass holding the drain.
 	releaseFirst := sync.OnceFunc(func() { close(holdFirst) })
-	start := func(r sweep.Reclaimer) *sweep.Sweeper {
+	policy := sweep.Policy{Interval: interval, Budget: 1}
+	start := func(regs ...sweep.Registration) *sweep.Sweeper {
 		t.Helper()
-		sw, err := sweep.New(integration.Database(t), []sweep.Registration{
-			{Name: "files", Reclaimer: r, Policy: sweep.Policy{Interval: interval, Budget: 1}},
-		}, 10*time.Second, slog.New(slog.DiscardHandler))
+		sw, err := sweep.New(integration.Database(t), regs, 10*time.Second, slog.New(slog.DiscardHandler))
 		if err != nil {
 			t.Fatalf("sweep.New: %v", err)
 		}
@@ -340,14 +351,25 @@ func TestSweepClaimAcrossReplicas(t *testing.T) {
 		})
 		return sw
 	}
-	start(first)
+	// attempts has the second replica attempt n files cycles, each nudged
+	// with the probe and awaited through the probe's pass.
+	attempts := func(other *sweep.Sweeper, n int) {
+		t.Helper()
+		for range n {
+			before := probe.passes.Load()
+			other.Nudge("files")
+			other.Nudge("probe")
+			processtest.WaitFor(t, "the second replica's delivery", func() bool { return probe.passes.Load() > before })
+		}
+	}
+	mine := start(sweep.Registration{Name: "files", Reclaimer: first, Policy: policy})
 	processtest.WaitFor(t, "the first replica's pass", func() bool { return first.passes.Load() > 0 })
 
-	other := start(second)
-	for range 10 {
-		other.Nudge("files")
-		time.Sleep(interval)
-	}
+	other := start(
+		sweep.Registration{Name: "files", Reclaimer: second, Policy: policy},
+		sweep.Registration{Name: "probe", Reclaimer: probe, Policy: policy},
+	)
+	attempts(other, 5)
 	if n := second.passes.Load(); n != 0 {
 		t.Fatalf("the second replica ran %d passes while the first held the claim; want none", n)
 	}
@@ -365,8 +387,8 @@ func TestSweepClaimAcrossReplicas(t *testing.T) {
 	releaseFirst()
 	processtest.WaitFor(t, "the second replica's pass", func() bool { return second.passes.Load() > 0 })
 	for range 10 {
-		other.Nudge("files")
-		time.Sleep(interval)
+		mine.Nudge("files")
+		attempts(other, 1)
 	}
 	if overlap.Load() {
 		t.Error("a pass of one replica ran inside a pass of the other")

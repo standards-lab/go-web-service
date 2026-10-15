@@ -122,9 +122,7 @@ Library promotion candidates stage in the base `sdk` package: flat, a package me
 accumulates no sub-packages, with each file named for the library its contents are bound for.
 Staging is cheap and deliberate; the `v1.data.evaluation` task rules on every tenant. `Command`,
 bound for go-web-sdk, is the guarded-command read composing the SDK's `PathUUID` (promoted from
-here in go-web-sdk v0.13.0), `IfMatch`, and `DecodeJSON`. The file protocols with a hook in the
-transaction that makes their change true staged here until blobfs v0.7.0 promoted them as
-`OnComplete` and `OnDelete` (the README's "The file protocols' hooks").
+here in go-web-sdk v0.13.0), `IfMatch`, and `DecodeJSON`.
 
 ## The operation-shape principle
 

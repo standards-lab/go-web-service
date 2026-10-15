@@ -490,10 +490,11 @@ func (s *store) seedEntries(ctx context.Context, organizationID, root, parent st
 // seedDirectory, then its entries, and a file by blobfs's retry-safe write,
 // whose completion's transaction emits FileUploaded, by its OnComplete
 // hook, when this call completes the file, as an upload's does; a file
-// found complete, or completed by another writer, emits nothing. An entry the seed does not own is left as it stands and
-// counts nothing: one there by name under another id (its directory's
-// contents are still ensured), one whose id a row carries under another
-// name, and one whose delete is under way.
+// found complete, or completed by another writer, emits nothing. An entry
+// the seed does not own is left as it stands and counts nothing: one there
+// by name under another id (its directory's contents are still ensured),
+// one whose id a row carries under another name, and one whose delete is
+// under way.
 func (s *store) seedEntry(ctx context.Context, organizationID, root, parent string, e seedEntry) (int, error) {
 	st := s.storage
 	isDir, err := e.directory()

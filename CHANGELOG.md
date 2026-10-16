@@ -219,15 +219,18 @@ accumulate under [Unreleased] until the first cut.
   reclaimer, beside the outbox and inbox retention, where it ran on a standalone worker with a
   wake of its own. A failed pass is logged at warn as `"sweep pass failed"`, with the reclaimer,
   whether it reported more, its duration, and the error, for every reclaimer; the worker's
-  `"sweep pass refused"` is gone. A `files` pass that did work is still logged at info as
-  `"sweep pass"` with its counts.
+  `"sweep pass refused"` is gone. A `files` pass that did work or was refused is still logged
+  with its counts and whether it reported more, now at info as `"sweep pass"`, where a refused
+  pass was logged at warn with its error; the error is in the `"sweep pass failed"` record.
 - Pins: sqlate v0.6.1 and sqlate/postgres v0.6.0, from v0.5.0 and postgres/v0.5.0, for the
   sweeper's non-blocking claim (`TryLocker`) and migrate's lock wait, which no longer deadlocks
   a concurrent index build when two replicas start on an empty schema; go-database v0.10.0, from
   v0.9.0, for the `sweep` package; and go-messaging/postgres v0.2.0, from v0.1.0, for
   `OutboxRetention`, `InboxRetention`, and the two retention indexes its migration set builds
-  concurrently. go.opentelemetry.io/otel and its metric API become direct requirements. Their
-  own changes are in their CHANGELOGs.
+  concurrently. go.opentelemetry.io/otel and its metric API become direct requirements, and
+  go.opentelemetry.io/proto/otlp v1.11.1 and google.golang.org/grpc v1.84.0 move from indirect
+  to direct for the integration test's OTLP receiver. Their own changes are in their
+  CHANGELOGs.
 - Pins: go-database v0.9.0, from v0.8.0, for `admin.Options.OnReset`, the hook a state reset
   runs after its apply and before its seed; its own changes are in its CHANGELOG.
 - slab runs on go-cli-sdk v0.2.0, in place of cobra and pflag, with a composition root modeled

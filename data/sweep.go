@@ -36,15 +36,16 @@ func (s *Storage) FilesReclaimer(db *sqlate.DB, staleAge time.Duration, logger *
 // and its work is found in the database, so a refused record is left for a
 // later pass, and the sweeper reports the error at warn.
 //
-// A pass that did work is logged at info as "sweep pass" with its counts:
-// the files, directories, and stale rows it removed, and whether it
-// reported More, whether or not it also met refusals. A pass with nothing
-// to do is not logged, and the error is left to the sweeper's report, so
-// a refusal is logged once.
+// A pass that did work or met refusals is logged at info as "sweep pass"
+// with its counts: the files, directories, and stale rows it removed, and
+// whether it reported More, so a refused pass logs its counts even when
+// they are all zero. Only a pass with nothing to do and no refusal is not
+// logged. The error itself is left to the sweeper's report, at warn, so a
+// refusal is logged once at warn and its counts once at info.
 func (r *FilesReclaimer) Pass(ctx context.Context, budget int) (bool, error) {
 	res, err := r.storage.FS.Sweep(ctx, r.db, r.storage.Objects,
 		bfdata.Batch(budget), bfdata.StaleOlderThan(r.staleAge))
-	if res.Files+res.Directories+res.Stale > 0 {
+	if err != nil || res.Files+res.Directories+res.Stale > 0 {
 		r.logger.InfoContext(ctx, "sweep pass",
 			"files", res.Files, "directories", res.Directories, "stale", res.Stale, "more", res.More)
 	}

@@ -132,9 +132,9 @@ func TestFilesReclaimer_NothingToDo(t *testing.T) {
 
 // A pass's refusals are its error, returned beside its more for the
 // sweeper to report and to go on by; the reclaimer logs the counts of the
-// work the pass did all the same, at info, and leaves the error to the
-// sweeper's report, so a refusal is logged once.
-func TestFilesReclaimer_RefusalsAreTheError(t *testing.T) {
+// work the refused pass did, at info, and leaves the error to the
+// sweeper's report, so a refusal is logged once, at warn.
+func TestFilesReclaimer_RefusalsAreTheErrorAndItsCountsAreLogged(t *testing.T) {
 	refused := sqltest.Response{Err: errors.New("the purge was refused")}
 	st, db, rec, _ := protocols(t,
 		// The first row refused, the next reclaimed, a third beyond the
@@ -150,19 +150,27 @@ func TestFilesReclaimer_RefusalsAreTheError(t *testing.T) {
 	if !strings.Contains(log, `level=INFO msg="sweep pass" files=0 directories=0 stale=1 more=true`) {
 		t.Errorf("the refused pass's counts were not logged at info:\n%s", log)
 	}
-	if strings.Contains(log, "the purge was refused") {
+	if strings.Contains(log, "the purge was refused") || strings.Contains(log, "level=WARN") {
 		t.Errorf("the reclaimer logged the error the sweeper reports:\n%s", log)
 	}
 	sameOps(t, rec, q, q, x, q, x, q, q)
 }
 
-// A refused pass that did nothing reports its error and logs nothing.
-func TestFilesReclaimer_ARefusalAloneLogsNothing(t *testing.T) {
+// A refused pass that did nothing reports its error and still logs its
+// counts, all zero, at info, leaving the error to the sweeper's report.
+func TestFilesReclaimer_ARefusalAloneLogsItsCounts(t *testing.T) {
 	st, db, rec, _ := protocols(t, sqltest.Response{Err: errors.New("the read was refused")})
 	logger, out := logged()
 	more, err := st.FilesReclaimer(db, staleAge, logger).Pass(context.Background(), 1)
-	if more || err == nil || out.String() != "" {
-		t.Errorf("Pass = (%v, %v), log %q; want (false, the refusal) and no record", more, err, out)
+	if more || err == nil {
+		t.Fatalf("Pass = (%v, %v), want (false, the refusal)", more, err)
+	}
+	log := out.String()
+	if !strings.Contains(log, `level=INFO msg="sweep pass" files=0 directories=0 stale=0 more=false`) {
+		t.Errorf("the refused pass's zero counts were not logged at info:\n%s", log)
+	}
+	if strings.Contains(log, "the read was refused") || strings.Contains(log, "level=WARN") {
+		t.Errorf("the reclaimer logged the error the sweeper reports:\n%s", log)
 	}
 	sameOps(t, rec, q)
 }

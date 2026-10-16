@@ -375,8 +375,9 @@ composition root runs it on a reactor, the process's one runner for work driven 
 occurrence for the process lifetime. `/readyz` reports it as the `sweeper` check; a backlog never
 makes the service unready.
 
-A `files` pass that did work is logged at info as `"sweep pass"`, with the files, directories,
-and stale rows it removed and whether it reported more. A pass that failed, any reclaimer's, is
+A `files` pass that did work or was refused is logged at info as `"sweep pass"`, with the
+files, directories, and stale rows it removed and whether it reported more, so a refused pass
+logs its counts even when they are all zero; its error is in the warn record below. A pass that failed, any reclaimer's, is
 logged at warn as `"sweep pass failed"`, with the reclaimer, whether it reported more, its
 duration, and the error; the sweep worker's `"sweep pass refused"` is gone. Two metrics report
 the passes:

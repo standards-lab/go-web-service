@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"sync/atomic"
 
 	"github.com/standards-lab/go-core/event"
@@ -46,9 +47,11 @@ const (
 )
 
 // reclaimers names every reclaimer the sweeper registers, in its
-// registration order: the sweep metrics node reports each one's backlog
-// from the start, before its first pass. A reclaimer newSweeper registers
-// is named here too.
+// registration order, and is the one source of those names: newSweeper
+// registers exactly the reclaimers named here, by iterating it, and the
+// sweep metrics node reports each one's backlog from the start, before its
+// first pass. A name here with no reclaimer constructed for it fails
+// startup, as does a reclaimer constructed under a name not here.
 var reclaimers = []string{reclaimFiles, reclaimOutbox, reclaimInbox}
 
 // Nudge is the nudge node's value, the document layer's document.Sweeper:
@@ -118,11 +121,17 @@ func newSweeper(n *Nodes) func(*graph.Scope) (*sweep.Sweeper, error) {
 			return nil, err
 		}
 
-		policy := sweep.Policy{Interval: cfg.Sweep.Interval.Duration(), Budget: *cfg.Sweep.Batch}
-		regs := []sweep.Registration{
-			{Name: reclaimFiles, Reclaimer: s.Use(n.Files).FilesReclaimer(db, cfg.Sweep.StaleAge.Duration(), logger), Policy: policy},
-			{Name: reclaimOutbox, Reclaimer: outbox, Policy: policy},
-			{Name: reclaimInbox, Reclaimer: inbox, Policy: policy},
+		// The registrations are built from reclaimers, so the backlog
+		// gauge's names and the sweeper's are one list: a reclaimer is
+		// registered only under a name listed there.
+		built := map[string]sweep.Reclaimer{
+			reclaimFiles:  s.Use(n.Files).FilesReclaimer(db, cfg.Sweep.StaleAge.Duration(), logger),
+			reclaimOutbox: outbox,
+			reclaimInbox:  inbox,
+		}
+		regs, err := registrations(built, sweep.Policy{Interval: cfg.Sweep.Interval.Duration(), Budget: *cfg.Sweep.Batch})
+		if err != nil {
+			return nil, err
 		}
 		sw, err := sweep.New(db, regs, cfg.ShutdownTimeout.Duration(), logger,
 			sweep.Gated(s.Use(n.Gate)), sweep.OnPass(s.Use(n.SweepMetrics)))
@@ -132,6 +141,25 @@ func newSweeper(n *Nodes) func(*graph.Scope) (*sweep.Sweeper, error) {
 		s.Use(n.Nudge).sweeper.Store(sw)
 		return sw, nil
 	}
+}
+
+// registrations registers the reclaimers built, by name, in the order of
+// reclaimers, each under policy. A name in reclaimers with no reclaimer
+// built, or a reclaimer built under a name not in reclaimers, is a wiring
+// defect, returned as an error so it fails startup.
+func registrations(built map[string]sweep.Reclaimer, policy sweep.Policy) ([]sweep.Registration, error) {
+	regs := make([]sweep.Registration, 0, len(reclaimers))
+	for _, name := range reclaimers {
+		r, ok := built[name]
+		if !ok {
+			return nil, fmt.Errorf("sweeper: no reclaimer for %q", name)
+		}
+		regs = append(regs, sweep.Registration{Name: name, Reclaimer: r, Policy: policy})
+	}
+	if len(built) != len(regs) {
+		return nil, fmt.Errorf("sweeper: %d reclaimers built, %d named", len(built), len(regs))
+	}
+	return regs, nil
 }
 
 // newRuntime constructs the service's messaging from the config node's

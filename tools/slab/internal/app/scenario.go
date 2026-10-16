@@ -7,6 +7,7 @@ import (
 	"github.com/standards-lab/go-cli-sdk/scenario"
 	"github.com/standards-lab/go-core/graph"
 
+	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 	"github.com/standards-lab/go-web-service/tools/slab/scenarios"
 )
 
@@ -14,7 +15,8 @@ import (
 // declare, over the nodes defineInfrastructure defined: service, the
 // running service at the base node's URL with the client node's client
 // bound to it, and grafana up, the running Grafana at the grafana node's
-// URL. Each value is a lifecycle Starter that probes what it names, so the
+// URL with a Mimir client bound to it, which the sweeper scenario reads
+// metrics through. Each value is a lifecycle Starter that probes what it names, so the
 // dispatcher starts it after the Build and a scenario that declares it
 // runs no step until it answers; a failed probe is reported
 // "startup: <node>: ..." naming the mise task that fixes it.
@@ -36,7 +38,8 @@ func defineScenarioNodes(g *graph.Graph, n *Nodes) {
 	service := n.Service
 	n.GrafanaUp = g.Define("grafana up", func(s *graph.Scope) (scenarios.Grafana, error) {
 		s.After(service)
-		return scenarios.Grafana{URL: s.Use(grafana)}, nil
+		url := s.Use(grafana)
+		return scenarios.Grafana{URL: url, Mimir: httpx.NewMimir(httpx.NewClient(url))}, nil
 	})
 }
 

@@ -338,28 +338,60 @@ read included, and takes the storage check on `/readyz` down; the rows are untou
 file's row now names an object that no longer exists, and its download answers 404. In
 development, a reset to a seeded state (`mise run db:state default`) writes the seeded files
 again; anything else is uploaded again. The service does not reconcile rows against the store:
-blobfs defers that reconciler to the event flow `v1.messaging` brings.
+blobfs defers that reconciler until an orphaned object is observed or a consumer stores at
+volume, and it would join the [sweep](#sweep) as a reclaimer.
 
 ## Sweep
 
-The sweep finishes the rows that a recursive directory delete, a write that stops partway, and a
-delete that stops partway leave for later: a branch marked deleting, a pending upload, a file
-whose delete began. It removes each file's object and then its row, and each directory once it
-is empty. The sweep is the `data` package's background worker (`data.Storage.SweepWorker`),
-which runs blobfs's sweep in bounded passes while a pass reports more. Once the service begins to
-drain, the sweep finishes the pass in flight and runs no further one, whatever remains, so a
-large backlog never holds the drain; the next start's wake finds what is left.
+The sweep reclaims what the service leaves behind. It is go-database's general sweeper
+(`sweep.Sweeper`), one node, `sweeper`, that runs three reclaimers, each a library's own:
+
+- `files` is blobfs's sweep. It finishes the rows that a recursive directory delete, a write
+  that stops partway, and a delete that stops partway leave for later: a branch marked deleting,
+  a pending upload, a file whose delete began. It removes each file's object and then its row,
+  and each directory once it is empty, and reclaims the uploads and deletes left unfinished past
+  `sweep.stale_age` (an hour). Each recursive delete nudges it, so a marked branch is swept at
+  once.
+- `outbox` is go-messaging's outbox retention. It deletes the published outbox rows published
+  more than `sweep.outbox_age` (7 days) ago; an unpublished or quarantined row is never deleted.
+- `inbox` is go-messaging's inbox retention. It deletes the inbox rows handled more than
+  `sweep.inbox_age` (7 days) ago.
+
+Every reclaimer shares one policy: it is due every `sweep.interval` (30 seconds) and at
+startup, so a branch marked before a restart is swept at the next start, and each of its
+passes handles at most `sweep.batch` (100) records. A due reclaimer runs a cycle: passes while
+a pass reports more, for at most one interval, after which it yields to the reclaimers behind
+it and stays due, so one large backlog never starves the others. A cycle first claims the
+session advisory lock `sweep.<name>` (`sweep.files`, `sweep.outbox`, `sweep.inbox`) without
+waiting; a reclaimer whose lock another replica holds skips the cycle, so two replicas on one
+database never run the same reclaimer's cycle at once. Each pass holds the quiesce gate shared,
+so a schema verb never meets one. A pass the store or the database refuses never ends its cycle
+or fails the service: every pass is idempotent, so a later pass finds what it left. Once the
+service begins to drain, the sweeper finishes the pass in flight and runs no further one, whatever
+remains, so a large backlog never holds the drain; the next start finds what is left.
 
 The sweep is a Reactor in the architecture's sense, one that dispatches to no Domain Service: the
 composition root runs it on a reactor, the process's one runner for work driven by an
-occurrence for the process lifetime.
+occurrence for the process lifetime. `/readyz` reports it as the `sweeper` check; a backlog never
+makes the service unready.
 
-It wakes on each recursive delete, on an interval (`sweep.interval`, 30 seconds) for work no
-delete announced, and once at startup, so a branch marked before a restart is swept at the
-next start. A pass reclaims uploads and deletes left unfinished past `sweep.stale_age` (an
-hour), and handles at most `sweep.batch` (100) records. A pass the store or the database
-refuses is logged at warn and retried on the next wake; it never fails the service. `/readyz`
-reports the reactor as the `sweeper` check.
+A `files` pass that did work or was refused is logged at info as `"sweep pass"`, with the
+files, directories, and stale rows it removed and whether it reported more, so a refused pass
+logs its counts even when they are all zero; its error is in the warn record below. A pass that
+failed, any reclaimer's, is logged at warn as `"sweep pass failed"`, with the reclaimer, whether
+it reported more, its duration, and the error. A cycle whose claim fails, such as on a lost
+connection, runs no pass and is logged at warn as `"sweep claim failed"`, with the reclaimer and
+the error. Two metrics report the passes:
+
+| Metric | Kind | Attributes | Meaning |
+|--------|------|------------|---------|
+| `sweep.passes` | counter | `sweep.reclaimer` (`files`, `outbox`, `inbox`), `sweep.outcome` (`drained`, `more`, `error`) | The passes run; `error` when the pass failed, whatever it reported, `more` when it reported more, `drained` otherwise |
+| `sweep.backlogged` | gauge | `sweep.reclaimer` | 1 while the reclaimer's last pass reported more, else 0 |
+
+The collector writes them to Mimir under Prometheus names, labelled `job="go-web-service"`:
+`sweep.passes` is `sweep_passes_total`, by `sweep_reclaimer` and `sweep_outcome`, and
+`sweep.backlogged` is `sweep_backlogged_ratio`, by `sweep_reclaimer`, since a gauge whose unit is
+`1` gains `_ratio`. `mise run slab -- scenario sweeper` reads both there.
 
 ## Messaging
 
@@ -555,8 +587,12 @@ a loopback forwarder (`Options.Database`, `Options.Storage`, `Options.NATS`) tha
 for an outage. go-web-sdk's `webtest` drives the service through its API; beneath it,
 `integration.Objects` reads the container, `integration.Database` opens a session on the
 database, and `integration.Subscribe` reads the service's stream ([Adding an
-event](#adding-an-event)). A failing test prints each service process's output, so a 500 comes with the
-service's own record of it. The service adds only its configuration and state control through
+event](#adding-an-event)). `sweep_metrics_test.go` points the service's OTLP exporter at a
+gRPC receiver in the test and reads the sweep's metrics from what it exports. The unit tier's
+`internal/app/sweep_metrics_test.go` proves each outcome, the backlog gauge per reclaimer, and
+the `"sweep pass failed"` record, reporting passes to the sweep metrics node's hook under a
+manual reader through `internal/apptest`'s fixtures. A failing test prints each service process's
+output, so a 500 comes with the service's own record of it. The service adds only its configuration and state control through
 the admin mount; nothing in the service exists for the tests' sake.
 
 The task runs the same `compose.yml` as its own project (`go-web-service-integration`, Postgres
@@ -574,7 +610,8 @@ Configuration layers in a fixed precedence, later sources winning:
 1. `config.json`, the base file, every knob at its default.
 2. `config.<APP_ENV>.json`, the environment overlay; `mise.toml` sets `APP_ENV=local`, which
    activates the committed `config.local.json` (loopback host, debug logging, the `default`
-   seed set).
+   seed set, and a `sweep.outbox_age` and `sweep.inbox_age` of `2m`, so the local outbox
+   reclaimer has work).
 3. `secrets.json` and `secrets.<APP_ENV>.json`, gitignored secret layers; the database password
    and the object store's key go here.
 4. `APP_*` environment variables, the final override: the log, server, and shutdown variables,
@@ -585,8 +622,9 @@ Configuration layers in a fixed precedence, later sources winning:
    `APP_OBSERVABILITY_SAMPLE_RATIO`, the rate limit (`APP_RATE_LIMIT_REQUESTS`,
    `APP_RATE_LIMIT_WINDOW`), the reads paging policy
    (`APP_READS_DEFAULT_SIZE`, `APP_READS_MAX_SIZE`), the admin seed set (`APP_ADMIN_SEED`, a
-   state name), and the sweep's interval, pass size, and stale age (`APP_SWEEP_INTERVAL`,
-   `APP_SWEEP_BATCH`, `APP_SWEEP_STALE_AGE`). An empty value counts as unset, as it does for every
+   state name), and the sweep's interval, pass size, stale age, and retention ages
+   (`APP_SWEEP_INTERVAL`, `APP_SWEEP_BATCH`, `APP_SWEEP_STALE_AGE`, `APP_SWEEP_OUTBOX_AGE`,
+   `APP_SWEEP_INBOX_AGE`). An empty value counts as unset, as it does for every
    override, so only a file's `"seed": ""` clears a configured seed set.
 
 Every file is optional: a deployment can run on the base file and environment variables alone,
@@ -628,8 +666,12 @@ is allowed. The body's size counts up to the route's limit (10 MiB for a documen
 logo). An upload slower than that pace answers 408; a download slower than that ends short.
 
 The `sweep` block schedules the [sweep](#sweep): `interval` (`APP_SWEEP_INTERVAL`, `30s`), the
-backstop wake; `batch` (`APP_SWEEP_BATCH`, 100), the records one pass handles; and `stale_age`
-(`APP_SWEEP_STALE_AGE`, `1h`), the age past which a pass reclaims an unfinished upload or delete.
+backstop wake; `batch` (`APP_SWEEP_BATCH`, 100), the records one pass handles; `stale_age`
+(`APP_SWEEP_STALE_AGE`, `1h`), the age past which a pass reclaims an unfinished upload or delete;
+`outbox_age` (`APP_SWEEP_OUTBOX_AGE`, `168h`, 7 days), the age past which a pass deletes a
+published outbox row; and `inbox_age` (`APP_SWEEP_INBOX_AGE`, `168h`), the age past which a pass
+deletes a handled inbox row, which must outlast every redelivery the broker can make. The interval
+and the batch apply to every reclaimer, and a non-positive age fails startup, naming the key.
 
 The `messaging` block is go-messaging's: `source` (`APP_MESSAGING_SOURCE`, `web-service` in
 `config.json`, required), the CloudEvents source of every event the service emits;

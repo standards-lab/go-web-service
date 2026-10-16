@@ -5,11 +5,17 @@ import (
 	"log/slog"
 	"maps"
 	"runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/standards-lab/go-core/graph"
+	"github.com/standards-lab/go-database/sweep"
 	"github.com/standards-lab/go-observability"
 	"github.com/standards-lab/go-observability/otlp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/embedded"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
 	"github.com/standards-lab/go-web-service/internal/config"
@@ -63,8 +69,8 @@ func observabilityConfig(cfg *config.Config) observability.Config {
 	return obsCfg
 }
 
-// defineTelemetry defines the telemetry node on g into n. It constructs
-// nothing.
+// defineTelemetry defines the telemetry node, the meter provider node, and
+// the sweep metrics node on g into n. It constructs nothing.
 //
 // The database and the object store order themselves after telemetry, so
 // its Start installs the providers before either starts and its Shutdown
@@ -73,8 +79,39 @@ func observabilityConfig(cfg *config.Config) observability.Config {
 // is what brings it into the Build. The server sits above both
 // connections, so every request is served while the providers are
 // installed.
+//
+// The meter provider node is what the service's own instruments are
+// created on, and the sweep metrics node is the sweeper's per-pass hook,
+// which the sweeper Uses. Neither is a lifecycle participant.
 func defineTelemetry(g *graph.Graph, n *Nodes) {
 	n.Telemetry = g.Define("telemetry", newTelemetry(n))
+	n.MeterProvider = g.Define("meterprovider", newMeterProvider)
+	n.SweepMetrics = g.Define("sweepmetrics", newSweepMetrics(n))
+}
+
+// newMeterProvider returns the meter provider the service's own instruments
+// are created on: the otel global, as the HTTP middleware's
+// request-duration histogram resolves it. It is a node so a test can
+// Replace it; the constructor installs nothing. Before the telemetry node's
+// Start installs the real provider, the global is a delegating proxy that
+// routes the instruments created on it to that provider once installed, so
+// the node needs no edge to telemetry.
+func newMeterProvider(*graph.Scope) (metric.MeterProvider, error) {
+	return globalMeterProvider{}, nil
+}
+
+// globalMeterProvider is the meter provider node's value: it resolves the
+// otel global at each Meter call rather than holding it. Once the
+// telemetry node has started, the global is the SDK provider, a Stopper
+// that node already shuts down; held as a node's value, it would be shut
+// down by the lifecycle a second time.
+type globalMeterProvider struct {
+	embedded.MeterProvider
+}
+
+// Meter returns the global meter provider's Meter.
+func (globalMeterProvider) Meter(name string, opts ...metric.MeterOption) metric.Meter {
+	return otel.GetMeterProvider().Meter(name, opts...)
 }
 
 // newTelemetry constructs the telemetry service over the OTLP exporters.
@@ -134,6 +171,111 @@ func (t *Telemetry) Shutdown(ctx context.Context) error {
 	defer cancel()
 	if err := t.tel.Shutdown(ctx); err != nil {
 		t.logger.Warn("telemetry shutdown", "error", err)
+	}
+	return nil
+}
+
+// meterName is the instrumentation scope of the service's own instruments:
+// the module path, as an instrumentation library names its scope by its
+// import path.
+const meterName = "github.com/standards-lab/go-web-service"
+
+// The sweep.outcome values of the sweep.passes counter.
+const (
+	outcomeError   = "error"
+	outcomeMore    = "more"
+	outcomeDrained = "drained"
+)
+
+// sweepMetrics records the sweeper's passes as two instruments, and logs
+// the failed ones. Its hook replaces go-database's default report, so it
+// carries that report too.
+//
+//   - sweep.passes, a counter, counts each pass by its sweep.reclaimer and
+//     its sweep.outcome: error when the pass returned an error, whatever it
+//     reported of more; more when it reported more; drained otherwise.
+//   - sweep.backlogged, an observable gauge, reports per sweep.reclaimer 1
+//     while that reclaimer's last pass reported more, and 0 otherwise, from
+//     the start. A failed pass that reported more leaves it backlogged.
+//
+// The sweeper keeps no backlog state (go-database's sweep reports passes
+// and nothing else), so the gauge's state is kept here, one value per
+// reclaimer the sweeper registers, read at each collection.
+type sweepMetrics struct {
+	passes metric.Int64Counter
+	logger *slog.Logger
+
+	mu         sync.Mutex
+	backlogged map[string]bool
+}
+
+// newSweepMetrics constructs the sweeper's per-pass hook: it creates the
+// sweeper's instruments on the meter provider node's provider, for each
+// reclaimer the sweeper registers, and returns the hook, which records each
+// pass and logs a failed one at warn on the logger node's logger. The error
+// is the meter's refusal of an instrument.
+func newSweepMetrics(n *Nodes) func(*graph.Scope) (sweep.Hook, error) {
+	return func(s *graph.Scope) (sweep.Hook, error) {
+		meter := s.Use(n.MeterProvider).Meter(meterName)
+		m := &sweepMetrics{logger: s.Use(n.Logger), backlogged: make(map[string]bool, len(reclaimers))}
+		for _, name := range reclaimers {
+			m.backlogged[name] = false
+		}
+
+		var err error
+		m.passes, err = meter.Int64Counter("sweep.passes",
+			metric.WithDescription("Sweeper passes run, by reclaimer and outcome."),
+			metric.WithUnit("{pass}"))
+		if err != nil {
+			return nil, err
+		}
+		_, err = meter.Int64ObservableGauge("sweep.backlogged",
+			metric.WithDescription("1 while the reclaimer's last pass reported more, else 0."),
+			metric.WithUnit("1"),
+			metric.WithInt64Callback(m.observe))
+		if err != nil {
+			return nil, err
+		}
+		return m.pass, nil
+	}
+}
+
+// pass is the sweeper's hook: it counts p, records whether its reclaimer
+// is backlogged, and logs p at warn when it failed.
+func (m *sweepMetrics) pass(ctx context.Context, p sweep.Pass) {
+	outcome := outcomeDrained
+	switch {
+	case p.Err != nil:
+		outcome = outcomeError
+	case p.More:
+		outcome = outcomeMore
+	}
+	m.passes.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("sweep.reclaimer", p.Name),
+		attribute.String("sweep.outcome", outcome)))
+
+	m.mu.Lock()
+	m.backlogged[p.Name] = p.More
+	m.mu.Unlock()
+
+	// go-database's default report, which this hook replaces, word for
+	// word: the integration tier counts these records.
+	if p.Err != nil {
+		m.logger.WarnContext(ctx, "sweep pass failed",
+			"reclaimer", p.Name, "more", p.More, "duration", p.Duration, "error", p.Err)
+	}
+}
+
+// observe reports each reclaimer's backlog to the sweep.backlogged gauge.
+func (m *sweepMetrics) observe(_ context.Context, o metric.Int64Observer) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for name, more := range m.backlogged {
+		var v int64
+		if more {
+			v = 1
+		}
+		o.Observe(v, metric.WithAttributes(attribute.String("sweep.reclaimer", name)))
 	}
 	return nil
 }

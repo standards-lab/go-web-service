@@ -199,6 +199,8 @@ mise run slab -- scenario storage    # ends by resetting to the default state
 mise run slab -- scenario storage    # runs again as it stands: the branch it deletes is named for the run
 mise run slab -- scenario events     # with events watch in another terminal: each step names the events it prints
 mise run slab -- scenario events     # runs again as it stands: it deletes what it creates, named for the run
+mise run slab -- scenario sweeper    # needs otel:up: the reclaimers' pass counts in Mimir around a recursive delete
+mise run slab -- scenario sweeper    # runs again as it stands; each run waits up to 2m30s for the service's next metric export
 mise run slab -- scenario            # the listing: each scenario, its summary, and the nodes it uses
 mise run slab -- scenario none       # usage error (exit 2): unknown command "none"
 ```

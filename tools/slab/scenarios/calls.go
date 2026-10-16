@@ -32,10 +32,10 @@ const (
 // storage and events scenarios find the PNGs their logo steps upload.
 const fixturesDir = seedsDir + "/fixtures"
 
-// sweepLimit bounds the storage and events scenarios' wait for the sweep,
-// as --wait's duration bounds dirs delete. The delete nudges the sweep, so
-// a small branch is gone well inside it; the sweep's own interval (30
-// seconds) is the fallback the limit leaves room for.
+// sweepLimit bounds the storage, events, and sweeper scenarios' wait for
+// the sweep, as --wait's duration bounds dirs delete. The delete nudges the
+// sweep, so a small branch is gone well inside it; the sweep's own interval
+// (30 seconds) is the fallback the limit leaves room for.
 const sweepLimit = 45 * time.Second
 
 // stateRoute is the database admin service's reset, inside the /admin

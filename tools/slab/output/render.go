@@ -156,6 +156,19 @@ func Trace(st style.Style, grafanaBase, serviceName, traceID string) Render {
 	}, ": ")
 }
 
+// Metrics returns the Render of the pointer a reader follows by hand to a
+// metric query in Grafana, as [Trace] is to a trace: the Explore page under
+// grafanaBase, the datasource to pick there, and the PromQL to run, one per
+// line, the names keyed under st and padded so the colons line up. It is
+// not a deep link, for Trace's reason.
+func Metrics(st style.Style, grafanaBase, datasource, promql string) Render {
+	return aligned(st, [][2]string{
+		{"Grafana", strings.TrimRight(grafanaBase, "/") + "/explore"},
+		{"Datasource", datasource},
+		{"PromQL", promql},
+	}, ": ")
+}
+
 // writeHeader writes one header line, its name keyed under st.
 func writeHeader(b *bytes.Buffer, st style.Style, name, value string) {
 	fmt.Fprintf(b, "%s: %s\n", st.Key(name), value)

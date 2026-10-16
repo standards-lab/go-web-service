@@ -6,15 +6,18 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"net"
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	libconfig "github.com/standards-lab/go-core/config"
 	"github.com/standards-lab/go-core/graph"
 	"github.com/standards-lab/go-core/lifecycle"
+	"github.com/standards-lab/go-core/process/processtest"
 	"github.com/standards-lab/go-web-sdk"
 
 	"github.com/standards-lab/go-web-service/internal/app"
@@ -132,7 +135,7 @@ func TestGraph_ServerAloneInTopLayer(t *testing.T) {
 // that both starts and reports Ready, are the database, the object store,
 // the broker, the schema, the sweeper, and the relay, in that order;
 // /readyz reports them after "lifecycle". No other value is both: not the
-// sweep's wake, whose source's readiness the sweeper reports, not the
+// nudge the document layer reaches the sweeper through, not the
 // messaging runtime, which starts nothing, and not the readiness node
 // itself.
 func TestGraph_ReadinessChecks(t *testing.T) {
@@ -306,52 +309,187 @@ func TestGraph_RelayHeldOffByTheGate(t *testing.T) {
 	}
 }
 
-// The sweeper cancels a pass still running half the shutdown timeout into
+// The sweeper cancels a cycle still running half the shutdown timeout into
 // its drain, go-core's CancelWithin rule, and its drain reports the period:
 // under the 10s default, "handlers cancelled after 5s". A shorter timeout
-// keeps the test fast. The pass in flight is one waiting on the gate, which
-// the test holds exclusively, as a schema-changing admin verb would, so no
-// live engine is needed.
+// keeps the test fast. The cycle in flight is the files reclaimer's, its
+// claim waiting on a connection to a database that accepts and never
+// answers, which only the cancellation ends, so no live engine is needed.
+// The drain alone does not end it: a claim, unlike a wait on the gate,
+// runs until its context does.
 func TestGraph_SweeperCancelsWithinTheShutdownTimeout(t *testing.T) {
 	cfg := configtest.Config(t)
 	cfg.ShutdownTimeout = libconfig.Duration(200 * time.Millisecond)
+	port, dialled := silentPort(t)
+	cfg.Database.Port = &port
 	a := app.New(cfg, io.Discard)
 	n := a.Nodes()
 	sys, err := a.Graph().Build(n.Sweeper)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-
-	release, err := sys.Get(n.Gate).Exclusive(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer release()
-
 	sweeper := sys.Get(n.Sweeper)
 	if err := sweeper.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	// The wake's construction nudge is pending when the source starts
-	// receiving, so the pass begins at once and waits on the gate; the
-	// pause lets it reach the wait before the drain stops the source. No
-	// seam outside go-core shows the wait itself; a pause that fell short
-	// would leave no pass in flight, and the drain's nil fails the test
-	// rather than passing it.
-	deadline := time.Now().Add(5 * time.Second)
-	for !sweeper.Ready() {
-		if time.Now().After(deadline) {
-			t.Fatal("the sweeper never became ready")
-		}
-		time.Sleep(time.Millisecond)
+	// Every reclaimer is due at start, so the files cycle begins at once
+	// and its claim dials the silent database: once the dial is accepted,
+	// the cycle is in flight, waiting on an answer that never comes.
+	select {
+	case <-dialled:
+	case <-time.After(failsafe):
+		t.Fatal("the sweeper's claim never dialled the database")
 	}
-	time.Sleep(20 * time.Millisecond)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err = sweeper.Shutdown(ctx)
 	if err == nil || !strings.Contains(err.Error(), "handlers cancelled after 100ms") {
-		t.Errorf("Shutdown = %v, want the pass cancelled after 100ms, half the shutdown timeout", err)
+		t.Errorf("Shutdown = %v, want the cycle cancelled after 100ms, half the shutdown timeout", err)
+	}
+}
+
+// silentPort listens on a loopback port that accepts each connection and
+// never answers it, so a client's handshake waits until its context ends.
+// The channel is closed once the first connection is accepted. The
+// listener and its connections close at cleanup.
+func silentPort(t *testing.T) (int, <-chan struct{}) {
+	t.Helper()
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	accepted := make(chan struct{})
+	first := sync.OnceFunc(func() { close(accepted) })
+	var mu sync.Mutex
+	var conns []net.Conn
+	go func() {
+		for {
+			c, err := lis.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, c)
+			mu.Unlock()
+			first()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = lis.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+	})
+	return lis.Addr().(*net.TCPAddr).Port, accepted
+}
+
+// closingPort listens on a loopback port that closes each connection as it
+// accepts it, so a client's handshake fails at once. The listener closes at
+// cleanup.
+func closingPort(t *testing.T) int {
+	t.Helper()
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	go func() {
+		for {
+			c, err := lis.Accept()
+			if err != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+	t.Cleanup(func() { _ = lis.Close() })
+	return lis.Addr().(*net.TCPAddr).Port
+}
+
+// claimFailures counts the sweeper's records, in log, of a failed claim of
+// the lock of the reclaimer named.
+func claimFailures(log, reclaimer string) int {
+	re := regexp.MustCompile(`sweep claim failed.*reclaimer\W+` + regexp.QuoteMeta(reclaimer) + `\b`)
+	return len(re.FindAllStringIndex(log, -1))
+}
+
+// The nudge the document layer gives after each branch it marks reaches
+// the sweeper's files reclaimer and no other. The database closes every
+// connection, so each cycle's claim fails and is logged under its
+// reclaimer's name; with an interval of an hour, a cycle after the start's
+// runs only on a nudge. The nudge node the document layer is built with
+// then earns the files reclaimer, alone, a second cycle: a nudge left
+// unbound, or bound to another reclaimer, never logs one. The records also
+// show the service's sweeper claims each reclaimer's lock: one built
+// sweep.Unlocked would log no claim. Unbound, as in a graph built without
+// the sweeper, a nudge does nothing and never panics.
+func TestGraph_TheDocumentNudgeReachesTheFilesReclaimer(t *testing.T) {
+	cfg := configtest.Config(t)
+	cfg.Sweep.Interval = libconfig.Duration(time.Hour)
+	port := closingPort(t)
+	cfg.Database.Port = &port
+	log := &syncBuffer{}
+	a := app.New(cfg, log)
+	n := a.Nodes()
+
+	alone, err := a.Graph().Build(n.Document)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	alone.Get(n.Nudge).Nudge()
+
+	sys, err := a.Graph().Build(n.Document, n.Sweeper)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	sweeper := sys.Get(n.Sweeper)
+	if err := sweeper.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := sweeper.Shutdown(ctx); err != nil {
+			t.Errorf("Shutdown = %v", err)
+		}
+	})
+	// The start's cycles run in the list's order, inbox last.
+	processtest.WaitFor(t, "the start's cycles", func() bool {
+		return claimFailures(log.String(), "inbox") == 1
+	})
+
+	sys.Get(n.Nudge).Nudge()
+	processtest.WaitFor(t, "the nudged files cycle", func() bool {
+		return claimFailures(log.String(), "files") == 2
+	})
+	if o, i := claimFailures(log.String(), "outbox"), claimFailures(log.String(), "inbox"); o != 1 || i != 1 {
+		t.Errorf("outbox and inbox cycles = %d and %d, want the start's alone:\n%s", o, i, log)
+	}
+}
+
+// The sweeper registers the three reclaimers the service runs, files,
+// outbox, and inbox: go-database's Sweeper panics on a nudge of a name it
+// was not built with, so a reclaimer missing from the registration, or
+// registered under another name, fails here. A name it was not built with
+// is refused, which shows a nudge of a missing name does fail.
+func TestGraph_SweeperRegistersTheReclaimers(t *testing.T) {
+	a := app.New(configtest.Config(t), io.Discard)
+	sweeper := buildAsRun(t, a).Get(a.Nodes().Sweeper)
+
+	nudge := func(name string) (panicked bool) {
+		defer func() { panicked = recover() != nil }()
+		sweeper.Nudge(name)
+		return false
+	}
+	for _, name := range []string{"files", "outbox", "inbox"} {
+		if nudge(name) {
+			t.Errorf("Nudge(%q) panicked; want %s registered", name, name)
+		}
+	}
+	if !nudge("sessions") {
+		t.Error(`Nudge("sessions") did not panic; want a name the sweeper was not built with refused`)
 	}
 }
 

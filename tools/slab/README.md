@@ -26,6 +26,7 @@ mise run slab -- scenario domain                 # the organization domain's ful
 mise run slab -- scenario problems               # a tour of the service's problem responses, against the running service
 mise run slab -- scenario storage                # logos, documents, the refusals, and the sweep, against the running service
 mise run slab -- scenario events                 # one command per event the service publishes, for events watch to print
+mise run slab -- scenario sweeper                # the general sweeper's reclaimers through their metrics in Mimir
 mise run slab -- org list                        # the organization domain's endpoints, one subcommand per route
 mise run slab -- docs dirs list <org-id> root    # the document domain's endpoints, grouped by dirs and files
 mise run slab -- admin database schema status    # the admin mount's endpoints, under their own domain word
@@ -35,7 +36,8 @@ mise run slab -- version                         # slab's version
 
 Everything but `scenario sqlate` needs the compose stack and the service (`scenario storage`
 and `scenario events` read no traces, so they need no Grafana, but `mise run serve` streams its
-logs to the collector; `events watch` needs only NATS and the stream the service creates when it
+logs to the collector; `scenario sweeper` reads Mimir through Grafana, so it needs the
+observability profile up and the service exporting to it; `events watch` needs only NATS and the stream the service creates when it
 starts):
 
 ```sh
@@ -171,6 +173,21 @@ nothing but the repository root and the color setting.
   references once its logo and root are gone. Nineteen events in all, every type at least once.
   A run leaves nothing behind, and its names are unique to the run, so it runs twice in a row.
   Needs postgres, azurite, NATS, and the service, not Grafana.
+- **sweeper** — the service's general sweeper, read through its metrics in Mimir: the counter
+  `sweep.passes` (`sweep_passes_total` by `sweep_reclaimer` and `sweep_outcome`) and the gauge
+  `sweep.backlogged` (`sweep_backlogged_ratio`), queried through Grafana's proxy to its Mimir
+  datasource. It shows the sweep block as `config.local.json` merges over `config.json` and the
+  three reclaimers' passes by outcome (`files`, `outbox`, `inbox`), creates a run-named branch
+  under acme with a file in it, deletes it recursively, which nudges `files`, and waits out the
+  sweep. It then polls Mimir until an export sampled after the sweep lands (the service exports
+  every 60 seconds, the OpenTelemetry SDK's default; the wait gives up after 2m30s) and shows
+  each reclaimer's passes in the window: `files` moved, and `outbox` and `inbox` only on their
+  interval, which it says when they did: no command names them, but a delivery runs every
+  reclaimer that is due, the nudge's included. It narrates the outbox's
+  retention, the short local `outbox_age` making the run's own outbox rows the outbox
+  reclaimer's work, with the outbox's pass counter, and ends with the PromQL to run in Grafana's
+  Explore. The branch is removed by its own delete, so a run leaves no document and runs twice
+  in a row. Needs postgres, azurite, NATS, the service, and the observability profile.
 
 Two of the nodes are needs, each checked when the run starts, before any step:
 

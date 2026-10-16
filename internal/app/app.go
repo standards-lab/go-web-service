@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"time"
 
 	"github.com/standards-lab/go-core/event"
 	"github.com/standards-lab/go-core/graph"
@@ -13,10 +12,12 @@ import (
 	"github.com/standards-lab/go-core/reactor"
 	"github.com/standards-lab/go-database"
 	"github.com/standards-lab/go-database/admin"
+	"github.com/standards-lab/go-database/sweep"
 	"github.com/standards-lab/go-messaging"
 	"github.com/standards-lab/go-messaging/nats"
 	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-web-sdk"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/standards-lab/go-web-service/data"
 	"github.com/standards-lab/go-web-service/domain/document"
@@ -53,7 +54,9 @@ type Nodes struct {
 	Files    *graph.Node[*data.Storage]  // "files"
 
 	// Telemetry (telemetry.go).
-	Telemetry *graph.Node[*Telemetry] // "telemetry"
+	Telemetry     *graph.Node[*Telemetry]           // "telemetry"
+	MeterProvider *graph.Node[metric.MeterProvider] // "meterprovider"
+	SweepMetrics  *graph.Node[sweep.Hook]           // "sweepmetrics"
 
 	// Admin (admin.go).
 	Gate   *graph.Node[*reactor.Gate]  // "gate"
@@ -64,8 +67,8 @@ type Nodes struct {
 	Document     *graph.Node[*document.Service]     // "document"
 
 	// Reactors (reactors.go).
-	Wake    *graph.Node[*Wake]                         // "wake"
-	Sweeper *graph.Node[*reactor.Reactor[time.Time]]   // "sweeper"
+	Nudge   *graph.Node[*Nudge]                        // "nudge"
+	Sweeper *graph.Node[*sweep.Sweeper]                // "sweeper"
 	Runtime *graph.Node[*messaging.Runtime]            // "runtime"
 	Relay   *graph.Node[*reactor.Reactor[event.Event]] // "relay"
 

@@ -170,3 +170,11 @@ func TestTrace_KeysTheNamesWhenColorIsOn(t *testing.T) {
 		t.Errorf("Trace wrote %q, want the names keyed", got)
 	}
 }
+
+func TestMetrics_PointsAtTheExplorePageTheDatasourceAndTheQuery(t *testing.T) {
+	got := render(t, output.Metrics(style.New(false), "http://g:3000/", "Mimir", "sum(up)"))
+	want := "Grafana   : http://g:3000/explore\nDatasource: Mimir\nPromQL    : sum(up)\n"
+	if got != want {
+		t.Errorf("Metrics wrote %q, want %q", got, want)
+	}
+}

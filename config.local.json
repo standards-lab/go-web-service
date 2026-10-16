@@ -14,5 +14,9 @@
   },
   "admin": {
     "seed": "default"
+  },
+  "sweep": {
+    "outbox_age": "2m",
+    "inbox_age": "2m"
   }
 }

@@ -61,6 +61,15 @@ accumulate under [Unreleased] until the first cut.
   `slab events watch` prints for it in another terminal. It ends by deleting its organization's
   document root recursively and then the organization, so it leaves nothing behind, and its
   names are unique to the run, so it runs twice in a row.
+- `slab scenario sweeper`, a narrated run of the general sweeper through its metrics in Mimir,
+  read through Grafana's proxy to its Mimir datasource (slab's `httpx.Mimir`): the three
+  reclaimers' `sweep_passes_total` by outcome and `sweep_backlogged_ratio`, a run-named branch
+  deleted recursively, which nudges `files`, then the next export, polled for up to 2m30s,
+  showing `files` moved while `outbox` and `inbox` moved only on their interval, the outbox's
+  retention, and the PromQL to run in Grafana's Explore. `config.local.json` sets
+  `sweep.outbox_age` and `sweep.inbox_age` to `2m` for the local stack, so the outbox reclaimer
+  has work there; `config.json` keeps `168h`. `slab scenario storage`'s Sweep step says the
+  sweep runs as the general sweeper's `files` reclaimer.
 - NATS 2.15 with JetStream in the compose file (`compose/nats/`, on 4222, `NATS_PORT` to move
   it), started and stopped with the `db:` and `stack:` tasks; the integration task runs it on
   4223 in its own project, and its harness reaches the stream (`integration.Subscribe`), the
@@ -91,14 +100,25 @@ accumulate under [Unreleased] until the first cut.
   `If-Match`; a recursive directory delete marks the branch deleting and answers 202 with the
   directory's read as its `Location`, its listings 404 and its writes 409 until the sweep removes
   it.
-- The sweep: data's background worker (`data.Storage.SweepWorker`), blobfs's sweep in bounded
-  passes, run on the reactor the composition root defines as the `sweeper` node. It finishes
-  the branches a recursive delete marks and reclaims uploads and deletes left unfinished past
-  the stale age; it wakes on each recursive delete, on an interval, and once at startup, and
-  logs a refused pass at warn without failing the service. Once the service drains, it finishes
-  the pass in flight and runs no further one. The `sweep` configuration block
-  (`APP_SWEEP_INTERVAL`, `APP_SWEEP_BATCH`, `APP_SWEEP_STALE_AGE`; 30s, 100, 1h), and the
-  `sweeper` check on `/readyz`.
+- The sweep: go-database's general sweeper (`sweep.Sweeper`), the `sweeper` node, running three
+  reclaimers. `files` is blobfs's sweep, finishing the branches a recursive delete marks and
+  reclaiming uploads and deletes left unfinished past the stale age; each recursive delete
+  nudges it. `outbox` and `inbox` are go-messaging/postgres's `OutboxRetention` and
+  `InboxRetention`, deleting the published outbox rows and the handled inbox rows past their
+  ages; an unpublished or quarantined outbox row is never deleted. Every reclaimer is due at
+  startup and on the interval, and runs passes of the batch while a pass reports more, for at
+  most one interval per cycle. Each cycle claims the session advisory lock `sweep.<name>`
+  without waiting, so two replicas never run the same reclaimer's cycle at once, and the lock
+  registry (`data/locks.go`) records the `sweep.` prefix. A failed pass is logged at warn
+  without failing the service. Once the service drains, it finishes the pass in flight and runs
+  no further one. The `sweep` configuration block (`APP_SWEEP_INTERVAL`, `APP_SWEEP_BATCH`,
+  `APP_SWEEP_STALE_AGE`, `APP_SWEEP_OUTBOX_AGE`, `APP_SWEEP_INBOX_AGE`; 30s, 100, 1h, 168h,
+  168h), whose interval and batch every reclaimer shares and whose non-positive ages fail
+  startup naming the key, and the `sweeper` check on `/readyz`.
+- The sweep's metrics: the counter `sweep.passes`, by `sweep.reclaimer` (`files`, `outbox`,
+  `inbox`) and `sweep.outcome` (`error` when the pass failed, else `more` when it reported
+  more, else `drained`), and the gauge `sweep.backlogged`, per `sweep.reclaimer`, 1 while the
+  reclaimer's last pass reported more, else 0.
 - The quiesce gate: the schema-changing admin verbs (`up`, `down`, `steps`, and the state reset)
   hold it exclusively and each sweep pass holds it shared, so the two never run at once and a
   state reset never deadlocks with a pass (SQLSTATE 40P01). The gate is per process.
@@ -195,6 +215,22 @@ accumulate under [Unreleased] until the first cut.
   `<service>.<domain>.<entity>.<past-tense verb>`; still no version suffix before v1. Seeds and
   the state reset now emit, where the convention had the admin layer emit nothing, and every
   command emits, where only the document upload did.
+- The general sweeper replaces the sweep worker: blobfs's sweep is the sweeper's `files`
+  reclaimer, beside the outbox and inbox retention, where it ran on a standalone worker with a
+  wake of its own. A failed pass is logged at warn as `"sweep pass failed"`, with the reclaimer,
+  whether it reported more, its duration, and the error, for every reclaimer; the worker's
+  `"sweep pass refused"` is gone. A `files` pass that did work or was refused is still logged
+  with its counts and whether it reported more, now at info as `"sweep pass"`, where a refused
+  pass was logged at warn with its error; the error is in the `"sweep pass failed"` record.
+- Pins: sqlate v0.6.1 and sqlate/postgres v0.6.0, from v0.5.0 and postgres/v0.5.0, for the
+  sweeper's non-blocking claim (`TryLocker`) and migrate's lock wait, which no longer deadlocks
+  a concurrent index build when two replicas start on an empty schema; go-database v0.10.0, from
+  v0.9.0, for the `sweep` package; and go-messaging/postgres v0.2.0, from v0.1.0, for
+  `OutboxRetention`, `InboxRetention`, and the two retention indexes its migration set builds
+  concurrently. go.opentelemetry.io/otel and its metric API become direct requirements, and
+  go.opentelemetry.io/proto/otlp v1.11.1 and google.golang.org/grpc v1.84.0 move from indirect
+  to direct for the integration test's OTLP receiver. Their own changes are in their
+  CHANGELOGs.
 - Pins: go-database v0.9.0, from v0.8.0, for `admin.Options.OnReset`, the hook a state reset
   runs after its apply and before its seed; its own changes are in its CHANGELOG.
 - slab runs on go-cli-sdk v0.2.0, in place of cobra and pflag, with a composition root modeled
@@ -373,6 +409,8 @@ accumulate under [Unreleased] until the first cut.
   v0.9.0's `reactor` package.
 - `sdk.WriteFile`, `sdk.EnsureFile`, and `sdk.RemoveFile`, the file protocols with hooks `sdk`
   staged (`blobfs.go`), promoted to blobfs v0.7.0 as `OnComplete` and `OnDelete`.
+- `data.Storage.SweepWorker`, the sweep's standalone worker, and its wake node, superseded by
+  go-database's general sweeper.
 - `slab demo` and `slab list`, superseded by `slab scenario`, along with slab's own scenario
   runner and its `env` package; and the `--tempo`/`SLAB_TEMPO` setting, which nothing read.
 

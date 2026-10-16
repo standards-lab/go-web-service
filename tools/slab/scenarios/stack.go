@@ -46,11 +46,14 @@ func (s Service) Start(ctx context.Context) error {
 }
 
 // Grafana is the grafana up node's value: the running Grafana's base URL,
-// which a step's trace pointer names. It is a lifecycle Starter, as
-// [Service] is, so a scenario that points at traces runs no step until
+// which a step's trace pointer names, and the Mimir client the composition
+// root binds to it, which the sweeper scenario reads metrics through
+// (Grafana's datasource proxy). It is a lifecycle Starter, as [Service] is,
+// so a scenario that points at traces or reads metrics runs no step until
 // Grafana answers.
 type Grafana struct {
-	URL string // Grafana's base URL, from the grafana setting
+	URL   string       // Grafana's base URL, from the grafana setting
+	Mimir *httpx.Mimir // Mimir through the proxy of the Grafana at URL
 }
 
 // Start probes Grafana's health endpoint. Its error names the mise task

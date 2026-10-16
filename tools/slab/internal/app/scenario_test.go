@@ -214,18 +214,19 @@ func TestScenario_WithNoScenarioPrintsItsHelpEndingInTheListing(t *testing.T) {
 		}
 		names = append(names, strings.Fields(line)[0])
 	}
-	if want := []string{"sqlate", "domain", "problems", "storage", "events"}; !slices.Equal(names, want) {
+	if want := []string{"sqlate", "domain", "problems", "storage", "events", "sweeper"}; !slices.Equal(names, want) {
 		t.Errorf("the listing names %q, want %q:\n%s", names, want, listing)
 	}
 	// Each uses line names the need nodes first, then the settings the
 	// steps read: storage and events point at no trace, so they use no
-	// grafana up.
+	// grafana up, and sweeper reads Mimir through Grafana, so it does.
 	if want := []string{
 		"repo, no color",
 		"service, grafana up, repo, no color",
 		"service, grafana up, repo, no color",
 		"service, repo, no color",
 		"service, repo, no color",
+		"service, grafana up, repo, no color",
 	}; !slices.Equal(uses, want) {
 		t.Errorf("the listing's uses lines are %q, want %q:\n%s", uses, want, listing)
 	}
@@ -292,7 +293,7 @@ func TestScenario_UsageErrors(t *testing.T) {
 }
 
 // stackScenarios are the scenarios that declare the service node.
-var stackScenarios = []string{"domain", "problems", "storage", "events"}
+var stackScenarios = []string{"domain", "problems", "storage", "events", "sweeper"}
 
 // closedURL returns the URL of a listener that has been closed, where
 // nothing answers.
@@ -379,11 +380,11 @@ func TestScenario_StopsAtStartWhenTheServiceIsNotReady(t *testing.T) {
 	}
 }
 
-// A scenario that points at traces declares grafana up, so it fails before
-// its first step when Grafana does not answer, naming the node and mise
-// run otel:up, though the service is ready.
+// A scenario that points at traces or reads metrics declares grafana up, so
+// it fails before its first step when Grafana does not answer, naming the
+// node and mise run otel:up, though the service is ready.
 func TestScenario_StopsAtStartWhenGrafanaIsDown(t *testing.T) {
-	for _, name := range []string{"domain", "problems"} {
+	for _, name := range []string{"domain", "problems", "sweeper"} {
 		t.Run(name, func(t *testing.T) {
 			base, _ := answering(t, map[string]int{"/readyz": http.StatusOK})
 			r := runScenario(t, name, base, closedURL(t))
@@ -411,7 +412,7 @@ func TestScenario_StopsAtStartWhenGrafanaIsDown(t *testing.T) {
 // up reports service, naming mise run serve, and not grafana up: grafana up
 // starts after service, so the first fix the run names is the service.
 func TestScenario_StopsAtStartOnTheServiceWhenNothingIsRunning(t *testing.T) {
-	for _, name := range []string{"domain", "problems"} {
+	for _, name := range []string{"domain", "problems", "sweeper"} {
 		t.Run(name, func(t *testing.T) {
 			r := runScenario(t, name, closedURL(t), closedURL(t))
 

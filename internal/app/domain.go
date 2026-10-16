@@ -24,10 +24,10 @@ func defineDomain(g *graph.Graph, n *Nodes) {
 	n.Organization = g.Define("organization", func(s *graph.Scope) (*organization.Service, error) {
 		return organization.New(s.Use(n.SQL), s.Use(n.Files), s.Use(n.Logger), s.Use(n.Runtime).Recorder), nil
 	})
-	// The wake node is the document layer's Sweeper, which it nudges after
+	// The nudge node is the document layer's Sweeper, which it nudges after
 	// each branch it marks.
 	n.Document = g.Define("document", func(s *graph.Scope) (*document.Service, error) {
-		return document.New(s.Use(n.SQL), s.Use(n.Files), s.Use(n.Wake), s.Use(n.Runtime).Recorder), nil
+		return document.New(s.Use(n.SQL), s.Use(n.Files), s.Use(n.Nudge), s.Use(n.Runtime).Recorder), nil
 	})
 }
 

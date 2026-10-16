@@ -84,7 +84,7 @@ func TestLifecycle_StartupMigratesSeedsAndDrains(t *testing.T) {
 	if !strings.Contains(s.Output(), "server stopped") {
 		t.Errorf("drain not logged:\n%s", s.Output())
 	}
-	if strings.Contains(s.Output(), refusedRecord) {
+	if refused(s.Output()) > 0 {
 		t.Errorf("a sweep pass was refused while the schema was empty; want the sweep started after the schema:\n%s", s.Output())
 	}
 

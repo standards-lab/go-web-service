@@ -25,17 +25,17 @@ baseline is running: `cmd/server`, the config files, and the README are authorit
 composition root, configuration bootstrap, logging, lifecycle, HTTP server, probes, the database
 with its admin service (startup migration, the configured seed set, the named states, and the
 admin mount), observability (a telemetry node beneath every lifecycle participant, tracing and
-metrics over OTLP, and structured logs correlated to them by trace id), and object storage (an
+metrics over OTLP, and structured logs correlated to them by trace id), object storage (an
 organization's logo and its document hierarchy on blobfs over go-storage, proxied through the
-service), messaging (NATS JetStream through
-go-messaging, with every public command, seed write, and state reset emitting its event through
-the outbox and relay, cataloged in the README's Messaging section), and the sweep (go-database's
-general sweeper, running blobfs's sweep, which finishes a recursive delete, and go-messaging's
-outbox and inbox retention, described in the README's Sweep section), all wired over the SDKs,
-go-observability, go-storage, blobfs, go-messaging, and sqlate at pinned releases; the root `integration`
-package is the integration tier that asserts the running service through its API. The remaining layers are the
-`v1` goals in the workspace roadmap, which sequences them; each is named here with the note
-that carries its direction:
+service), messaging (NATS JetStream through go-messaging, with every public command, seed write,
+and state reset emitting its event through the outbox and relay, cataloged in the README's
+Messaging section), and the sweep (go-database's general sweeper, running blobfs's sweep, which
+finishes a recursive delete, and go-messaging's outbox and inbox retention, described in the
+README's Sweep section). All of it is wired over the SDKs, go-observability, go-storage, blobfs,
+go-messaging, and sqlate at pinned releases, and the root `integration` package is the
+integration tier that asserts the running service through its API. The remaining layers are the
+`v1` goals in the workspace roadmap, which sequences them; each is named here with the note that
+carries its direction:
 
 - **Data composition and CQRS** — the organization and document domains run on authored SQL;
   `data-layer.md` carries the remaining domains and the CQRS contract.
@@ -44,8 +44,6 @@ that carries its direction:
   strategy.
 - **The management listener** — the admin mount on its own listener, a composition-root
   reshape here and in the template; the coordinator's admin-listener note explores it.
-- **Messaging and reactor services** — the rest of goal `v1.messaging`: the reactor layer
-  go-messaging makes real; go-core's `reactor` package already runs the sweep and the relay.
 - **AI** — the go-ai capability demonstrated in a documented layer.
 - **Embedded client** — a web client embedded in and served by the service binary.
 - **Deployment** — deployment infrastructure in its own repository, targeting this service.

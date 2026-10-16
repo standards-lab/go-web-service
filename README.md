@@ -365,10 +365,10 @@ it and stays due, so one large backlog never starves the others. A cycle first c
 session advisory lock `sweep.<name>` (`sweep.files`, `sweep.outbox`, `sweep.inbox`) without
 waiting; a reclaimer whose lock another replica holds skips the cycle, so two replicas on one
 database never run the same reclaimer's cycle at once. Each pass holds the quiesce gate shared,
-so a schema verb never meets one. A pass the store or the database refuses never ends its
-cycle or fails the service: every pass is idempotent, so a later pass finds what it left. Once the service begins to drain, the sweeper finishes
-the pass in flight and runs no further one, whatever remains, so a large backlog never holds the
-drain; the next start finds what is left.
+so a schema verb never meets one. A pass the store or the database refuses never ends its cycle
+or fails the service: every pass is idempotent, so a later pass finds what it left. Once the
+service begins to drain, the sweeper finishes the pass in flight and runs no further one, whatever
+remains, so a large backlog never holds the drain; the next start finds what is left.
 
 The sweep is a Reactor in the architecture's sense, one that dispatches to no Domain Service: the
 composition root runs it on a reactor, the process's one runner for work driven by an
@@ -377,10 +377,11 @@ makes the service unready.
 
 A `files` pass that did work or was refused is logged at info as `"sweep pass"`, with the
 files, directories, and stale rows it removed and whether it reported more, so a refused pass
-logs its counts even when they are all zero; its error is in the warn record below. A pass that failed, any reclaimer's, is
-logged at warn as `"sweep pass failed"`, with the reclaimer, whether it reported more, its
-duration, and the error; the sweep worker's `"sweep pass refused"` is gone. Two metrics report
-the passes:
+logs its counts even when they are all zero; its error is in the warn record below. A pass that
+failed, any reclaimer's, is logged at warn as `"sweep pass failed"`, with the reclaimer, whether
+it reported more, its duration, and the error. A cycle whose claim fails, such as on a lost
+connection, runs no pass and is logged at warn as `"sweep claim failed"`, with the reclaimer and
+the error. Two metrics report the passes:
 
 | Metric | Kind | Attributes | Meaning |
 |--------|------|------------|---------|
@@ -588,10 +589,10 @@ for an outage. go-web-sdk's `webtest` drives the service through its API; beneat
 database, and `integration.Subscribe` reads the service's stream ([Adding an
 event](#adding-an-event)). `sweep_metrics_test.go` points the service's OTLP exporter at a
 gRPC receiver in the test and reads the sweep's metrics from what it exports. The unit tier's
-`internal/app/sweep_metrics_test.go` proves each outcome, the backlog gauge per reclaimer, and the
-`"sweep pass failed"` record, reporting passes to the sweep metrics node's hook under a manual
-reader through `internal/apptest`'s fixtures. A failing test prints each service process's output, so a 500 comes with the
-service's own record of it. The service adds only its configuration and state control through
+`internal/app/sweep_metrics_test.go` proves each outcome, the backlog gauge per reclaimer, and
+the `"sweep pass failed"` record, reporting passes to the sweep metrics node's hook under a
+manual reader through `internal/apptest`'s fixtures. A failing test prints each service process's
+output, so a 500 comes with the service's own record of it. The service adds only its configuration and state control through
 the admin mount; nothing in the service exists for the tests' sake.
 
 The task runs the same `compose.yml` as its own project (`go-web-service-integration`, Postgres

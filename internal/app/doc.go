@@ -3,8 +3,8 @@
 // defines the layer's nodes in its define function, so the layer files are
 // the architecture's layer list:
 //
-//   - infrastructure.go: defineInfrastructure, the configuration, the
-//     lifecycle config, the logger, the database pool, the object store, the NATS broker, and
+//   - infrastructure.go: defineInfrastructure, the lifecycle config, the
+//     logger, the database pool, the object store, the NATS broker, and
 //     the two the domains see the first two through, the sql session and
 //     the files store;
 //   - telemetry.go: defineTelemetry, the trace and meter providers, which
@@ -26,9 +26,10 @@
 // [Nodes] holds one handle per node, the single description of what the
 // service is composed of: each define function fills its own part of one
 // Nodes value, and its constructors read the lower layers' nodes from it
-// with Use. [App] is the described process. [New] is the cold start: it
-// describes the graph, layer by layer, lowest first, constructs nothing,
-// and cannot fail. [App.Graph] and [App.Nodes] publish the graph and its
+// with Use. Each field's node is named for the field. [App] is the
+// described process. [New] is the cold start: it defines the configuration
+// and the logger's writer as fixed-value nodes, describes the rest of the
+// graph layer by layer, constructs nothing, and cannot fail. [App.Graph] and [App.Nodes] publish the graph and its
 // handles, so a caller can Observe or Replace a node before Run, as
 // internal/apptest's fixtures do. [App.Run]
 // is the hot start plus shutdown: it runs a go-web-sdk web.Service, which

@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"io"
 	"log/slog"
 
 	bfdata "github.com/standards-lab/blobfs/data"
@@ -21,13 +20,12 @@ import (
 	"github.com/standards-lab/sqlate/query"
 
 	"github.com/standards-lab/go-web-service/data"
-	"github.com/standards-lab/go-web-service/internal/config"
 )
 
 // defineInfrastructure defines the infrastructure nodes on g into n: the
-// configuration cfg, the lifecycle config the Coordinator is configured
-// from, the logger written to w, and the services the
-// application is composed on. database is the database's lifecycle object,
+// lifecycle config the Coordinator is configured from, the logger written
+// to the writer node, and the services the application is composed on,
+// each read from the config node New defined. database is the database's lifecycle object,
 // the provider's pool with its start, readiness, and shutdown, which the
 // schema node administers; the domains never see it. storage is the object
 // store itself, a lifecycle participant too, which the storage admin
@@ -50,58 +48,47 @@ import (
 // declares their migration sets, and the runtime (reactors.go), which takes
 // go-messaging's outbox and inbox, so the package is the one place a
 // provider is named.
-func defineInfrastructure(g *graph.Graph, n *Nodes, cfg *config.Config, w io.Writer) {
-	n.Config = g.Define("config", func(*graph.Scope) (*config.Config, error) {
-		return cfg, nil
-	})
-	n.LifecycleConfig = g.Define("lifecycle config", newLifecycleConfig(n))
-	n.Logger = g.Define("logger", newLogger(n, w))
-	n.Database = g.Define("database", newDatabase(n), graph.After(n.Telemetry))
-	n.Storage = g.Define("storage", newStorage(n), graph.After(n.Telemetry))
-	n.Broker = g.Define("broker", newBroker(n), graph.After(n.Telemetry))
-	n.SQL = g.Define("sql", newSQL(n))
-	n.Files = g.Define("files", newFiles(n))
+func defineInfrastructure(g *graph.Graph, n *Nodes) {
+	n.LifecycleConfig = g.Define("lifecycle config", n.newLifecycleConfig)
+	n.Logger = g.Define("logger", n.newLogger)
+	n.Database = g.Define("database", n.newDatabase, graph.After(n.Telemetry))
+	n.Storage = g.Define("storage", n.newStorage, graph.After(n.Telemetry))
+	n.Broker = g.Define("broker", n.newBroker, graph.After(n.Telemetry))
+	n.SQL = g.Define("sql", n.newSQL)
+	n.Files = g.Define("files", n.newFiles)
 }
 
 // newLifecycleConfig returns the config node's lifecycle block, the
 // configuration [App.Run] hands the lifecycle Coordinator.
-func newLifecycleConfig(n *Nodes) func(*graph.Scope) (lifecycle.Config, error) {
-	return func(s *graph.Scope) (lifecycle.Config, error) {
-		return s.Use(n.Config).Config, nil
-	}
+func (n *Nodes) newLifecycleConfig(s *graph.Scope) (lifecycle.Config, error) {
+	return s.Use(n.Config).Config, nil
 }
 
-// newLogger constructs the service's logger over w from the config node's
-// log block. The trace handler passes records through unchanged outside a
-// span, so the wrap is unconditional and costs nothing when no trace is
-// live.
-func newLogger(n *Nodes, w io.Writer) func(*graph.Scope) (*slog.Logger, error) {
-	return func(s *graph.Scope) (*slog.Logger, error) {
-		return slog.New(observability.NewTraceHandler(logging.New(w, s.Use(n.Config).Log).Handler())), nil
-	}
+// newLogger constructs the service's logger over the writer node from the
+// config node's log block. The trace handler passes records through
+// unchanged outside a span, so the wrap is unconditional and costs nothing
+// when no trace is live.
+func (n *Nodes) newLogger(s *graph.Scope) (*slog.Logger, error) {
+	return slog.New(observability.NewTraceHandler(logging.New(s.Use(n.Writer), s.Use(n.Config).Log).Handler())), nil
 }
 
 // newDatabase constructs the database pool from the config node's database
 // block. Its Define orders it after telemetry, so the providers are
 // installed before the pool starts and flushed after it closes.
-func newDatabase(n *Nodes) func(*graph.Scope) (*database.DB, error) {
-	return func(s *graph.Scope) (*database.DB, error) {
-		return postgres.New(s.Use(n.Config).Database)
-	}
+func (n *Nodes) newDatabase(s *graph.Scope) (*database.DB, error) {
+	return postgres.New(s.Use(n.Config).Database)
 }
 
 // newStorage constructs the object store over its provider's client from
 // the config node's storage block. Its Define orders it after telemetry, as
 // the database's does.
-func newStorage(n *Nodes) func(*graph.Scope) (*storage.Store, error) {
-	return func(s *graph.Scope) (*storage.Store, error) {
-		cfg := s.Use(n.Config).Storage
-		client, err := azureblob.New(cfg)
-		if err != nil {
-			return nil, err
-		}
-		return storage.New(client, cfg), nil
+func (n *Nodes) newStorage(s *graph.Scope) (*storage.Store, error) {
+	cfg := s.Use(n.Config).Storage
+	client, err := azureblob.New(cfg)
+	if err != nil {
+		return nil, err
 	}
+	return storage.New(client, cfg), nil
 }
 
 // newBroker constructs the NATS broker from the config node's nats block.
@@ -109,33 +96,27 @@ func newStorage(n *Nodes) func(*graph.Scope) (*storage.Store, error) {
 // connects, and provisions the stream the block's owner switch makes it own;
 // a broker whose server is down at startup fails startup, and one whose
 // connection drops later reconnects without limit, unready until it is back.
-func newBroker(n *Nodes) func(*graph.Scope) (*nats.Broker, error) {
-	return func(s *graph.Scope) (*nats.Broker, error) {
-		return nats.New(s.Use(n.Config).NATS)
-	}
+func (n *Nodes) newBroker(s *graph.Scope) (*nats.Broker, error) {
+	return nats.New(s.Use(n.Config).NATS)
 }
 
 // newSQL groups the session over the database pool with the pattern
 // catalog, built here, once: the library's namespace, blobfs's, and the
 // application's.
-func newSQL(n *Nodes) func(*graph.Scope) (*data.Database, error) {
-	return func(s *graph.Scope) (*data.Database, error) {
-		catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
-		session := sqlate.Wrap(s.Use(n.Database).Conn(), pgdialect.Dialect{})
-		return data.New(session, catalog), nil
-	}
+func (n *Nodes) newSQL(s *graph.Scope) (*data.Database, error) {
+	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
+	session := sqlate.Wrap(s.Use(n.Database).Conn(), pgdialect.Dialect{})
+	return data.New(session, catalog), nil
 }
 
 // newFiles constructs blobfs's store on the sql node's catalog and dialect,
 // with its Postgres engine, and groups it with the object store its keys
 // name.
-func newFiles(n *Nodes) func(*graph.Scope) (*data.Storage, error) {
-	return func(s *graph.Scope) (*data.Storage, error) {
-		sql := s.Use(n.SQL)
-		fs, err := bfdata.New(sql.Catalog, sql.Dialect(), bfdata.WithEngine(blobfspg.Engine))
-		if err != nil {
-			return nil, fmt.Errorf("blobfs: %w", err)
-		}
-		return data.NewStorage(sql, fs, s.Use(n.Storage)), nil
+func (n *Nodes) newFiles(s *graph.Scope) (*data.Storage, error) {
+	sql := s.Use(n.SQL)
+	fs, err := bfdata.New(sql.Catalog, sql.Dialect(), bfdata.WithEngine(blobfspg.Engine))
+	if err != nil {
+		return nil, fmt.Errorf("blobfs: %w", err)
 	}
+	return data.NewStorage(sql, fs, s.Use(n.Storage)), nil
 }

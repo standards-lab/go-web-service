@@ -15,6 +15,7 @@ import (
 
 	libconfig "github.com/standards-lab/go-core/config"
 	"github.com/standards-lab/go-core/graph"
+	"github.com/standards-lab/go-core/graph/graphtest"
 	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-core/process/processtest"
 	"github.com/standards-lab/go-web-sdk"
@@ -24,7 +25,7 @@ import (
 )
 
 // This file pins the graph's structural properties the composition root
-// owns: the server alone in the top layer, the readiness checks the
+// owns: each node named by its Nodes field, the server alone in the top layer, the readiness checks the
 // lifecycle infers from the node values and their order, telemetry beneath
 // every other participant, the schema between the connections and the
 // reactors, the relay held off by the gate, and each participant held by
@@ -33,6 +34,14 @@ import (
 // app_test.go, these tests name nodes: they reach the graph through
 // App.Graph and App.Nodes, as does the Build-failure case, which
 // substitutes a failing constructor.
+
+// Each node's name is its Nodes field's name lowercased, ignoring the
+// name's spaces, so a field names the node it holds without a comment
+// repeating the name, and every field holds a handle once New returns.
+func TestGraph_NodesNamedByTheirFields(t *testing.T) {
+	a := app.New(configtest.Config(t), io.Discard)
+	graphtest.CheckNames(t, a.Nodes())
+}
 
 // runSet returns the set Run builds, App.Roots plus the lifecycle config
 // node, plus extra. TestGraph_RootsBuildAsRun holds this set to Run's by

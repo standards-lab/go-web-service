@@ -18,10 +18,12 @@ import (
 // reclaimer the service registers (files, outbox, and inbox), and the nudge
 // the document layer reaches its files reclaimer through. The messaging is
 // the other: the runtime, and the relay it builds, which publishes the
-// outbox's committed events. No node Uses a reactor, so each is a member of
-// the reactors group, n.Reactors, which Run builds as a root and the server
-// orders itself after. Each reactor's Define also orders it after the
-// schema. It constructs nothing.
+// outbox's committed events. No node Uses a reactor, so each joins the
+// reactors group, n.Reactors, with graph.In on its Define line; Run builds
+// the group as a root and the server orders itself after it. Each
+// reactor's Define line also orders it after the schema. The nudge is a
+// fresh node, so each Build's is unbound until that Build's sweeper binds
+// it. It constructs nothing.
 //
 // The relay's last pass publishes what was committed while the producers
 // drained, so every producer must drain before it. A node that commits
@@ -31,10 +33,10 @@ import (
 // requests, and the server, ordered after every reactor, drains first.
 func defineReactors(g *graph.Graph, n *Nodes) {
 	n.Reactors = g.Group("reactors")
-	n.Nudge = g.Define("nudge", func(*graph.Scope) (*Nudge, error) { return new(Nudge), nil })
-	n.Sweeper = g.Define("sweeper", newSweeper(n), graph.In(n.Reactors), graph.After(n.Schema))
-	n.Runtime = g.Define("runtime", newRuntime(n))
-	n.Relay = g.Define("relay", newRelay(n), graph.In(n.Reactors), graph.After(n.Schema))
+	n.Nudge = g.Fresh[Nudge]("nudge")
+	n.Sweeper = g.Define("sweeper", n.newSweeper, graph.In(n.Reactors), graph.After(n.Schema))
+	n.Runtime = g.Define("runtime", n.newRuntime)
+	n.Relay = g.Define("relay", n.newRelay, graph.In(n.Reactors), graph.After(n.Schema))
 }
 
 // The names the sweeper registers its reclaimers under: the name a nudge
@@ -100,47 +102,45 @@ func (n *Nudge) Nudge() {
 //
 // Its value is a lifecycle Subsystem, ReadinessChecker, and Monitored, so
 // the Coordinator starts it, drains it, reports it, and ends the run on its
-// failure with no registration here. Its Define orders it after the schema,
-// so it starts once every table it touches is verified, and stops before the
-// schema's layer beneath it. Given the shutdown timeout, it cancels a pass
+// failure with no registration here. Its Define line orders it after the
+// schema, so it starts once every table it touches is verified, and stops
+// before the schema's layer beneath it. Given the shutdown timeout, it cancels a pass
 // still running at half of it (go-core's reactor.CancelWithin), so the
 // sweeper reports the cancellation before the coordinator's deadline drops
 // it.
-func newSweeper(n *Nodes) func(*graph.Scope) (*sweep.Sweeper, error) {
-	return func(s *graph.Scope) (*sweep.Sweeper, error) {
-		cfg := s.Use(n.Config)
-		db := s.Use(n.SQL).DB
-		logger := s.Use(n.Logger)
+func (n *Nodes) newSweeper(s *graph.Scope) (*sweep.Sweeper, error) {
+	cfg := s.Use(n.Config)
+	db := s.Use(n.SQL).DB
+	logger := s.Use(n.Logger)
 
-		outbox, err := msgpg.OutboxRetention(db, cfg.Sweep.OutboxAge.Duration())
-		if err != nil {
-			return nil, err
-		}
-		inbox, err := msgpg.InboxRetention(db, cfg.Sweep.InboxAge.Duration())
-		if err != nil {
-			return nil, err
-		}
-
-		// The registrations are built from reclaimers, so the backlog
-		// gauge's names and the sweeper's are one list: a reclaimer is
-		// registered only under a name listed there.
-		built := map[string]sweep.Reclaimer{
-			reclaimFiles:  s.Use(n.Files).FilesReclaimer(db, cfg.Sweep.StaleAge.Duration(), logger),
-			reclaimOutbox: outbox,
-			reclaimInbox:  inbox,
-		}
-		regs, err := registrations(built, sweep.Policy{Interval: cfg.Sweep.Interval.Duration(), Budget: *cfg.Sweep.Batch})
-		if err != nil {
-			return nil, err
-		}
-		sw, err := sweep.New(db, regs, cfg.ShutdownTimeout.Duration(), logger,
-			sweep.Gated(s.Use(n.Gate)), sweep.OnPass(s.Use(n.SweepMetrics)))
-		if err != nil {
-			return nil, err
-		}
-		s.Use(n.Nudge).sweeper.Store(sw)
-		return sw, nil
+	outbox, err := msgpg.OutboxRetention(db, cfg.Sweep.OutboxAge.Duration())
+	if err != nil {
+		return nil, err
 	}
+	inbox, err := msgpg.InboxRetention(db, cfg.Sweep.InboxAge.Duration())
+	if err != nil {
+		return nil, err
+	}
+
+	// The registrations are built from reclaimers, so the backlog
+	// gauge's names and the sweeper's are one list: a reclaimer is
+	// registered only under a name listed there.
+	built := map[string]sweep.Reclaimer{
+		reclaimFiles:  s.Use(n.Files).FilesReclaimer(db, cfg.Sweep.StaleAge.Duration(), logger),
+		reclaimOutbox: outbox,
+		reclaimInbox:  inbox,
+	}
+	regs, err := registrations(built, sweep.Policy{Interval: cfg.Sweep.Interval.Duration(), Budget: *cfg.Sweep.Batch})
+	if err != nil {
+		return nil, err
+	}
+	sw, err := sweep.New(db, regs, cfg.ShutdownTimeout.Duration(), logger,
+		sweep.Gated(s.Use(n.Gate)), sweep.OnPass(s.Use(n.SweepMetrics)))
+	if err != nil {
+		return nil, err
+	}
+	s.Use(n.Nudge).sweeper.Store(sw)
+	return sw, nil
 }
 
 // registrations registers the reclaimers built, by name, in the order of
@@ -170,12 +170,10 @@ func registrations(built map[string]sweep.Reclaimer, policy sweep.Policy) ([]swe
 // transaction and claims no row until the verb releases it. The runtime
 // holds no resource and registers nothing, so it is no lifecycle
 // participant; the broker beneath it and the reactors it builds are.
-func newRuntime(n *Nodes) func(*graph.Scope) (*messaging.Runtime, error) {
-	return func(s *graph.Scope) (*messaging.Runtime, error) {
-		cfg := s.Use(n.Config)
-		return messaging.New(cfg.Messaging, s.Use(n.Broker), msgpg.Outbox(), msgpg.Inbox(),
-			cfg.ShutdownTimeout.Duration(), s.Use(n.Logger), messaging.Gated(s.Use(n.Gate)))
-	}
+func (n *Nodes) newRuntime(s *graph.Scope) (*messaging.Runtime, error) {
+	cfg := s.Use(n.Config)
+	return messaging.New(cfg.Messaging, s.Use(n.Broker), msgpg.Outbox(), msgpg.Inbox(),
+		cfg.ShutdownTimeout.Duration(), s.Use(n.Logger), messaging.Gated(s.Use(n.Gate)))
 }
 
 // newRelay constructs the relay over the sql node's session. Its value is a
@@ -186,8 +184,6 @@ func newRuntime(n *Nodes) func(*graph.Scope) (*messaging.Runtime, error) {
 // reactor's cancellation of a publish still running at half of it. It drains
 // before the broker beneath it, which it Uses through the runtime, so the
 // last pass publishes before the connection closes.
-func newRelay(n *Nodes) func(*graph.Scope) (*reactor.Reactor[event.Event], error) {
-	return func(s *graph.Scope) (*reactor.Reactor[event.Event], error) {
-		return s.Use(n.Runtime).Relay(s.Use(n.SQL).DB), nil
-	}
+func (n *Nodes) newRelay(s *graph.Scope) (*reactor.Reactor[event.Event], error) {
+	return s.Use(n.Runtime).Relay(s.Use(n.SQL).DB), nil
 }

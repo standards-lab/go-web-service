@@ -35,60 +35,70 @@ type App struct {
 // Nodes is the App's graph, one handle per node: the single description of
 // what the service is composed of. Each layer file's define function fills
 // its own part of one Nodes value, and its constructors read the lower
-// layers' nodes from that same value. Each node's name, in the field's
-// comment, is the name the lifecycle labels its errors with and the
-// readiness probe reports its check under. A value only one node uses is
-// built inside that node's constructor rather than as a node of its own.
+// layers' nodes from that same value. Each field's node or group is named
+// for the field, its words lowercased and spaced, so LifecycleConfig holds
+// "lifecycle config", the name the lifecycle labels its errors with and the
+// readiness probe reports its check under; the field names the node, and no
+// comment repeats it. A value only one node uses is built inside that
+// node's constructor rather than as a node of its own.
 type Nodes struct {
-	// Infrastructure (infrastructure.go).
-	Config          *graph.Node[*config.Config]   // "config"
-	LifecycleConfig *graph.Node[lifecycle.Config] // "lifecycle config"
-	Logger          *graph.Node[*slog.Logger]     // "logger"
-	Database        *graph.Node[*database.DB]     // "database"
-	Storage         *graph.Node[*storage.Store]   // "storage"
-	Broker          *graph.Node[*nats.Broker]     // "broker"
-	SQL             *graph.Node[*data.Database]   // "sql"
-	Files           *graph.Node[*data.Storage]    // "files"
+	// The App's inputs (app.go): the configuration and the logger's
+	// writer New was given, each the same value in every Build.
+	Config *graph.Node[*config.Config]
+	Writer *graph.Node[io.Writer]
 
 	// Telemetry (telemetry.go).
-	Telemetry     *graph.Node[*Telemetry]           // "telemetry"
-	MeterProvider *graph.Node[metric.MeterProvider] // "meterprovider"
-	SweepMetrics  *graph.Node[sweep.Hook]           // "sweepmetrics"
+	Telemetry     *graph.Node[*Telemetry]
+	MeterProvider *graph.Node[metric.MeterProvider]
+	SweepMetrics  *graph.Node[sweep.Hook]
+
+	// Infrastructure (infrastructure.go).
+	LifecycleConfig *graph.Node[lifecycle.Config]
+	Logger          *graph.Node[*slog.Logger]
+	Database        *graph.Node[*database.DB]
+	Storage         *graph.Node[*storage.Store]
+	Broker          *graph.Node[*nats.Broker]
+	SQL             *graph.Node[*data.Database]
+	Files           *graph.Node[*data.Storage]
 
 	// Admin (admin.go).
-	Gate   *graph.Node[*reactor.Gate]  // "gate"
-	Schema *graph.Node[*admin.Service] // "schema"
+	Gate   *graph.Node[*reactor.Gate]
+	Schema *graph.Node[*admin.Service]
 
 	// Domain (domain.go).
-	Organization *graph.Node[*organization.Service] // "organization"
-	Document     *graph.Node[*document.Service]     // "document"
+	Organization *graph.Node[*organization.Service]
+	Document     *graph.Node[*document.Service]
 
-	// Reactors (reactors.go). Reactors is the group every reactor is a
-	// member of: no node Uses a reactor, so Run builds the group as a
-	// root, and the server orders itself after it so it stays the top
-	// layer.
-	Reactors *graph.Group                               // "reactors"
-	Nudge    *graph.Node[*Nudge]                        // "nudge"
-	Sweeper  *graph.Node[*sweep.Sweeper]                // "sweeper"
-	Runtime  *graph.Node[*messaging.Runtime]            // "runtime"
-	Relay    *graph.Node[*reactor.Reactor[event.Event]] // "relay"
+	// Reactors (reactors.go). Reactors is the group every reactor joins
+	// with graph.In on its Define line: no node Uses a reactor, so Run
+	// builds the group as a root, and the server orders itself after it
+	// so it stays the top layer.
+	Reactors *graph.Group
+	Nudge    *graph.Node[*Nudge]
+	Sweeper  *graph.Node[*sweep.Sweeper]
+	Runtime  *graph.Node[*messaging.Runtime]
+	Relay    *graph.Node[*reactor.Reactor[event.Event]]
 
 	// The request edge (server.go).
-	Readiness *graph.Node[*lifecycle.Readiness] // "readiness"
-	Router    *graph.Node[*web.Router]          // "router"
-	Server    *graph.Node[*web.Server]          // "server"
+	Readiness *graph.Node[*lifecycle.Readiness]
+	Router    *graph.Node[*web.Router]
+	Server    *graph.Node[*web.Server]
 }
 
 // New describes the graph over cfg and a writer for the service's logger,
-// one layer file at a time, and returns the App. It is cold: it constructs
-// nothing and cannot fail; [App.Run] builds. Telemetry is described first,
-// ahead of the infrastructure beneath it, because the connections order
-// themselves after its node at their Define, and an After takes a handle
-// already defined; every other layer follows lowest first.
+// and returns the App. It is cold: it constructs nothing and cannot fail;
+// [App.Run] builds. cfg and w are fixed-value nodes, the config node and
+// the writer node, which the layers reach with Use like any other; then
+// each layer file describes its nodes. Telemetry is described first, ahead
+// of the infrastructure beneath it, because the connections order
+// themselves after its node on their Define lines, and an After takes a
+// handle already defined; every other layer follows lowest first.
 func New(cfg *config.Config, w io.Writer) *App {
 	a := &App{graph: graph.New()}
+	a.nodes.Config = a.graph.Value("config", cfg)
+	a.nodes.Writer = a.graph.Value("writer", w)
 	defineTelemetry(a.graph, &a.nodes)
-	defineInfrastructure(a.graph, &a.nodes, cfg, w)
+	defineInfrastructure(a.graph, &a.nodes)
 	defineAdmin(a.graph, &a.nodes)
 	defineDomain(a.graph, &a.nodes)
 	defineReactors(a.graph, &a.nodes)
@@ -108,9 +118,9 @@ func (a *App) Nodes() Nodes { return a.nodes }
 
 // Roots returns the service's root set, the nodes a Build of the whole
 // service starts from: the server, which reaches the router, the
-// readiness, the logger, the config, telemetry, the schema, and the
-// domains through its Uses and theirs, and the reactors group, whose
-// members no Use reaches. [App.Run] builds this set plus the lifecycle
+// readiness, the logger, the writer node, the config node, telemetry, the
+// schema, and the domains through its Uses and theirs, and the reactors
+// group, whose members no Use reaches. [App.Run] builds this set plus the lifecycle
 // config node the Coordinator is configured from.
 func (a *App) Roots() []graph.Ref {
 	n := a.nodes

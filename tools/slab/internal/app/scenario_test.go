@@ -86,8 +86,8 @@ func TestScenario_RunsSqlate(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Errorf("stderr = %q, want empty", stderr)
 	}
-	if !slices.Equal(built.Log(), sqlateBuilt) {
-		t.Errorf("nodes built = %q, want %q", built.Log(), sqlateBuilt)
+	if !slices.Equal(apptest.Names(built.Log()), sqlateBuilt) {
+		t.Errorf("nodes built = %q, want %q", apptest.Names(built.Log()), sqlateBuilt)
 	}
 }
 
@@ -230,7 +230,7 @@ func TestScenario_WithNoScenarioPrintsItsHelpEndingInTheListing(t *testing.T) {
 	}; !slices.Equal(uses, want) {
 		t.Errorf("the listing's uses lines are %q, want %q:\n%s", uses, want, listing)
 	}
-	if log := built.Log(); len(log) != 0 {
+	if log := apptest.Names(built.Log()); len(log) != 0 {
 		t.Errorf("nodes built = %q, want none", log)
 	}
 }
@@ -285,7 +285,7 @@ func TestScenario_UsageErrors(t *testing.T) {
 			if stdout.Len() != 0 {
 				t.Errorf("stdout = %q, want empty", stdout)
 			}
-			if log := built.Log(); len(log) != 0 {
+			if log := apptest.Names(built.Log()); len(log) != 0 {
 				t.Errorf("nodes built = %q, want none", log)
 			}
 		})
@@ -307,9 +307,9 @@ func closedURL(t *testing.T) string {
 // answering returns the URL of a server that answers the readiness and
 // health probes with their status from probes, keyed by path, and every
 // other request with 500, recording each path it is sent.
-func answering(t *testing.T, probes map[string]int) (string, *apptest.Recorder) {
+func answering(t *testing.T, probes map[string]int) (string, *apptest.Recorder[string]) {
 	t.Helper()
-	sent := &apptest.Recorder{}
+	sent := &apptest.Recorder[string]{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sent.Record(r.Method + " " + r.URL.Path)
 		status, ok := probes[r.URL.Path]

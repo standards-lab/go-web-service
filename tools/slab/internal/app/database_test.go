@@ -72,7 +72,7 @@ func TestAdmin_MountsTheDatabaseAndStorageCommands(t *testing.T) {
 			t.Errorf("admin help lacks %q:\n%s", want, stdout.String())
 		}
 	}
-	if log := built.Log(); len(log) != 0 {
+	if log := apptest.Names(built.Log()); len(log) != 0 {
 		t.Errorf("nodes built = %q, want none", log)
 	}
 }

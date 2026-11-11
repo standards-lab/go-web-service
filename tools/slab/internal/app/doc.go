@@ -28,7 +28,11 @@
 //   - version.go: the version command, which declares no nodes.
 //
 // [Nodes] holds one handle per node: each define function fills its own
-// part of one Nodes value. Defining the nodes constructs nothing. A command
+// part of one Nodes value. Each field's node is named for the field, so no
+// comment names it; graph_test.go checks that rule with go-core's
+// graphtest.CheckNames, and checks that every leaf of the tree, as
+// Command.Leaves yields it, builds its nodes without dropping an order and
+// with grafana up above service wherever it builds both. Defining the nodes constructs nothing. A command
 // declares the nodes it needs with Use; the dispatcher builds them, with
 // the lifecycle configuration node, only when the command runs, and shuts
 // them down when it returns. A run that builds nothing, such as help, a

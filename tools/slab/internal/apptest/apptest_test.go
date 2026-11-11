@@ -6,11 +6,13 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/standards-lab/go-core/graph"
+
 	"github.com/standards-lab/go-web-service/tools/slab/internal/apptest"
 )
 
 func TestRecorder_LogsInOrder(t *testing.T) {
-	var r apptest.Recorder
+	var r apptest.Recorder[string]
 	if log := r.Log(); len(log) != 0 {
 		t.Errorf("zero Recorder Log() = %q, want empty", log)
 	}
@@ -25,7 +27,7 @@ func TestRecorder_LogsInOrder(t *testing.T) {
 }
 
 func TestRecorder_LogIsACopy(t *testing.T) {
-	var r apptest.Recorder
+	var r apptest.Recorder[string]
 	r.Record("a")
 
 	log := r.Log()
@@ -42,7 +44,7 @@ func TestRecorder_LogIsACopy(t *testing.T) {
 
 // Run under -race, concurrent Records prove the Recorder's lock.
 func TestRecorder_ConcurrentRecords(t *testing.T) {
-	var r apptest.Recorder
+	var r apptest.Recorder[string]
 	var wg sync.WaitGroup
 	const n = 50
 	for i := range n {
@@ -52,5 +54,18 @@ func TestRecorder_ConcurrentRecords(t *testing.T) {
 
 	if got := len(r.Log()); got != n {
 		t.Errorf("len(Log()) = %d, want %d", got, n)
+	}
+}
+
+// Names reads each handle's name, in order.
+func TestNames_ReadsEachHandle(t *testing.T) {
+	g := graph.New()
+	refs := []graph.Ref{g.Value("no color", false), g.Value("lifecycle config", 0)}
+
+	if got, want := apptest.Names(refs), []string{"no color", "lifecycle config"}; !slices.Equal(got, want) {
+		t.Errorf("Names() = %q, want %q", got, want)
+	}
+	if got := apptest.Names(nil); len(got) != 0 {
+		t.Errorf("Names(nil) = %q, want empty", got)
 	}
 }

@@ -32,7 +32,7 @@ func unreadable(t *testing.T) {
 
 // newApp returns the App over fresh buffers, and the recorder of the nodes
 // its runs build.
-func newApp(t *testing.T) (a *app.App, stdout, stderr *bytes.Buffer, built *apptest.Recorder) {
+func newApp(t *testing.T) (a *app.App, stdout, stderr *bytes.Buffer, built *apptest.Recorder[graph.Ref]) {
 	t.Helper()
 	stdout, stderr = new(bytes.Buffer), new(bytes.Buffer)
 	a = app.New(cli.Streams{Stdin: strings.NewReader(""), Stdout: stdout, Stderr: stderr})
@@ -104,7 +104,7 @@ func TestRun_RootHelp(t *testing.T) {
 			if stderr.Len() != 0 {
 				t.Errorf("stderr = %q, want empty", stderr)
 			}
-			if log := built.Log(); len(log) != 0 {
+			if log := apptest.Names(built.Log()); len(log) != 0 {
 				t.Errorf("nodes built = %q, want none", log)
 			}
 		})
@@ -125,7 +125,7 @@ func TestRun_ParentWithNoSubcommand(t *testing.T) {
 	if want := "Hold the probes\n\nUsage:\n  slab group <command> [flags]"; !strings.HasPrefix(stdout.String(), want) {
 		t.Errorf("stdout = %q, want it to start with %q", stdout, want)
 	}
-	if log := built.Log(); len(log) != 0 {
+	if log := apptest.Names(built.Log()); len(log) != 0 {
 		t.Errorf("nodes built = %q, want none", log)
 	}
 }
@@ -165,7 +165,7 @@ func TestRun_UsageErrors(t *testing.T) {
 			if stdout.Len() != 0 {
 				t.Errorf("stdout = %q, want empty", stdout)
 			}
-			if log := built.Log(); len(log) != 0 {
+			if log := apptest.Names(built.Log()); len(log) != 0 {
 				t.Errorf("nodes built = %q, want none", log)
 			}
 		})
@@ -188,7 +188,7 @@ func TestRun_Version(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Errorf("stderr = %q, want empty", stderr)
 	}
-	if log := built.Log(); len(log) != 0 {
+	if log := apptest.Names(built.Log()); len(log) != 0 {
 		t.Errorf("nodes built = %q, want none", log)
 	}
 }
@@ -230,8 +230,8 @@ func TestRun_CommandBuildsWhatItDeclares(t *testing.T) {
 	if *got == nil {
 		t.Fatal("probe did not run")
 	}
-	if !slices.Equal(built.Log(), probeBuilt) {
-		t.Errorf("nodes built = %q, want %q", built.Log(), probeBuilt)
+	if !slices.Equal(apptest.Names(built.Log()), probeBuilt) {
+		t.Errorf("nodes built = %q, want %q", apptest.Names(built.Log()), probeBuilt)
 	}
 }
 
@@ -260,8 +260,8 @@ func TestRun_ASettingIsReadOnlyByACommandThatDeclaresIt(t *testing.T) {
 	if got != "http://env-grafana" {
 		t.Errorf("grafana = %q, want the environment's", got)
 	}
-	if want := []string{"grafana", "lifecycle config"}; !slices.Equal(built.Log(), want) {
-		t.Errorf("nodes built = %q, want %q", built.Log(), want)
+	if want := []string{"grafana", "lifecycle config"}; !slices.Equal(apptest.Names(built.Log()), want) {
+		t.Errorf("nodes built = %q, want %q", apptest.Names(built.Log()), want)
 	}
 }
 
@@ -392,8 +392,8 @@ func TestRun_HaltStopsTheCommand(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Errorf("stdout = %q, want empty", stdout)
 	}
-	if !slices.Equal(built.Log(), probeBuilt) {
-		t.Errorf("nodes built = %q, want %q", built.Log(), probeBuilt)
+	if !slices.Equal(apptest.Names(built.Log()), probeBuilt) {
+		t.Errorf("nodes built = %q, want %q", apptest.Names(built.Log()), probeBuilt)
 	}
 }
 
@@ -410,7 +410,7 @@ func TestRun_HaltLeavesVersion(t *testing.T) {
 	if stdout.String() != "(devel)\n" {
 		t.Errorf("stdout = %q, want %q", stdout, "(devel)\n")
 	}
-	if log := built.Log(); len(log) != 0 {
+	if log := apptest.Names(built.Log()); len(log) != 0 {
 		t.Errorf("nodes built = %q, want none", log)
 	}
 }

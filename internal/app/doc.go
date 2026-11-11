@@ -32,7 +32,7 @@
 // handles, so a caller can Observe or Replace a node before Run, as
 // internal/apptest's fixtures do. [App.Run]
 // is the hot start plus shutdown: it builds the graph from the config, the
-// logger, the server, the schema, and each reactor as roots, hands the
+// logger, the server, the schema, and the reactors group as roots, hands the
 // System to go-core's lifecycle Coordinator, and returns the process exit
 // code. A constructor's error is reported there as the service failing; a
 // wiring mistake panics during Build.
@@ -44,7 +44,8 @@
 // has its runtime error watched. Nodes start in layer order and drain in
 // reverse.
 // No layer file registers anything with the Coordinator. The order is
-// computed from what each node uses, plus four After edges, which order
+// computed from what each node uses, plus four After edges, declared with
+// graph.After at each node's Define, which order
 // two nodes without passing a value: the database, the object store, and
 // the broker after telemetry, the sweeper and the relay after the schema,
 // and the server after every reactor and the schema, so it is alone in the
@@ -66,6 +67,7 @@
 // relay's publishes to the broker.
 // What a producer of events must order itself after is defineReactors'
 // drain rule. Extending the service means defining a node in its layer's
-// define function, and appending a reactor's node to Nodes.Reactors; the
+// define function, and placing a reactor's node in the reactors group with
+// graph.In at its Define; the
 // signatures, cmd/server, and [App.Run] stay untouched.
 package app

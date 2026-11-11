@@ -56,7 +56,7 @@ func New(streams cli.Streams) *App {
 // command's result. An App runs one command at a time, since a graph.Graph
 // is not safe for concurrent use.
 func (a *App) Run(ctx context.Context, args []string) int {
-	return cli.Run(ctx, a.root, args, a.streams, cli.WithGraph(a.graph, a.nodes.LifecycleConfig))
+	return cli.Program{Root: a.root, Graph: a.graph, LifecycleConfig: a.nodes.LifecycleConfig}.Run(ctx, args, a.streams)
 }
 
 // Nodes is the App's graph, one handle per node: the single description of

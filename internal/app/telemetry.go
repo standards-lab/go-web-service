@@ -72,13 +72,13 @@ func observabilityConfig(cfg *config.Config) observability.Config {
 // defineTelemetry defines the telemetry node, the meter provider node, and
 // the sweep metrics node on g into n. It constructs nothing.
 //
-// The database and the object store order themselves after telemetry, so
-// its Start installs the providers before either starts and its Shutdown
-// flushes after both have closed. Those edges only order; the router's
-// middleware stack, whose tracing records to the providers, Uses it, which
-// is what brings it into the Build. The server sits above both
-// connections, so every request is served while the providers are
-// installed.
+// The database and the object store order themselves after telemetry at
+// their Define, so the layer is defined before the infrastructure, and its
+// Start installs the providers before either starts and its Shutdown flushes
+// after both have closed. Those edges only order; the router's middleware
+// stack, whose tracing records to the providers, Uses it, which is what
+// brings it into the Build. The server sits above both connections, so every
+// request is served while the providers are installed.
 //
 // The meter provider node is what the service's own instruments are
 // created on, and the sweep metrics node is the sweeper's per-pass hook,

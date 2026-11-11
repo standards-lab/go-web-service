@@ -1,7 +1,7 @@
 # The OpenTelemetry Collector, contrib distribution, receiving the service's
 # logs, traces, and metrics and forwarding each to its backend. This FROM line
 # is the collector's one pin.
-FROM otel/opentelemetry-collector-contrib:0.162.0
+FROM otel/opentelemetry-collector-contrib:0.165.0
 
 COPY otel-collector.yaml /etc/otelcol-contrib/otel-collector.yaml
 

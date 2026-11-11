@@ -42,7 +42,7 @@ import (
 func buildAsRun(t *testing.T, a *app.App, extra ...graph.Ref) *graph.System {
 	t.Helper()
 	n := a.Nodes()
-	roots := append([]graph.Ref{n.Config, n.Logger, n.Server, n.Schema}, n.Reactors...)
+	roots := []graph.Ref{n.Config, n.Logger, n.Server, n.Schema, n.Reactors}
 	sys, err := a.Graph().Build(append(roots, extra...)...)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -97,7 +97,7 @@ func TestGraph_ServerAloneInTopLayer(t *testing.T) {
 		// Run reaches rather than a set this test chose. The context ends
 		// before startup, so the Run starts nothing.
 		ran := map[string]bool{}
-		a.Graph().Observe(func(name string) { ran[name] = true })
+		a.Graph().Observe(func(r graph.Ref) { ran[r.Name()] = true })
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		if code := a.Run(ctx); code != 0 {

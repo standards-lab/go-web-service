@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/standards-lab/go-core/graph"
+
 	"github.com/standards-lab/go-web-service/internal/app"
 	"github.com/standards-lab/go-web-service/internal/config/configtest"
 )
@@ -86,7 +88,7 @@ func TestRun_TwicePanics(t *testing.T) {
 	}
 
 	var built []string
-	a.Graph().Observe(func(name string) { built = append(built, name) })
+	a.Graph().Observe(func(r graph.Ref) { built = append(built, r.Name()) })
 	defer func() {
 		if recover() == nil {
 			t.Error("a second Run did not panic")

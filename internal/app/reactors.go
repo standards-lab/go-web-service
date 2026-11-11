@@ -18,9 +18,10 @@ import (
 // reclaimer the service registers (files, outbox, and inbox), and the nudge
 // the document layer reaches its files reclaimer through. The messaging is
 // the other: the runtime, and the relay it builds, which publishes the
-// outbox's committed events. No node Uses a reactor, so each is listed in
-// n.Reactors, which Run builds as roots and the server orders itself after.
-// It constructs nothing.
+// outbox's committed events. No node Uses a reactor, so each is a member of
+// the reactors group, n.Reactors, which Run builds as a root and the server
+// orders itself after. Each reactor's Define also orders it after the
+// schema. It constructs nothing.
 //
 // The relay's last pass publishes what was committed while the producers
 // drained, so every producer must drain before it. A node that commits
@@ -29,11 +30,11 @@ import (
 // every domain service is, needs no edge: its commands run in the server's
 // requests, and the server, ordered after every reactor, drains first.
 func defineReactors(g *graph.Graph, n *Nodes) {
+	n.Reactors = g.Group("reactors")
 	n.Nudge = g.Define("nudge", func(*graph.Scope) (*Nudge, error) { return new(Nudge), nil })
-	n.Sweeper = g.Define("sweeper", newSweeper(n))
+	n.Sweeper = g.Define("sweeper", newSweeper(n), graph.In(n.Reactors), graph.After(n.Schema))
 	n.Runtime = g.Define("runtime", newRuntime(n))
-	n.Relay = g.Define("relay", newRelay(n))
-	n.Reactors = []graph.Ref{n.Sweeper, n.Relay}
+	n.Relay = g.Define("relay", newRelay(n), graph.In(n.Reactors), graph.After(n.Schema))
 }
 
 // The names the sweeper registers its reclaimers under: the name a nudge
@@ -99,15 +100,14 @@ func (n *Nudge) Nudge() {
 //
 // Its value is a lifecycle Subsystem, ReadinessChecker, and Monitored, so
 // the Coordinator starts it, drains it, reports it, and ends the run on its
-// failure with no registration here. It orders itself after the schema, so
-// it starts once every table it touches is verified, and stops before the
+// failure with no registration here. Its Define orders it after the schema,
+// so it starts once every table it touches is verified, and stops before the
 // schema's layer beneath it. Given the shutdown timeout, it cancels a pass
 // still running at half of it (go-core's reactor.CancelWithin), so the
 // sweeper reports the cancellation before the coordinator's deadline drops
 // it.
 func newSweeper(n *Nodes) func(*graph.Scope) (*sweep.Sweeper, error) {
 	return func(s *graph.Scope) (*sweep.Sweeper, error) {
-		s.After(n.Schema)
 		cfg := s.Use(n.Config)
 		db := s.Use(n.SQL).DB
 		logger := s.Use(n.Logger)
@@ -180,7 +180,7 @@ func newRuntime(n *Nodes) func(*graph.Scope) (*messaging.Runtime, error) {
 
 // newRelay constructs the relay over the sql node's session. Its value is a
 // lifecycle Subsystem, ReadinessChecker, and Monitored, as the sweeper
-// is. It orders itself after the schema, so its first pass finds the
+// is. Its Define orders it after the schema, so its first pass finds the
 // messaging set migrated and verified. The runtime gives it go-messaging's
 // drain: a last pass bounded at a quarter of the shutdown timeout, and the
 // reactor's cancellation of a publish still running at half of it. It drains
@@ -188,7 +188,6 @@ func newRuntime(n *Nodes) func(*graph.Scope) (*messaging.Runtime, error) {
 // last pass publishes before the connection closes.
 func newRelay(n *Nodes) func(*graph.Scope) (*reactor.Reactor[event.Event], error) {
 	return func(s *graph.Scope) (*reactor.Reactor[event.Event], error) {
-		s.After(n.Schema)
 		return s.Use(n.Runtime).Relay(s.Use(n.SQL).DB), nil
 	}
 }

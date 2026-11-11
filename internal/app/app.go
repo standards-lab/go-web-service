@@ -66,30 +66,32 @@ type Nodes struct {
 	Organization *graph.Node[*organization.Service] // "organization"
 	Document     *graph.Node[*document.Service]     // "document"
 
-	// Reactors (reactors.go).
-	Nudge   *graph.Node[*Nudge]                        // "nudge"
-	Sweeper *graph.Node[*sweep.Sweeper]                // "sweeper"
-	Runtime *graph.Node[*messaging.Runtime]            // "runtime"
-	Relay   *graph.Node[*reactor.Reactor[event.Event]] // "relay"
+	// Reactors (reactors.go). Reactors is the group every reactor is a
+	// member of: no node Uses a reactor, so Run builds the group as a
+	// root, and the server orders itself after it so it stays the top
+	// layer.
+	Reactors *graph.Group                               // "reactors"
+	Nudge    *graph.Node[*Nudge]                        // "nudge"
+	Sweeper  *graph.Node[*sweep.Sweeper]                // "sweeper"
+	Runtime  *graph.Node[*messaging.Runtime]            // "runtime"
+	Relay    *graph.Node[*reactor.Reactor[event.Event]] // "relay"
 
 	// The request edge (server.go).
 	Readiness *graph.Node[*lifecycle.Readiness] // "readiness"
 	Router    *graph.Node[*web.Router]          // "router"
 	Server    *graph.Node[*web.Server]          // "server"
-
-	// Reactors are the reactor layer's Build roots: a reactor is reached by
-	// no Use, so Run builds each as a root, and the server orders itself
-	// after each so it stays the top layer.
-	Reactors []graph.Ref
 }
 
 // New describes the graph over cfg and a writer for the service's logger,
-// one layer file at a time, lowest first, and returns the App. It is cold:
-// it constructs nothing and cannot fail; [App.Run] builds.
+// one layer file at a time, and returns the App. It is cold: it constructs
+// nothing and cannot fail; [App.Run] builds. Telemetry is described first,
+// ahead of the infrastructure beneath it, because the connections order
+// themselves after its node at their Define, and an After takes a handle
+// already defined; every other layer follows lowest first.
 func New(cfg *config.Config, w io.Writer) *App {
 	a := &App{graph: graph.New(), cfg: cfg, w: w}
-	defineInfrastructure(a.graph, &a.nodes, cfg, w)
 	defineTelemetry(a.graph, &a.nodes)
+	defineInfrastructure(a.graph, &a.nodes, cfg, w)
 	defineAdmin(a.graph, &a.nodes)
 	defineDomain(a.graph, &a.nodes)
 	defineReactors(a.graph, &a.nodes)
@@ -107,14 +109,14 @@ func (a *App) Graph() *graph.Graph { return a.graph }
 // or Observe.
 func (a *App) Nodes() Nodes { return a.nodes }
 
-// Run builds the graph, hands the System to a lifecycle Coordinator with
-// the config node's lifecycle block, and runs it until ctx ends, returning
-// the process exit code. The Build's roots are every node Run reads (the
-// config, the logger, the server), the schema, and the reactors. Once the
+// Run builds the graph, hands the System to a lifecycle Coordinator with the
+// config node's lifecycle block, and runs it until ctx ends, returning the
+// process exit code. The Build's roots are every node Run reads (the config,
+// the logger, the server), the schema, and the reactors group. Once the
 // server has bound, the ready record names its address. Run logs "server
 // stopped" and returns 0 after a clean drain, or logs "service failed" with
-// the error and returns 1 on a Build, startup, runtime, or shutdown
-// failure. An App runs once: a second Run panics before it builds anything.
+// the error and returns 1 on a Build, startup, runtime, or shutdown failure.
+// An App runs once: a second Run panics before it builds anything.
 func (a *App) Run(ctx context.Context) int {
 	if a.ran {
 		panic("app: Run called twice; an App runs once")
@@ -122,8 +124,7 @@ func (a *App) Run(ctx context.Context) int {
 	a.ran = true
 
 	n := a.nodes
-	roots := append([]graph.Ref{n.Config, n.Logger, n.Server, n.Schema}, n.Reactors...)
-	sys, err := a.graph.Build(roots...)
+	sys, err := a.graph.Build(n.Config, n.Logger, n.Server, n.Schema, n.Reactors)
 	if err != nil {
 		// The logger node may be what failed, so the Build failure is
 		// reported through a logger of Run's own over the same writer and

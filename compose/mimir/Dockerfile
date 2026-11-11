@@ -1,6 +1,6 @@
 # Mimir, the metrics backend, as a single binary (-target=all) on local
 # storage. This FROM line is Mimir's one pin.
-FROM grafana/mimir:3.2.2
+FROM grafana/mimir:3.2.4
 
 COPY mimir.yaml /etc/mimir/mimir.yaml
 

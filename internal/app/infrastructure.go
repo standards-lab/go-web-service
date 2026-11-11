@@ -53,9 +53,9 @@ func defineInfrastructure(g *graph.Graph, n *Nodes, cfg *config.Config, w io.Wri
 		return cfg, nil
 	})
 	n.Logger = g.Define("logger", newLogger(n, w))
-	n.Database = g.Define("database", newDatabase(n))
-	n.Storage = g.Define("storage", newStorage(n))
-	n.Broker = g.Define("broker", newBroker(n))
+	n.Database = g.Define("database", newDatabase(n), graph.After(n.Telemetry))
+	n.Storage = g.Define("storage", newStorage(n), graph.After(n.Telemetry))
+	n.Broker = g.Define("broker", newBroker(n), graph.After(n.Telemetry))
 	n.SQL = g.Define("sql", newSQL(n))
 	n.Files = g.Define("files", newFiles(n))
 }
@@ -71,21 +71,19 @@ func newLogger(n *Nodes, w io.Writer) func(*graph.Scope) (*slog.Logger, error) {
 }
 
 // newDatabase constructs the database pool from the config node's database
-// block. It orders itself after telemetry, so the providers are installed
-// before the pool starts and flushed after it closes.
+// block. Its Define orders it after telemetry, so the providers are
+// installed before the pool starts and flushed after it closes.
 func newDatabase(n *Nodes) func(*graph.Scope) (*database.DB, error) {
 	return func(s *graph.Scope) (*database.DB, error) {
-		s.After(n.Telemetry)
 		return postgres.New(s.Use(n.Config).Database)
 	}
 }
 
 // newStorage constructs the object store over its provider's client from
-// the config node's storage block, ordered after telemetry as the database
-// is.
+// the config node's storage block. Its Define orders it after telemetry, as
+// the database's does.
 func newStorage(n *Nodes) func(*graph.Scope) (*storage.Store, error) {
 	return func(s *graph.Scope) (*storage.Store, error) {
-		s.After(n.Telemetry)
 		cfg := s.Use(n.Config).Storage
 		client, err := azureblob.New(cfg)
 		if err != nil {
@@ -95,14 +93,13 @@ func newStorage(n *Nodes) func(*graph.Scope) (*storage.Store, error) {
 	}
 }
 
-// newBroker constructs the NATS broker from the config node's nats block,
-// ordered after telemetry as the connections are. Its Start connects, and
-// provisions the stream the block's owner switch makes it own; a broker
-// whose server is down at startup fails startup, and one whose connection
-// drops later reconnects without limit, unready until it is back.
+// newBroker constructs the NATS broker from the config node's nats block.
+// Its Define orders it after telemetry, as the connections' do. Its Start
+// connects, and provisions the stream the block's owner switch makes it own;
+// a broker whose server is down at startup fails startup, and one whose
+// connection drops later reconnects without limit, unready until it is back.
 func newBroker(n *Nodes) func(*graph.Scope) (*nats.Broker, error) {
 	return func(s *graph.Scope) (*nats.Broker, error) {
-		s.After(n.Telemetry)
 		return nats.New(s.Use(n.Config).NATS)
 	}
 }

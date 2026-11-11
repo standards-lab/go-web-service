@@ -13,7 +13,7 @@ func defineServer(g *graph.Graph, n *Nodes) {
 		return new(lifecycle.Readiness), nil
 	})
 	n.Router = g.Define("router", newRouter(n))
-	n.Server = g.Define("server", newServer(n))
+	n.Server = g.Define("server", newServer(n), graph.After(n.Reactors, n.Schema))
 }
 
 // newRouter assembles the router: the middleware stack, the mounts, and the
@@ -41,16 +41,12 @@ func newRouter(n *Nodes) func(*graph.Scope) (*web.Router, error) {
 // newServer constructs the server over the router from the config node's
 // server block. Its value is a lifecycle.Subsystem and a
 // lifecycle.Monitored, so the Coordinator starts it, drains it, and watches
-// its Err channel with no registration here. It orders itself after every
-// reactor and after the schema, so it is the top layer: it starts after
+// its Err channel with no registration here. Its Define orders it after the
+// reactors group and the schema, so it is the top layer: it starts after
 // everything else and drains first, and in-flight requests complete before
 // what they run on closes.
 func newServer(n *Nodes) func(*graph.Scope) (*web.Server, error) {
 	return func(s *graph.Scope) (*web.Server, error) {
-		for _, r := range n.Reactors {
-			s.After(r)
-		}
-		s.After(n.Schema)
 		return web.NewServer(s.Use(n.Config).Server, s.Use(n.Router), s.Use(n.Logger)), nil
 	}
 }

@@ -40,7 +40,7 @@ func (r *Recorder) Log() []string {
 // only the observers it has when a Build begins.
 func Builds(a *app.App) *Recorder {
 	r := &Recorder{}
-	a.Graph().Observe(r.Record)
+	a.Graph().Observe(func(ref graph.Ref) { r.Record(ref.Name()) })
 	return r
 }
 

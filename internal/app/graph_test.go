@@ -30,20 +30,20 @@ import (
 // publishes building what a real Run builds, the server alone in the top
 // layer, the reactors group's members, the readiness checks the lifecycle
 // infers from the node values and their order, telemetry beneath every
-// other participant, the schema between the connections and the reactors,
-// the root set dropping no order, the relay held off by the gate, and each
-// participant held by one node. It builds the graph without starting it,
-// so it needs no live engine. Unlike app_test.go, these tests name nodes:
-// they reach the graph through App.Graph and App.Nodes, as does the
-// Build-failure case, which substitutes a failing constructor. They read
-// placement by handle: the System's layer of each node handle, whether it
-// holds a handle, and the handle on each built node.
+// other participant, the connections in one layer and the schema between
+// them and the reactors, the root set dropping no order, the relay held
+// off by the gate, and each participant held by one node. It builds the
+// graph without starting it, so it needs no live engine. Unlike
+// app_test.go, these tests name nodes: they reach the graph through
+// App.Graph and App.Nodes, as does the Build-failure case, which
+// substitutes a failing constructor. They read placement by handle: the
+// System's layer of each node handle, whether it holds a handle, and the
+// handle on each built node.
 //
 // Each placement guard a fixture can break is a function returning an
 // error that carries the System's layer table, called both by the test of
 // the App's own roots and by a test of a fixture that breaks it, so the
 // fixture shows the real assertion can fail.
-// substitutes a failing constructor.
 
 // Each node's name is its Nodes field's name lowercased, ignoring the
 // name's spaces, so a field names the node it holds without a comment
@@ -314,9 +314,10 @@ func TestGraph_TelemetryBeneathParticipants(t *testing.T) {
 	})
 }
 
-// The schema sits above the database, the object store, and the broker,
-// so it starts once they are connected and stops before they close, and
-// below the sweeper and the relay, so they start once every table they
+// The database, the object store, and the broker share a layer, so they
+// start together, concurrently, and close together. The schema sits above
+// them, so it starts once they are connected and stops before they close,
+// and below the sweeper and the relay, so they start once every table they
 // touch is verified and stop before the schema does. The relay also sits
 // above the broker, so it drains, its last pass included, before the
 // broker stops. The document node does not Use the relay, so the schema,
@@ -329,6 +330,11 @@ func TestGraph_SchemaBetweenConnectionsAndReactors(t *testing.T) {
 	for _, r := range []graph.Ref{n.Database, n.Storage, n.Broker, n.Schema, n.Sweeper, n.Relay} {
 		if !sys.Has(r) {
 			t.Fatalf("%s is not in the System\nlayers:\n%s", r.Name(), sys)
+		}
+	}
+	for _, conn := range []graph.Ref{n.Storage, n.Broker} {
+		if d, c := sys.LayerOf(n.Database), sys.LayerOf(conn); d != c {
+			t.Errorf("%s in layer %d, %s in layer %d; want the same layer", n.Database.Name(), d, conn.Name(), c)
 		}
 	}
 	below := func(lower, upper graph.Ref) {

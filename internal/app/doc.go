@@ -35,8 +35,8 @@
 // [App.Run] is the hot start plus shutdown: it runs a go-web-sdk
 // web.Service, which builds [App.Roots], the server and the reactors group,
 // plus the lifecycle config node, hands the System to go-core's lifecycle
-// Coordinator, and returns the process exit code. A constructor's error is
-// reported there as the service failing, on stderr; a wiring mistake
+// Coordinator, and returns the process exit code. Run reports a
+// constructor's error on stderr as the service failing; a wiring mistake
 // panics during Build.
 //
 // What a node takes part in is inferred from its value's methods: a
@@ -46,12 +46,13 @@
 // has its runtime error watched. Nodes start in layer order and drain in
 // reverse.
 // No layer file registers anything with the Coordinator. The order is
-// computed from what each node uses, plus four After edges, declared with
-// graph.After at each node's Define, which order two nodes without passing
-// a value: the database, the object store, and the broker after telemetry,
-// the sweeper and the relay after the schema, and the server after every
-// reactor and the schema, so it is alone in the top layer, starts last, and
-// drains first. The drain therefore runs the
+// computed from what each node uses, plus seven After edges, each declared
+// with graph.After on the later node's Define line and each ordering two
+// nodes without passing a value. The database, the object store, and the
+// broker start after telemetry. The sweeper and the relay start after the
+// schema. The server starts after the reactors group, which orders it
+// after every reactor, and after the schema, so it is alone in the top
+// layer, starts last, and drains first. The drain therefore runs the
 // server, then the reactors (the relay with its last pass, which publishes
 // what the server's requests committed while they drained), then the
 // schema, then the broker and the connections. The probes report the

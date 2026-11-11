@@ -36,8 +36,9 @@
 // with grafana up above service wherever it builds both. Defining the
 // nodes constructs nothing. A command declares the nodes it needs with
 // Use; the dispatcher builds them, with the lifecycle configuration node,
-// only when the command runs, and shuts them down when it returns. A run that builds nothing, such as help, a
-// usage error, or version, reads no configuration. The root's PreRun
+// only when the command runs, and shuts them down when it returns. A run
+// that builds nothing, such as help, a usage error, or version, reads no
+// configuration. The root's PreRun
 // records which root flags a dispatch set, so a setting's node applies its
 // flag over its variable only when the flag was given. No aggregate
 // configuration gathers the settings: a command declares only the ones it

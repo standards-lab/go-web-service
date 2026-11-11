@@ -17,18 +17,23 @@ import (
 // contributions join checks its statements (admin.go). It constructs
 // nothing.
 func defineDomain(g *graph.Graph, n *Nodes) {
-	// The runtime's recorder is the one each layer's commands emit
-	// through. Their commands run in the server's requests, so neither
-	// needs an edge to the relay: the server drains before it
-	// (reactors.go).
-	n.Organization = g.Define("organization", func(s *graph.Scope) (*organization.Service, error) {
-		return organization.New(s.Use(n.SQL), s.Use(n.Files), s.Use(n.Logger), s.Use(n.Runtime).Recorder), nil
-	})
-	// The nudge node is the document layer's Sweeper, which it nudges after
-	// each branch it marks.
-	n.Document = g.Define("document", func(s *graph.Scope) (*document.Service, error) {
-		return document.New(s.Use(n.SQL), s.Use(n.Files), s.Use(n.Nudge), s.Use(n.Runtime).Recorder), nil
-	})
+	n.Organization = g.Define("organization", n.newOrganization)
+	n.Document = g.Define("document", n.newDocument)
+}
+
+// newOrganization constructs the organization layer's service. The
+// runtime's recorder is the one each layer's commands emit through. Their
+// commands run in the server's requests, so neither layer needs an edge to
+// the relay: the server drains before it (reactors.go).
+func (n *Nodes) newOrganization(s *graph.Scope) (*organization.Service, error) {
+	return organization.New(s.Use(n.SQL), s.Use(n.Files), s.Use(n.Logger), s.Use(n.Runtime).Recorder), nil
+}
+
+// newDocument constructs the document layer's service. The nudge node is
+// the layer's Sweeper, which it nudges after each branch it marks; the
+// recorder is the organization layer's.
+func (n *Nodes) newDocument(s *graph.Scope) (*document.Service, error) {
+	return document.New(s.Use(n.SQL), s.Use(n.Files), s.Use(n.Nudge), s.Use(n.Runtime).Recorder), nil
 }
 
 // mountAPI builds the API mount, /api, with each domain layer's route group

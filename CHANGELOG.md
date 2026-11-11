@@ -199,6 +199,27 @@ accumulate under [Unreleased] until the first cut.
 
 ### Changed
 
+- The composition root declares each node's order and membership where it defines it:
+  `graph.After` on the node's `Define` line, in place of `s.After` in its constructor, and the
+  sweeper and the relay join the `reactors` group with `graph.In`, so `Nodes.Reactors` is a
+  `*graph.Group`, where it was a `[]graph.Ref`. `App.Roots` names the root set, the server and
+  the reactors group; the config, logger, and schema nodes, roots of their own before, are
+  reached through the server's uses. `App.Run` runs the service as go-web-sdk's `web.Service`
+  over that set and takes `stderr`: a Build failure is written there as
+  `service failed: <error>`, in place of a `service failed` log record, since the logger node
+  may be what failed. A startup, runtime, or shutdown failure is still logged as
+  `service failed`.
+- A Monitored node's runtime failure (the server's, the sweeper's, or the relay's) names its
+  node: the run ends as `run: <node>: <error>`, where it was `run: <error>`. slab reports such a
+  failure while a command or a scenario step runs on one line,
+  `slab <command path>: run: <node>: <error>`, in place of `context canceled` followed by
+  `run: <error>`.
+- Pins: go-core v0.11.0, from v0.10.0, in both modules. In the base module, go-web-sdk v0.16.0
+  with middleware/rate-limit v0.4.0, go-database v0.11.0 with postgres/v0.6.0, go-storage
+  v0.7.0 with azureblob/v0.6.0, go-observability v0.3.0 with otlp/v0.3.0, and
+  google.golang.org/grpc v1.85.0. In slab's, go-cli-sdk v0.3.0, go-web-sdk v0.16.0, sqlate
+  v0.6.1 with sqlate/postgres v0.6.0, and nats.go v1.55.0. Their own changes are in their
+  CHANGELOGs.
 - The document upload, the file delete, and the seeded document files run on blobfs v0.7.0's
   completion and delete hooks: `Store.WriteFile` and `Store.EnsureFile` with `OnComplete`, run
   in the completion's transaction, only when the call completes the file, and `Store.RemoveFile`

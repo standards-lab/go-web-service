@@ -3,10 +3,14 @@ package app_test
 import (
 	"bytes"
 	"context"
+	"io"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/standards-lab/go-core/graph"
 
 	"github.com/standards-lab/go-web-service/internal/app"
 	"github.com/standards-lab/go-web-service/internal/config/configtest"
@@ -44,16 +48,16 @@ func (b *syncBuffer) String() string {
 
 // New and Run's Build perform no I/O — they succeed with nothing
 // listening — and Run then fails startup at the connections' layer,
-// draining to exit 1 with the failure named in the log, never flipping
-// readiness. The database, the object store, and the broker start
-// together, and the first to fail cancels the others, so the log names
-// whichever failed first.
+// draining to exit 1 with the failure logged as the service failing and
+// naming the node, never flipping readiness or writing to stderr. The
+// database, the object store, and the broker start together, and the first
+// to fail cancels the others, so the log names whichever failed first.
 func TestRun_FailsStartupWithoutInfrastructure(t *testing.T) {
-	buf := &syncBuffer{}
+	buf, stderr := &syncBuffer{}, &syncBuffer{}
 	a := app.New(configtest.Config(t), buf)
 
 	done := make(chan int, 1)
-	go func() { done <- a.Run(context.Background()) }()
+	go func() { done <- a.Run(context.Background(), stderr) }()
 
 	select {
 	case code := <-done:
@@ -65,11 +69,15 @@ func TestRun_FailsStartupWithoutInfrastructure(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "startup: database") && !strings.Contains(out, "startup: storage") && !strings.Contains(out, "startup: broker") {
-		t.Errorf("failure log names no connection: %q", out)
+	failure := regexp.MustCompile(`msg="service failed" error="[^"]*startup: (database|storage|broker)`)
+	if !failure.MatchString(out) {
+		t.Errorf("log = %q, want a service failure naming a connection's startup", out)
 	}
 	if strings.Contains(out, "server ready") {
 		t.Error("log carries a ready record despite the failed startup")
+	}
+	if got := stderr.String(); got != "" {
+		t.Errorf("stderr = %q, want nothing: a startup failure is logged", got)
 	}
 }
 
@@ -81,12 +89,12 @@ func TestRun_TwicePanics(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if code := a.Run(ctx); code != 0 {
+	if code := a.Run(ctx, io.Discard); code != 0 {
 		t.Fatalf("first Run = %d, want 0 on a context ended before startup", code)
 	}
 
 	var built []string
-	a.Graph().Observe(func(name string) { built = append(built, name) })
+	a.Graph().Observe(func(r graph.Ref) { built = append(built, r.Name()) })
 	defer func() {
 		if recover() == nil {
 			t.Error("a second Run did not panic")
@@ -95,5 +103,5 @@ func TestRun_TwicePanics(t *testing.T) {
 			t.Errorf("the second Run built %v before it panicked, want nothing", built)
 		}
 	}()
-	_ = a.Run(ctx)
+	_ = a.Run(ctx, io.Discard)
 }

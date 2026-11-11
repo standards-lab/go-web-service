@@ -95,10 +95,11 @@ domain's store with its statements, and `data.NewStorage(db, …)` records blobf
 `Seeder.Verify` checks every recorded store, including one that seeds nothing, and no list in the
 composition root can leave a store out. The admin service runs `Verify` in its startup, before
 it seeds. The composition root's graph sets the startup order: each node starts after the nodes
-it uses, and `After` edges, which order two nodes without passing a value, complete it, leaving
-the server alone in the top layer; `internal/app`'s package doc lists the edges. The order stays in the composition root, never in
-a library or a domain. The base layers (`data`,
-`domain/<layer>`, `admin/<service>`) are root-level packages because the domain packages import
+it uses and after any node its Define line names with `graph.After`, an edge that orders two
+nodes without passing a value. Those edges leave the server alone in the top layer;
+`internal/app`'s package doc lists them. The order stays in the composition root, never in a
+library or a domain. The base layers (`data`, `domain/<layer>`, `admin/<service>`) are
+root-level packages because the domain packages import
 `data` and the topology-and-naming principle forbids a root-level package importing `internal/*`. A
 domain that seeds the named states declares each contribution over its own tables and statements,
 returned by a method of its service (`Seed`, `LogoSeed`). A contribution of rows is a `data.Seed`,

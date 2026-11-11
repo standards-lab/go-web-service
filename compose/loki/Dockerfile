@@ -1,6 +1,6 @@
 # Loki, the log backend, as a single binary on local storage. This FROM line is
 # Loki's one pin.
-FROM grafana/loki:3.7.8
+FROM grafana/loki:3.7.9
 
 COPY loki.yaml /etc/loki/loki.yaml
 

@@ -1,7 +1,7 @@
 # The development stack's NATS: the JetStream server the service's broker
 # publishes to, which config.json's nats block names. This FROM line is
 # NATS's one pin.
-FROM nats:2.15.1-alpine
+FROM nats:2.15.2-alpine
 
 # JetStream on, its store in /data, the stack's named volume, and the
 # monitoring endpoint on 8222 for the health check.

@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/standards-lab/go-core/process"
+
+	"github.com/standards-lab/go-web-service/tools/slab/internal/apptest"
 )
 
 // scenarioRun is what one "slab scenario <name>" run left: its exit code,
@@ -31,7 +33,7 @@ func runScenario(t *testing.T, name, base, grafana string) scenarioRun {
 	t.Setenv("SLAB_GRAFANA", grafana)
 	a, stdout, stderr, built := newApp(t)
 	code := a.Run(context.Background(), []string{"scenario", name})
-	return scenarioRun{code: code, stdout: stdout.String(), stderr: stderr.String(), built: built.Log()}
+	return scenarioRun{code: code, stdout: stdout.String(), stderr: stderr.String(), built: apptest.Names(built.Log())}
 }
 
 // runOrgScenario runs the scenario name against fake, serving as both the

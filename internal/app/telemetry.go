@@ -72,21 +72,22 @@ func observabilityConfig(cfg *config.Config) observability.Config {
 // defineTelemetry defines the telemetry node, the meter provider node, and
 // the sweep metrics node on g into n. It constructs nothing.
 //
-// The database and the object store order themselves after telemetry, so
-// its Start installs the providers before either starts and its Shutdown
-// flushes after both have closed. Those edges only order; the router's
-// middleware stack, whose tracing records to the providers, Uses it, which
-// is what brings it into the Build. The server sits above both
-// connections, so every request is served while the providers are
-// installed.
+// The database, the object store, and the broker order themselves after
+// telemetry on their Define lines, so the layer is defined before the
+// infrastructure, and its Start installs the providers before any of them
+// starts and its Shutdown flushes after all have closed. Those edges only
+// order; the router's middleware stack, whose tracing records to the
+// providers, Uses it, which is what brings it into the Build. The server
+// sits above the connections, so every request is served while the
+// providers are installed.
 //
 // The meter provider node is what the service's own instruments are
 // created on, and the sweep metrics node is the sweeper's per-pass hook,
 // which the sweeper Uses. Neither is a lifecycle participant.
 func defineTelemetry(g *graph.Graph, n *Nodes) {
-	n.Telemetry = g.Define("telemetry", newTelemetry(n))
+	n.Telemetry = g.Define("telemetry", n.newTelemetry)
 	n.MeterProvider = g.Define("meterprovider", newMeterProvider)
-	n.SweepMetrics = g.Define("sweepmetrics", newSweepMetrics(n))
+	n.SweepMetrics = g.Define("sweepmetrics", n.newSweepMetrics)
 }
 
 // newMeterProvider returns the meter provider the service's own instruments
@@ -116,26 +117,24 @@ func (globalMeterProvider) Meter(name string, opts ...metric.MeterOption) metric
 
 // newTelemetry constructs the telemetry service over the OTLP exporters.
 // Construction performs no I/O: both exporters dial lazily.
-func newTelemetry(n *Nodes) func(*graph.Scope) (*Telemetry, error) {
-	return func(s *graph.Scope) (*Telemetry, error) {
-		obsCfg := observabilityConfig(s.Use(n.Config))
-		ctx := context.Background()
+func (n *Nodes) newTelemetry(s *graph.Scope) (*Telemetry, error) {
+	obsCfg := observabilityConfig(s.Use(n.Config))
+	ctx := context.Background()
 
-		traceExp, err := otlp.NewTraceExporter(ctx, obsCfg)
-		if err != nil {
-			return nil, err
-		}
-		metricExp, err := otlp.NewMetricExporter(ctx, obsCfg)
-		if err != nil {
-			return nil, err
-		}
-		reader := sdkmetric.NewPeriodicReader(metricExp)
-
-		return &Telemetry{
-			tel:    observability.New(obsCfg, observability.Exporters{Trace: traceExp, Metric: reader}),
-			logger: s.Use(n.Logger),
-		}, nil
+	traceExp, err := otlp.NewTraceExporter(ctx, obsCfg)
+	if err != nil {
+		return nil, err
 	}
+	metricExp, err := otlp.NewMetricExporter(ctx, obsCfg)
+	if err != nil {
+		return nil, err
+	}
+	reader := sdkmetric.NewPeriodicReader(metricExp)
+
+	return &Telemetry{
+		tel:    observability.New(obsCfg, observability.Exporters{Trace: traceExp, Metric: reader}),
+		logger: s.Use(n.Logger),
+	}, nil
 }
 
 // Telemetry is the telemetry node's value: go-observability's Telemetry
@@ -214,30 +213,28 @@ type sweepMetrics struct {
 // reclaimer the sweeper registers, and returns the hook, which records each
 // pass and logs a failed one at warn on the logger node's logger. The error
 // is the meter's refusal of an instrument.
-func newSweepMetrics(n *Nodes) func(*graph.Scope) (sweep.Hook, error) {
-	return func(s *graph.Scope) (sweep.Hook, error) {
-		meter := s.Use(n.MeterProvider).Meter(meterName)
-		m := &sweepMetrics{logger: s.Use(n.Logger), backlogged: make(map[string]bool, len(reclaimers))}
-		for _, name := range reclaimers {
-			m.backlogged[name] = false
-		}
-
-		var err error
-		m.passes, err = meter.Int64Counter("sweep.passes",
-			metric.WithDescription("Sweeper passes run, by reclaimer and outcome."),
-			metric.WithUnit("{pass}"))
-		if err != nil {
-			return nil, err
-		}
-		_, err = meter.Int64ObservableGauge("sweep.backlogged",
-			metric.WithDescription("1 while the reclaimer's last pass reported more, else 0."),
-			metric.WithUnit("1"),
-			metric.WithInt64Callback(m.observe))
-		if err != nil {
-			return nil, err
-		}
-		return m.pass, nil
+func (n *Nodes) newSweepMetrics(s *graph.Scope) (sweep.Hook, error) {
+	meter := s.Use(n.MeterProvider).Meter(meterName)
+	m := &sweepMetrics{logger: s.Use(n.Logger), backlogged: make(map[string]bool, len(reclaimers))}
+	for _, name := range reclaimers {
+		m.backlogged[name] = false
 	}
+
+	var err error
+	m.passes, err = meter.Int64Counter("sweep.passes",
+		metric.WithDescription("Sweeper passes run, by reclaimer and outcome."),
+		metric.WithUnit("{pass}"))
+	if err != nil {
+		return nil, err
+	}
+	_, err = meter.Int64ObservableGauge("sweep.backlogged",
+		metric.WithDescription("1 while the reclaimer's last pass reported more, else 0."),
+		metric.WithUnit("1"),
+		metric.WithInt64Callback(m.observe))
+	if err != nil {
+		return nil, err
+	}
+	return m.pass, nil
 }
 
 // pass is the sweeper's hook: it counts p, records whether its reclaimer

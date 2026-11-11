@@ -3,9 +3,9 @@ package app_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
-	"maps"
 	"net"
 	"regexp"
 	"slices"
@@ -16,6 +16,7 @@ import (
 
 	libconfig "github.com/standards-lab/go-core/config"
 	"github.com/standards-lab/go-core/graph"
+	"github.com/standards-lab/go-core/graph/graphtest"
 	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-core/process/processtest"
 	"github.com/standards-lab/go-web-sdk"
@@ -25,96 +26,144 @@ import (
 )
 
 // This file pins the graph's structural properties the composition root
-// owns: the server alone in the top layer, the readiness checks the
-// lifecycle infers from the node values and their order, telemetry beneath
-// every other participant, the schema between the connections and the
-// reactors, the relay held off by the gate, and each participant held by
-// one node. It builds the
+// owns: each node named by its Nodes field, the root set App.Roots
+// publishes building what a real Run builds, the server alone in the top
+// layer, the reactors group's members, the readiness checks the lifecycle
+// infers from the node values and their order, telemetry beneath every
+// other participant, the connections in one layer and the schema between
+// them and the reactors, the root set dropping no order, the relay held
+// off by the gate, and each participant held by one node. It builds the
 // graph without starting it, so it needs no live engine. Unlike
 // app_test.go, these tests name nodes: they reach the graph through
 // App.Graph and App.Nodes, as does the Build-failure case, which
-// substitutes a failing constructor.
+// substitutes a failing constructor. They read placement by handle: the
+// System's layer of each node handle, whether it holds a handle, and the
+// handle on each built node.
+//
+// Each placement guard a fixture can break is a function returning an
+// error that carries the System's layer table, called both by the test of
+// the App's own roots and by a test of a fixture that breaks it, so the
+// fixture shows the real assertion can fail.
 
-// buildAsRun builds a's graph from the roots Run builds from, the config,
-// the logger, the server, the schema, and the reactors, plus extra.
-// TestGraph_ServerAloneInTopLayer holds these roots to Run's by observing a
-// real Run.
+// Each node's name is its Nodes field's name lowercased, ignoring the
+// name's spaces, so a field names the node it holds without a comment
+// repeating the name, and every field holds a handle once New returns.
+func TestGraph_NodesNamedByTheirFields(t *testing.T) {
+	a := app.New(configtest.Config(t), io.Discard)
+	graphtest.CheckNames(t, a.Nodes())
+}
+
+// runSet returns the set Run builds, App.Roots plus the lifecycle config
+// node, plus extra. TestGraph_RootsBuildAsRun holds this set to Run's by
+// observing a real Run.
+func runSet(a *app.App, extra ...graph.Ref) []graph.Ref {
+	return append(append(a.Roots(), a.Nodes().LifecycleConfig), extra...)
+}
+
+// buildAsRun builds a's graph from runSet(a, extra...).
 func buildAsRun(t *testing.T, a *app.App, extra ...graph.Ref) *graph.System {
 	t.Helper()
-	n := a.Nodes()
-	roots := append([]graph.Ref{n.Config, n.Logger, n.Server, n.Schema}, n.Reactors...)
-	sys, err := a.Graph().Build(append(roots, extra...)...)
+	sys, err := a.Graph().Build(runSet(a, extra...)...)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	return sys
 }
 
-// serverAloneOnTop reports whether the System's last layer holds the server
-// node alone, and returns that layer.
-func serverAloneOnTop(sys *graph.System, n app.Nodes) ([]graph.Dependency, bool) {
-	layers := sys.Layers()
-	if len(layers) == 0 {
-		return nil, false
+// observeRun runs a with a context already ended, so the Run builds and
+// starts nothing, and returns the handle of every node its Build
+// constructed.
+func observeRun(t *testing.T, a *app.App) []graph.Ref {
+	t.Helper()
+	var ran []graph.Ref
+	a.Graph().Observe(func(r graph.Ref) { ran = append(ran, r) })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if code := a.Run(ctx, io.Discard); code != 0 {
+		t.Fatalf("Run = %d, want 0", code)
 	}
-	top := layers[len(layers)-1]
-	alone := len(top) == 1 &&
-		top[0].Name == n.Server.Name() &&
-		top[0].Value == any(sys.Get(n.Server))
-	return top, alone
+	return ran
 }
 
-// layerOf returns the index of the layer holding the node named name, or -1.
-func layerOf(sys *graph.System, name string) int {
-	for i, layer := range sys.Layers() {
-		for _, d := range layer {
-			if d.Name == name {
-				return i
-			}
+// App.Roots is the server and the reactors group, and a Build of it plus
+// the lifecycle config node constructs exactly the nodes a real Run
+// constructs, compared by handle: every node Run built is in the System,
+// and the System holds no node Run did not build. It holds the tests
+// below, which inspect that set, to what Run reaches.
+func TestGraph_RootsBuildAsRun(t *testing.T) {
+	a := app.New(configtest.Config(t), io.Discard)
+	n := a.Nodes()
+	if got, want := a.Roots(), []graph.Ref{n.Server, n.Reactors}; !slices.Equal(got, want) {
+		t.Errorf("Roots = %v, want the server and the reactors group", got)
+	}
+
+	ran := observeRun(t, a)
+	sys := buildAsRun(t, a)
+	for _, r := range ran {
+		if !sys.Has(r) {
+			t.Errorf("Run built %s, the root set's Build did not", r.Name())
 		}
 	}
-	return -1
+	for _, d := range sys.Dependencies() {
+		if !slices.Contains(ran, d.Ref) {
+			t.Errorf("the root set's Build built %s, Run did not", d.Name)
+		}
+	}
+	if t.Failed() {
+		t.Logf("layers:\n%s", sys)
+	}
 }
 
-// names lists the layer's node names.
-func names(layer []graph.Dependency) []string {
-	out := make([]string, len(layer))
-	for i, d := range layer {
-		out[i] = d.Name
+// layerError returns an error of the formatted message followed by sys's
+// layer table.
+func layerError(sys *graph.System, format string, args ...any) error {
+	return fmt.Errorf(format+"\nlayers:\n%s", append(args, sys)...)
+}
+
+// wantGuardFails fails t unless err, a guard's verdict on sys, is an error
+// that names mention and carries sys's layer table.
+func wantGuardFails(t *testing.T, err error, sys *graph.System, mention string) {
+	t.Helper()
+	switch {
+	case err == nil:
+		t.Fatalf("the guard passed a fixture that breaks it\nlayers:\n%s", sys)
+	case !strings.Contains(err.Error(), mention):
+		t.Errorf("guard error = %q, want it to name %s", err, mention)
+	case !strings.Contains(err.Error(), "\nlayers:\n"+sys.String()):
+		t.Errorf("guard error = %q, want it to carry the layer table:\n%s", err, sys)
 	}
-	return out
+}
+
+// serverAlone reports, as an error carrying the layer table, any node of
+// sys at or above the server's layer: the server must be alone in the top
+// layer, so it starts after every other node and drains first.
+func serverAlone(sys *graph.System, server graph.Ref) error {
+	if !sys.Has(server) {
+		return layerError(sys, "%s is not in the System", server.Name())
+	}
+	top := sys.LayerOf(server)
+	var beside []string
+	for _, d := range sys.Dependencies() {
+		if d.Ref != server && sys.LayerOf(d.Ref) >= top {
+			beside = append(beside, d.Name)
+		}
+	}
+	if len(beside) > 0 {
+		return layerError(sys, "%v at or above %s's layer %d; want %s alone in the top layer",
+			beside, server.Name(), top, server.Name())
+	}
+	return nil
 }
 
 // The server is the only node in the top layer of the graph Run builds, so
 // it starts after every other node and drains first. A node defined above
-// it, or beside it at the top, fails here; the second case shows the check
-// catches one.
+// it, or beside it at the top, fails the guard; the second case shows the
+// guard catches one.
 func TestGraph_ServerAloneInTopLayer(t *testing.T) {
 	t.Run("as defined", func(t *testing.T) {
 		a := app.New(configtest.Config(t), io.Discard)
-
-		// Run's own Build, observed, so the Build below inspects the nodes
-		// Run reaches rather than a set this test chose. The context ends
-		// before startup, so the Run starts nothing.
-		ran := map[string]bool{}
-		a.Graph().Observe(func(name string) { ran[name] = true })
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		if code := a.Run(ctx); code != 0 {
-			t.Fatalf("Run = %d, want 0", code)
-		}
-		ranNames := slices.Sorted(maps.Keys(ran))
-
-		sys := buildAsRun(t, a)
-		var built []string
-		for _, layer := range sys.Layers() {
-			built = append(built, names(layer)...)
-		}
-		if slices.Sort(built); !slices.Equal(built, ranNames) {
-			t.Fatalf("buildAsRun built %v, Run built %v; their roots differ", built, ranNames)
-		}
-		if top, ok := serverAloneOnTop(sys, a.Nodes()); !ok {
-			t.Errorf("top layer = %+v, want the server node alone", names(top))
+		if err := serverAlone(buildAsRun(t, a), a.Nodes().Server); err != nil {
+			t.Error(err)
 		}
 	})
 
@@ -125,10 +174,63 @@ func TestGraph_ServerAloneInTopLayer(t *testing.T) {
 			return s.Use(n.Server), nil
 		})
 		sys := buildAsRun(t, a, above)
-		if top, ok := serverAloneOnTop(sys, n); ok {
-			t.Errorf("top layer = %+v, reported the server alone with a node above it", names(top))
-		}
+		wantGuardFails(t, serverAlone(sys, n.Server), sys, "above")
 	})
+}
+
+// The reactors group's members are the sweeper and the relay, each joined
+// by its graph.In alone, and each sits below the server. go-core lists no
+// group's members, so they are read from Builds: a Build of the group
+// holds both, and holds no node a Build of the two does not, so a third
+// member would show unless the two already reach it. A Build of the
+// server and the lifecycle config node, Run's roots without the group,
+// holds neither, so no Use reaches them and the group alone puts them in
+// Run's Build.
+func TestGraph_ReactorsGroupMembers(t *testing.T) {
+	a := app.New(configtest.Config(t), io.Discard)
+	n := a.Nodes()
+	reactors := []graph.Ref{n.Sweeper, n.Relay}
+	build := func(roots ...graph.Ref) *graph.System {
+		t.Helper()
+		sys, err := a.Graph().Build(roots...)
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		return sys
+	}
+
+	group := build(n.Reactors)
+	for _, r := range reactors {
+		if !group.Has(r) {
+			t.Errorf("a Build of %s does not hold %s; want it a member", n.Reactors.Name(), r.Name())
+		}
+	}
+	pair := build(reactors...)
+	for _, d := range group.Dependencies() {
+		if !pair.Has(d.Ref) {
+			t.Errorf("a Build of %s holds %s, which the sweeper and the relay do not reach; want no other member",
+				n.Reactors.Name(), d.Name)
+		}
+	}
+
+	ungrouped := build(n.Server, n.LifecycleConfig)
+	for _, r := range reactors {
+		if ungrouped.Has(r) {
+			t.Errorf("a Build of the roots without %s holds %s; want only the group to reach it",
+				n.Reactors.Name(), r.Name())
+		}
+	}
+
+	sys := buildAsRun(t, a)
+	for _, r := range reactors {
+		if sys.LayerOf(r) >= sys.LayerOf(n.Server) {
+			t.Errorf("%s in layer %d, server in layer %d; want it below the server",
+				r.Name(), sys.LayerOf(r), sys.LayerOf(n.Server))
+		}
+	}
+	if t.Failed() {
+		t.Logf("layers:\n%s", sys)
+	}
 }
 
 // The readiness checks the lifecycle infers from the node values, each one
@@ -163,23 +265,26 @@ func participant(v any) bool {
 	return false
 }
 
-// beneathTelemetry returns the lifecycle participants, other than telemetry
-// itself, whose layer is not above telemetry's.
-func beneathTelemetry(t *testing.T, sys *graph.System, n app.Nodes) []string {
-	t.Helper()
-	tel := layerOf(sys, n.Telemetry.Name())
-	if tel < 0 {
-		t.Fatal("telemetry is not in the built System")
+// telemetryBeneath reports, as an error carrying the layer table, a
+// System without telemetry, or any lifecycle participant other than
+// telemetry whose layer is not above telemetry's. Telemetry's presence is
+// checked first, so a System missing it cannot pass with no participant
+// compared.
+func telemetryBeneath(sys *graph.System, telemetry graph.Ref) error {
+	if !sys.Has(telemetry) {
+		return layerError(sys, "%s is not in the System", telemetry.Name())
 	}
-	var out []string
-	for i, layer := range sys.Layers() {
-		for _, d := range layer {
-			if d.Name != n.Telemetry.Name() && participant(d.Value) && i <= tel {
-				out = append(out, d.Name)
-			}
+	floor := sys.LayerOf(telemetry)
+	var below []string
+	for _, d := range sys.Dependencies() {
+		if d.Ref != telemetry && participant(d.Value) && sys.LayerOf(d.Ref) <= floor {
+			below = append(below, d.Name)
 		}
 	}
-	return out
+	if len(below) > 0 {
+		return layerError(sys, "participants %v are not above %s's layer %d", below, telemetry.Name(), floor)
+	}
+	return nil
 }
 
 // lateStarter is a participant that orders itself after nothing.
@@ -189,14 +294,13 @@ func (lateStarter) Start(context.Context) error { return nil }
 
 // Telemetry sits beneath every other lifecycle participant, so its
 // providers are installed before any starts and flushed after all have
-// stopped. A participant that misses the edge to telemetry fails here; the
-// second case shows the check catches one.
+// stopped. A participant that misses the edge to telemetry fails the
+// guard; the second case shows the guard catches one.
 func TestGraph_TelemetryBeneathParticipants(t *testing.T) {
 	t.Run("as defined", func(t *testing.T) {
 		a := app.New(configtest.Config(t), io.Discard)
-		sys := buildAsRun(t, a)
-		if below := beneathTelemetry(t, sys, a.Nodes()); len(below) > 0 {
-			t.Errorf("participants %v are not above telemetry's layer", below)
+		if err := telemetryBeneath(buildAsRun(t, a), a.Nodes().Telemetry); err != nil {
+			t.Error(err)
 		}
 	})
 
@@ -206,59 +310,91 @@ func TestGraph_TelemetryBeneathParticipants(t *testing.T) {
 			return lateStarter{}, nil
 		})
 		sys := buildAsRun(t, a, stray)
-		if below := beneathTelemetry(t, sys, a.Nodes()); !slices.Contains(below, "stray") {
-			t.Errorf("participants below telemetry = %v, want stray among them", below)
-		}
+		wantGuardFails(t, telemetryBeneath(sys, a.Nodes().Telemetry), sys, "stray")
 	})
 }
 
-// The connections share a layer beneath the schema, so they start together
-// and close together after it, and the sweeper sits above the schema, so it
-// starts once every table it touches is verified and stops before the
-// schema does.
-func TestGraph_SchemaBetweenConnectionsAndSweeper(t *testing.T) {
+// The database, the object store, and the broker share a layer, so they
+// start together, concurrently, and close together. The schema sits above
+// them, so it starts once they are connected and stops before they close,
+// and below the sweeper and the relay, so they start once every table they
+// touch is verified and stop before the schema does. The relay also sits
+// above the broker, so it drains, its last pass included, before the
+// broker stops. The document node does not Use the relay, so the schema,
+// which Uses the document node for its seed, can sit beneath it.
+func TestGraph_SchemaBetweenConnectionsAndReactors(t *testing.T) {
 	a := app.New(configtest.Config(t), io.Discard)
 	sys := buildAsRun(t, a)
 	n := a.Nodes()
 
-	db, store := layerOf(sys, n.Database.Name()), layerOf(sys, n.Storage.Name())
-	schema, sweeper := layerOf(sys, n.Schema.Name()), layerOf(sys, n.Sweeper.Name())
-	if db < 0 || store < 0 || schema < 0 || sweeper < 0 {
-		t.Fatalf("layers: database %d, storage %d, schema %d, sweeper %d; want each built", db, store, schema, sweeper)
+	for _, r := range []graph.Ref{n.Database, n.Storage, n.Broker, n.Schema, n.Sweeper, n.Relay} {
+		if !sys.Has(r) {
+			t.Fatalf("%s is not in the System\nlayers:\n%s", r.Name(), sys)
+		}
 	}
-	if db != store {
-		t.Errorf("database in layer %d, storage in layer %d, want the same layer", db, store)
+	for _, conn := range []graph.Ref{n.Storage, n.Broker} {
+		if d, c := sys.LayerOf(n.Database), sys.LayerOf(conn); d != c {
+			t.Errorf("%s in layer %d, %s in layer %d; want the same layer", n.Database.Name(), d, conn.Name(), c)
+		}
 	}
-	if db >= schema {
-		t.Errorf("connections in layer %d, schema in layer %d, want the connections below", db, schema)
+	below := func(lower, upper graph.Ref) {
+		t.Helper()
+		if l, u := sys.LayerOf(lower), sys.LayerOf(upper); l >= u {
+			t.Errorf("%s in layer %d, %s in layer %d; want %s below", lower.Name(), l, upper.Name(), u, lower.Name())
+		}
 	}
-	if sweeper <= schema {
-		t.Errorf("sweeper in layer %d, schema in layer %d, want the sweeper above", sweeper, schema)
+	for _, conn := range []graph.Ref{n.Database, n.Storage, n.Broker} {
+		below(conn, n.Schema)
+	}
+	below(n.Schema, n.Sweeper)
+	below(n.Schema, n.Relay)
+	below(n.Broker, n.Relay)
+	if t.Failed() {
+		t.Logf("layers:\n%s", sys)
 	}
 }
 
-// The broker shares the connections' layer, and the relay sits above both
-// it and the schema: the relay starts once the messaging set is migrated
-// and verified and the broker is connected, and it drains, its last pass
-// included, before the schema, the broker, and the database stop. The
-// document node does not Use the relay, so the schema, which Uses the
-// document node for its seed, can sit beneath it.
-func TestGraph_RelayAboveSchemaAndBroker(t *testing.T) {
-	a := app.New(configtest.Config(t), io.Discard)
-	sys := buildAsRun(t, a)
-	n := a.Nodes()
+// rootDrops builds roots from a's graph and reports, as an error carrying
+// the layer table, a failed Build or any After the Build dropped. The
+// reactors group has members, so the server's After of it orders; any
+// drop means a root is missing from the set, or a node orders itself
+// after one no root reaches, so an order is silently lost.
+func rootDrops(a *app.App, roots []graph.Ref) error {
+	sys, err := a.Graph().Build(roots...)
+	if err != nil {
+		return fmt.Errorf("Build: %w", err)
+	}
+	var drops []string
+	for _, d := range sys.Dropped() {
+		drops = append(drops, fmt.Sprintf("%s's After of %s", d.Node.Name(), d.After.Name()))
+	}
+	if len(drops) > 0 {
+		return layerError(sys, "dropped %s; want every After to order", strings.Join(drops, ", "))
+	}
+	return nil
+}
 
-	db, broker := layerOf(sys, n.Database.Name()), layerOf(sys, n.Broker.Name())
-	schema, relay := layerOf(sys, n.Schema.Name()), layerOf(sys, n.Relay.Name())
-	if db < 0 || broker < 0 || schema < 0 || relay < 0 {
-		t.Fatalf("layers: database %d, broker %d, schema %d, relay %d; want each built", db, broker, schema, relay)
-	}
-	if broker != db {
-		t.Errorf("broker in layer %d, database in layer %d, want the same layer", broker, db)
-	}
-	if relay <= schema {
-		t.Errorf("relay in layer %d, schema in layer %d, want the relay above", relay, schema)
-	}
+// A Build of the root set drops no After. The second case shows the guard
+// catches an After whose target the roots do not build.
+func TestGraph_RootsDropNothing(t *testing.T) {
+	t.Run("as defined", func(t *testing.T) {
+		a := app.New(configtest.Config(t), io.Discard)
+		if err := rootDrops(a, runSet(a)); err != nil {
+			t.Error(err)
+		}
+	})
+
+	t.Run("an After of a node not built", func(t *testing.T) {
+		a := app.New(configtest.Config(t), io.Discard)
+		unbuilt := a.Graph().Value("unbuilt", 0)
+		orderer := a.Graph().Value("orderer", 0, graph.After(unbuilt))
+		roots := runSet(a, orderer)
+		sys, err := a.Graph().Build(roots...)
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		wantGuardFails(t, rootDrops(a, roots), sys, "orderer's After of unbuilt")
+	})
 }
 
 // The relay holds the gate shared for each row, so while a schema verb
@@ -502,18 +638,16 @@ func TestGraph_EachParticipantInOneNode(t *testing.T) {
 	sys := buildAsRun(t, a)
 
 	held := map[any]string{}
-	for _, layer := range sys.Layers() {
-		for _, d := range layer {
-			switch d.Value.(type) {
-			case lifecycle.Starter, lifecycle.Stopper, lifecycle.ReadinessChecker, lifecycle.Monitored:
-			default:
-				continue
-			}
-			if other, dup := held[d.Value]; dup {
-				t.Errorf("nodes %s and %s hold the same participant", other, d.Name)
-			}
-			held[d.Value] = d.Name
+	for _, d := range sys.Dependencies() {
+		switch d.Value.(type) {
+		case lifecycle.Starter, lifecycle.Stopper, lifecycle.ReadinessChecker, lifecycle.Monitored:
+		default:
+			continue
 		}
+		if other, dup := held[d.Value]; dup {
+			t.Errorf("nodes %s and %s hold the same participant", other, d.Name)
+		}
+		held[d.Value] = d.Name
 	}
 }
 
@@ -536,30 +670,29 @@ func TestTelemetry_ShutdownWithoutStart(t *testing.T) {
 	}
 }
 
-// A constructor's error fails Run's Build: Run returns 1 and logs the
-// failure, labelled with the failing node's name, through a logger of its
-// own, since the node that failed may be the logger itself. Nothing reports
-// ready.
+// A constructor's error fails Run's Build: Run returns 1 and writes the
+// failure to stderr, labelled with the failing node's name. It logs
+// nothing, since the node that failed may be the logger itself, and
+// nothing reports ready.
 func TestRun_BuildFailureExitsOne(t *testing.T) {
-	var log syncBuffer
+	var log, stderr syncBuffer
 	a := app.New(configtest.Config(t), &log)
 	a.Graph().Replace(a.Nodes().Logger, func(*graph.Scope) (*slog.Logger, error) {
-		return nil, errors.New("logger unavailable")
+		return nil, errors.New("unavailable")
 	})
 
 	// Cancelled up front, so a Build that wrongly succeeds drains at once
 	// and fails the exit-code check instead of hanging.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if code := a.Run(ctx); code != 1 {
+	if code := a.Run(ctx, &stderr); code != 1 {
 		t.Errorf("Run = %d, want 1", code)
 	}
-	out := log.String()
-	failure := regexp.MustCompile(`msg="service failed" error="[^"]*logger[^"]*logger unavailable`)
-	if !failure.MatchString(out) {
-		t.Errorf("log = %q, want a service failure naming the logger node and its error", out)
+	failure := regexp.MustCompile(`^service failed: .*\blogger\b.*unavailable`)
+	if got := stderr.String(); !failure.MatchString(got) {
+		t.Errorf("stderr = %q, want a service failure naming the logger node and its error", got)
 	}
-	if strings.Contains(out, "server ready") {
-		t.Errorf("log = %q, want no ready record", out)
+	if got := log.String(); got != "" {
+		t.Errorf("log = %q, want nothing logged", got)
 	}
 }

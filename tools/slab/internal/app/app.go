@@ -48,35 +48,40 @@ func New(streams cli.Streams) *App {
 	return a
 }
 
-// Run dispatches args, the program arguments without the program name, and
-// returns the process exit code. The dispatcher builds the nodes the
-// selected command's path declares with Use from the App's graph, with the
-// lifecycle configuration node, and shuts what it built down before Run
-// returns, so a Build, start, or shutdown error is reported with the
-// command's result. An App runs one command at a time, since a graph.Graph
-// is not safe for concurrent use.
+// Run dispatches args, the program arguments without the program name, as a
+// go-cli-sdk cli.Program over a's command tree and graph, and returns the
+// process exit code. The dispatcher builds the nodes the selected command's
+// path declares with Use from the App's graph, with the lifecycle
+// configuration node, and shuts what it built down before Run returns, so a
+// Build, start, or shutdown error is reported with the command's result. An
+// App runs one command at a time, since every dispatch parses into the one
+// tree's flags and restores the flags the previous dispatch set.
 func (a *App) Run(ctx context.Context, args []string) int {
-	return cli.Run(ctx, a.root, args, a.streams, cli.WithGraph(a.graph, a.nodes.LifecycleConfig))
+	return cli.Program{Root: a.root, Graph: a.graph, LifecycleConfig: a.nodes.LifecycleConfig}.Run(ctx, args, a.streams)
 }
 
 // Nodes is the App's graph, one handle per node: the single description of
 // what the program is composed of. Each layer file's define function fills
 // its own part of one Nodes value, and its constructors read the lower
-// layers' nodes from that same value. Each field's node is named as the
-// dispatcher labels its errors.
+// layers' nodes from that same value. Each field's node is named for the
+// field, its words lowercased and spaced, so LifecycleConfig holds
+// "lifecycle config", the name the dispatcher labels its errors with, and
+// NATSStream holds "nats stream"; the field names the node, and no comment
+// repeats it. graph_test.go checks that rule with go-core's
+// graphtest.CheckNames.
 type Nodes struct {
-	LifecycleConfig *graph.Node[lifecycle.Config]  // "lifecycle config"
-	Base            *graph.Node[string]            // "base", the service's base URL
-	Grafana         *graph.Node[string]            // "grafana", Grafana's base URL
-	Repo            *graph.Node[string]            // "repo", the repository root override; empty when not given
-	NoColor         *graph.Node[bool]              // "no color", print without ANSI color even on a terminal
-	NATS            *graph.Node[string]            // "nats", the NATS server's URL
-	NATSStream      *graph.Node[string]            // "nats stream", the service's stream
-	NATSPrefix      *graph.Node[string]            // "nats prefix", the prefix of the service's event types
-	Client          *graph.Node[*httpx.Client]     // "client"
-	Broker          *graph.Node[*events.Broker]    // "broker", the NATS broker on the service's stream, started before a command runs
-	Service         *graph.Node[scenarios.Service] // "service", the running service, checked ready at start
-	GrafanaUp       *graph.Node[scenarios.Grafana] // "grafana up", the running Grafana, checked up at start
+	LifecycleConfig *graph.Node[lifecycle.Config]
+	Base            *graph.Node[string]            // the service's base URL
+	Grafana         *graph.Node[string]            // Grafana's base URL
+	Repo            *graph.Node[string]            // the repository root override; empty when not given
+	NoColor         *graph.Node[bool]              // print without ANSI color even on a terminal
+	NATS            *graph.Node[string]            // the NATS server's URL
+	NATSStream      *graph.Node[string]            // the service's stream
+	NATSPrefix      *graph.Node[string]            // the prefix of the service's event types
+	Client          *graph.Node[*httpx.Client]     // the HTTP client to the service
+	Broker          *graph.Node[*events.Broker]    // the NATS broker on the service's stream, started before a command runs
+	Service         *graph.Node[scenarios.Service] // the running service, checked ready at start
+	GrafanaUp       *graph.Node[scenarios.Grafana] // the running Grafana, checked up at start
 }
 
 // Graph returns the graph a's commands are built from, as [New] described

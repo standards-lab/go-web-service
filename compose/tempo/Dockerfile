@@ -1,6 +1,6 @@
 # Tempo, the trace backend, as a single binary on local storage. This FROM line
 # is Tempo's one pin.
-FROM grafana/tempo:3.1.0
+FROM grafana/tempo:3.1.1
 
 COPY tempo.yaml /etc/tempo/tempo.yaml
 

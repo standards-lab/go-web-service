@@ -40,7 +40,7 @@ func runStorage(t *testing.T, status int, reply string, args ...string) (got []s
 	a := app.New(cli.Streams{Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errOut})
 	rec := apptest.Builds(a)
 	code = a.Run(context.Background(), slices.Concat([]string{"admin", "storage"}, args, []string{"--base", srv.URL}))
-	return got, out.String(), errOut.String(), code, rec.Log()
+	return got, out.String(), errOut.String(), code, apptest.Names(rec.Log())
 }
 
 // Each subcommand sends its endpoint's request with no body, prints the

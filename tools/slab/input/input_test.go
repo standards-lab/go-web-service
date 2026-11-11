@@ -31,7 +31,7 @@ func parsed(t *testing.T, args ...string) (inv *cli.Invocation, raw string, vers
 	cmd.Flags().StringVar(&raw, "body", "", "")
 	cmd.Flags().Int64Var(&version, "version", 0, "")
 	var stderr bytes.Buffer
-	if code := cli.Run(context.Background(), cmd, args, cli.Streams{Stdout: &stderr, Stderr: &stderr}); code != 0 {
+	if code := (cli.Program{Root: cmd}).Run(context.Background(), args, cli.Streams{Stdout: &stderr, Stderr: &stderr}); code != 0 {
 		t.Fatalf("dispatch of %q exited %d: %s", args, code, stderr.String())
 	}
 	return inv, raw, version

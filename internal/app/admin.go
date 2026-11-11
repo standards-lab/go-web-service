@@ -30,12 +30,11 @@ import (
 // the schema, checks every statement against it, and seeds, and which is
 // its own readiness check. The storage admin domain administers the storage
 // node's object store itself, read with Use: the same store as a second
-// node would start and be checked twice.
+// node would start and be checked twice. The gate is a fresh node, so each
+// Build's gate starts open.
 func defineAdmin(g *graph.Graph, n *Nodes) {
-	n.Gate = g.Define("gate", func(*graph.Scope) (*reactor.Gate, error) {
-		return new(reactor.Gate), nil
-	})
-	n.Schema = g.Define("schema", newSchema(n))
+	n.Gate = g.Fresh[reactor.Gate]("gate")
+	n.Schema = g.Define("schema", n.newSchema)
 }
 
 // newSchema constructs the database admin service over the database node's
@@ -53,37 +52,35 @@ func defineAdmin(g *graph.Graph, n *Nodes) {
 // reset's apply and its seed, so the event precedes the seed's on the
 // stream. Startup's own correction takes no gate, since it runs before the
 // sweeper and the relay, which order themselves after the schema, start.
-func newSchema(n *Nodes) func(*graph.Scope) (*admin.Service, error) {
-	return func(s *graph.Scope) (*admin.Service, error) {
-		sql := s.Use(n.SQL)
-		logger := s.Use(n.Logger)
+func (n *Nodes) newSchema(s *graph.Scope) (*admin.Service, error) {
+	sql := s.Use(n.SQL)
+	logger := s.Use(n.Logger)
 
-		messagingSet, err := msgpg.Migrations()
-		if err != nil {
-			return nil, fmt.Errorf("messaging migrations: %w", err)
-		}
-		blobfsSet, err := blobfspg.Migrations()
-		if err != nil {
-			return nil, fmt.Errorf("blobfs migrations: %w", err)
-		}
-		migrator, err := migrate.New(sql.DB, data.Migrations(messagingSet, blobfsSet), migrate.Options{Logger: logger})
-		if err != nil {
-			return nil, fmt.Errorf("migrate: %w", err)
-		}
-
-		sql.Record(verifier(msgpg.Verify))
-
-		org, doc := s.Use(n.Organization), s.Use(n.Document)
-		seeder := data.NewSeeder(sql, org.Seed(), org.LogoSeed(), doc.Seed())
-
-		return admin.New(s.Use(n.Database), sql.DB, migrator, sql.Catalog, admin.Options{
-			Seed:     s.Use(n.Config).Admin.SeedState(),
-			Seeder:   seeder,
-			Registry: sql,
-			Logger:   logger,
-			OnReset:  dbadmin.OnReset(sql.DB, s.Use(n.Runtime).Recorder),
-		}), nil
+	messagingSet, err := msgpg.Migrations()
+	if err != nil {
+		return nil, fmt.Errorf("messaging migrations: %w", err)
 	}
+	blobfsSet, err := blobfspg.Migrations()
+	if err != nil {
+		return nil, fmt.Errorf("blobfs migrations: %w", err)
+	}
+	migrator, err := migrate.New(sql.DB, data.Migrations(messagingSet, blobfsSet), migrate.Options{Logger: logger})
+	if err != nil {
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+
+	sql.Record(verifier(msgpg.Verify))
+
+	org, doc := s.Use(n.Organization), s.Use(n.Document)
+	seeder := data.NewSeeder(sql, org.Seed(), org.LogoSeed(), doc.Seed())
+
+	return admin.New(s.Use(n.Database), sql.DB, migrator, sql.Catalog, admin.Options{
+		Seed:     s.Use(n.Config).Admin.SeedState(),
+		Seeder:   seeder,
+		Registry: sql,
+		Logger:   logger,
+		OnReset:  dbadmin.OnReset(sql.DB, s.Use(n.Runtime).Recorder),
+	}), nil
 }
 
 // verifier adapts a library's verify function, such as go-messaging's

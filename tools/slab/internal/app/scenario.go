@@ -21,15 +21,16 @@ import (
 // runs no step until it answers; a failed probe is reported
 // "startup: <node>: ..." naming the mise task that fixes it.
 //
-// grafana up is ordered After service. go-core's lifecycle starts a
-// System's nodes in layers by longest dependency path and stops at the
-// first layer with a failure, and grafana up, reading only the grafana
-// setting, would otherwise sit in a lower layer than service, which reads
-// base and client: with both down, Grafana's failure would be reported and
-// service's never probed. The After edge puts grafana up a layer above
-// service whenever both are in the System, so with nothing running the
-// failure names service and mise run serve. After builds nothing, so a
-// scenario that declares only grafana up would not gain service.
+// grafana up is ordered after service by graph.After at its Define.
+// go-core's lifecycle starts a System's nodes in layers by longest
+// dependency path and stops at the first layer with a failure, and grafana
+// up, reading only the grafana setting, would otherwise sit in a lower layer
+// than service, which reads base and client: with both down, Grafana's
+// failure would be reported and service's never probed. The After edge puts
+// grafana up a layer above service whenever both are in the System, so with
+// nothing running the failure names service and mise run serve. After builds
+// nothing, so a scenario that declares only grafana up would not gain
+// service.
 func defineScenarioNodes(g *graph.Graph, n *Nodes) {
 	base, client, grafana := n.Base, n.Client, n.Grafana
 	n.Service = g.Define("service", func(s *graph.Scope) (scenarios.Service, error) {
@@ -37,10 +38,9 @@ func defineScenarioNodes(g *graph.Graph, n *Nodes) {
 	})
 	service := n.Service
 	n.GrafanaUp = g.Define("grafana up", func(s *graph.Scope) (scenarios.Grafana, error) {
-		s.After(service)
 		url := s.Use(grafana)
 		return scenarios.Grafana{URL: url, Mimir: httpx.NewMimir(httpx.NewClient(url))}, nil
-	})
+	}, graph.After(service))
 }
 
 // mountScenarios mounts go-cli-sdk's scenario parent at root, with one leaf

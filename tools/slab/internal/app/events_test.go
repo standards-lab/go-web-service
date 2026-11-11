@@ -12,6 +12,7 @@ import (
 	"github.com/standards-lab/go-cli-sdk"
 	"github.com/standards-lab/go-core/process"
 
+	"github.com/standards-lab/go-web-service/tools/slab/internal/apptest"
 	"github.com/standards-lab/go-web-service/tools/slab/repo"
 )
 
@@ -184,7 +185,7 @@ func TestEvents_UsageAndHelpBuildNothing(t *testing.T) {
 			if !strings.Contains(stderr.String(), tc.stderr) || (tc.stderr == "") != (stderr.Len() == 0) {
 				t.Errorf("stderr = %q, want it to contain %q", stderr, tc.stderr)
 			}
-			if log := built.Log(); len(log) != 0 {
+			if log := apptest.Names(built.Log()); len(log) != 0 {
 				t.Errorf("nodes built = %q, want none", log)
 			}
 		})

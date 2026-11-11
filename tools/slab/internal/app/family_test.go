@@ -104,7 +104,7 @@ func runFamily(t *testing.T, stdout io.Writer, path []string, srv *httptest.Serv
 	a := app.New(cli.Streams{Stdin: strings.NewReader(""), Stdout: stdout, Stderr: &stderr})
 	rec := apptest.Builds(a)
 	code := a.Run(context.Background(), slices.Concat(path, args, []string{"--base", srv.URL}))
-	r := result{path: strings.Join(path, " "), stderr: stderr.String(), code: code, built: rec.Log()}
+	r := result{path: strings.Join(path, " "), stderr: stderr.String(), code: code, built: apptest.Names(rec.Log())}
 	if b, ok := stdout.(*bytes.Buffer); ok {
 		r.stdout = b.String()
 	}

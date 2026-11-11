@@ -23,7 +23,7 @@ func readQuery(t *testing.T, args ...string) (query [][2]string, err error) {
 	}}
 	read.Bind(cmd)
 	var stderr bytes.Buffer
-	if code := cli.Run(context.Background(), cmd, args, cli.Streams{Stdout: &stderr, Stderr: &stderr}); code != 0 {
+	if code := (cli.Program{Root: cmd}).Run(context.Background(), args, cli.Streams{Stdout: &stderr, Stderr: &stderr}); code != 0 {
 		t.Fatalf("dispatch of %q exited %d: %s", args, code, stderr.String())
 	}
 	return query, err
@@ -58,7 +58,7 @@ func TestReadFlags_RefusesPageWithCursor(t *testing.T) {
 	}}
 	read.Bind(cmd)
 	var stderr bytes.Buffer
-	code := cli.Run(context.Background(), cmd, []string{"--page", "2", "--cursor", "c"}, cli.Streams{Stdout: &stderr, Stderr: &stderr})
+	code := (cli.Program{Root: cmd}).Run(context.Background(), []string{"--page", "2", "--cursor", "c"}, cli.Streams{Stdout: &stderr, Stderr: &stderr})
 	if code != 2 || !strings.Contains(stderr.String(), "flags --page, --cursor cannot be used together") {
 		t.Errorf("code = %d, stderr = %q, want the exclusive group refused", code, stderr.String())
 	}

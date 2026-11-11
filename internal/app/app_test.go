@@ -49,9 +49,9 @@ func (b *syncBuffer) String() string {
 // New and Run's Build perform no I/O — they succeed with nothing
 // listening — and Run then fails startup at the connections' layer,
 // draining to exit 1 with the failure logged as the service failing and
-// naming the node, never flipping readiness or writing to stderr. The database, the object store, and the broker start
-// together, and the first to fail cancels the others, so the log names
-// whichever failed first.
+// naming the node, never flipping readiness or writing to stderr. The
+// database, the object store, and the broker start together, and the first
+// to fail cancels the others, so the log names whichever failed first.
 func TestRun_FailsStartupWithoutInfrastructure(t *testing.T) {
 	buf, stderr := &syncBuffer{}, &syncBuffer{}
 	a := app.New(configtest.Config(t), buf)

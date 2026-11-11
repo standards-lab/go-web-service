@@ -120,8 +120,8 @@ func (a *App) Nodes() Nodes { return a.nodes }
 // service starts from: the server, which reaches the router, the
 // readiness, the logger, the writer node, the config node, telemetry, the
 // schema, and the domains through its Uses and theirs, and the reactors
-// group, whose members no Use reaches. [App.Run] builds this set plus the lifecycle
-// config node the Coordinator is configured from.
+// group, whose members no Use reaches. [App.Run] builds this set plus the
+// lifecycle config node the Coordinator is configured from.
 func (a *App) Roots() []graph.Ref {
 	n := a.nodes
 	return []graph.Ref{n.Server, n.Reactors}

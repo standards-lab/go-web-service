@@ -104,10 +104,10 @@ func (n *Nudge) Nudge() {
 // the Coordinator starts it, drains it, reports it, and ends the run on its
 // failure with no registration here. Its Define line orders it after the
 // schema, so it starts once every table it touches is verified, and stops
-// before the schema's layer beneath it. Given the shutdown timeout, it cancels a pass
-// still running at half of it (go-core's reactor.CancelWithin), so the
-// sweeper reports the cancellation before the coordinator's deadline drops
-// it.
+// before the schema's layer beneath it. Given the shutdown timeout, it
+// cancels a pass still running at half of it (go-core's
+// reactor.CancelWithin), so the sweeper reports the cancellation before the
+// coordinator's deadline drops it.
 func (n *Nodes) newSweeper(s *graph.Scope) (*sweep.Sweeper, error) {
 	cfg := s.Use(n.Config)
 	db := s.Use(n.SQL).DB

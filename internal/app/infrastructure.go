@@ -25,9 +25,9 @@ import (
 // defineInfrastructure defines the infrastructure nodes on g into n: the
 // lifecycle config the Coordinator is configured from, the logger written
 // to the writer node, and the services the application is composed on,
-// each read from the config node New defined. database is the database's lifecycle object,
-// the provider's pool with its start, readiness, and shutdown, which the
-// schema node administers; the domains never see it. storage is the object
+// each read from the config node New defined. database is the database's
+// lifecycle object, the provider's pool with its start, readiness, and
+// shutdown, which the schema node administers; the domains never see it. storage is the object
 // store itself, a lifecycle participant too, which the storage admin
 // domain administers. broker is the NATS JetStream broker the messaging
 // runtime (reactors.go) publishes through, a lifecycle participant whose

@@ -1,8 +1,8 @@
 // Package app is the composition root. [New] describes slab's dependencies
 // as one go-core graph and builds the command tree on go-cli-sdk over it;
 // [App.Run] dispatches the process arguments over that tree as a
-// go-cli-sdk cli.Program. The package is
-// one file per layer, so its table of contents is slab's layer list:
+// go-cli-sdk cli.Program. The package is one file per layer, so its table
+// of contents is slab's layer list:
 //
 //   - app.go: [App], [New], and [Nodes], which call the layer files'
 //     define and mount functions in layer order, lowest first;
@@ -33,10 +33,10 @@
 // comment names it; graph_test.go checks that rule with go-core's
 // graphtest.CheckNames, and checks that every leaf of the tree, as
 // Command.Leaves yields it, builds its nodes without dropping an order and
-// with grafana up above service wherever it builds both. Defining the nodes constructs nothing. A command
-// declares the nodes it needs with Use; the dispatcher builds them, with
-// the lifecycle configuration node, only when the command runs, and shuts
-// them down when it returns. A run that builds nothing, such as help, a
+// with grafana up above service wherever it builds both. Defining the
+// nodes constructs nothing. A command declares the nodes it needs with
+// Use; the dispatcher builds them, with the lifecycle configuration node,
+// only when the command runs, and shuts them down when it returns. A run that builds nothing, such as help, a
 // usage error, or version, reads no configuration. The root's PreRun
 // records which root flags a dispatch set, so a setting's node applies its
 // flag over its variable only when the flag was given. No aggregate

@@ -29,14 +29,15 @@
 // with Use. Each field's node is named for the field. [App] is the
 // described process. [New] is the cold start: it defines the configuration
 // and the logger's writer as fixed-value nodes, describes the rest of the
-// graph layer by layer, constructs nothing, and cannot fail. [App.Graph] and [App.Nodes] publish the graph and its
-// handles, so a caller can Observe or Replace a node before Run, as
-// internal/apptest's fixtures do. [App.Run]
-// is the hot start plus shutdown: it runs a go-web-sdk web.Service, which
-// builds [App.Roots], the server and the reactors group, plus the lifecycle
-// config node, hands the System to go-core's lifecycle Coordinator, and
-// returns the process exit code. A constructor's error is reported there
-// as the service failing, on stderr; a wiring mistake panics during Build.
+// graph layer by layer, constructs nothing, and cannot fail. [App.Graph]
+// and [App.Nodes] publish the graph and its handles, so a caller can
+// Observe or Replace a node before Run, as internal/apptest's fixtures do.
+// [App.Run] is the hot start plus shutdown: it runs a go-web-sdk
+// web.Service, which builds [App.Roots], the server and the reactors group,
+// plus the lifecycle config node, hands the System to go-core's lifecycle
+// Coordinator, and returns the process exit code. A constructor's error is
+// reported there as the service failing, on stderr; a wiring mistake
+// panics during Build.
 //
 // What a node takes part in is inferred from its value's methods: a
 // lifecycle.Starter or Stopper is started or stopped, a Subsystem is both,
@@ -46,11 +47,11 @@
 // reverse.
 // No layer file registers anything with the Coordinator. The order is
 // computed from what each node uses, plus four After edges, declared with
-// graph.After at each node's Define, which order
-// two nodes without passing a value: the database, the object store, and
-// the broker after telemetry, the sweeper and the relay after the schema,
-// and the server after every reactor and the schema, so it is alone in the
-// top layer, starts last, and drains first. The drain therefore runs the
+// graph.After at each node's Define, which order two nodes without passing
+// a value: the database, the object store, and the broker after telemetry,
+// the sweeper and the relay after the schema, and the server after every
+// reactor and the schema, so it is alone in the top layer, starts last, and
+// drains first. The drain therefore runs the
 // server, then the reactors (the relay with its last pass, which publishes
 // what the server's requests committed while they drained), then the
 // schema, then the broker and the connections. The probes report the
@@ -69,6 +70,6 @@
 // What a producer of events must order itself after is defineReactors'
 // drain rule. Extending the service means defining a node in its layer's
 // define function, and placing a reactor's node in the reactors group with
-// graph.In at its Define; the
-// signatures, cmd/server, and [App.Run] stay untouched.
+// graph.In at its Define; the signatures, cmd/server, and [App.Run] stay
+// untouched.
 package app

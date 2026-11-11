@@ -122,8 +122,8 @@ mise run serve      # run the service
 run first — see [`compose/README.md`](compose/README.md) for the mechanism and its one accepted
 limitation.
 
-The service is one dependency graph, described in `internal/app`, and startup runs it in layer
-order. Telemetry starts first, so its providers are installed before anything they record. The
+The service is one dependency graph, described in `internal/app`, and `App.Run` runs it as a
+go-web-sdk `web.Service`, starting it in layer order. Telemetry starts first, so its providers are installed before anything they record. The
 database, the object store, and the NATS broker connect next, together in one layer. The schema
 starts after them: it applies any pending migration, checks every statement against the schema,
 and seeds the configured state (the `local` overlay names `default`). The [sweep](#sweep) and
@@ -139,7 +139,10 @@ curl localhost:8080/healthz   # 200 {"status":"ok"}
 curl localhost:8080/readyz    # 200 {"status":"ready","checks":[...]}  — lifecycle, database, storage, broker, schema, sweeper, relay
 ```
 
-Ctrl-C drains in-flight requests and exits with `server stopped`. That serve, probe, and
+Ctrl-C drains in-flight requests and exits with `server stopped`. A failure to start, run, or
+drain logs `service failed` with the error, which names the failing node, and exits 1; a node
+whose constructor fails is reported on stderr instead, as `service failed: <error>`, since the
+logger may be what failed. That serve, probe, and
 drain sequence is the one check a change to the composition root is verified by hand with;
 everything the running service does is asserted by the integration tier below.
 
@@ -150,8 +153,10 @@ in `internal/app` (`defineDomain` in `domain.go` for a domain service, for examp
 handle to `Nodes`. Its part in the lifecycle is inferred from its value's methods: a `Start` or
 `Shutdown` makes it a participant, a `Ready` on a value that also has `Start` adds its check to
 `/readyz` (a `Ready` alone adds none), and an `Err` channel has its runtime failure watched, so
-nothing registers it. Its place in the order follows from the nodes it uses. A reactor's node
-also joins `Nodes.Reactors`, which `Run` builds as roots and the server orders itself after. A
+nothing registers it. Its place in the order follows from the nodes it uses, plus any
+`graph.After` on its Define line, which orders it after a node it does not use. A reactor's node
+joins the reactors group, `Nodes.Reactors`, with `graph.In` on its Define line; the group is one
+of `App.Roots`, the root set `Run` builds, and the server orders itself after it. A
 node that commits events outside a request, such as a consuming reactor, Uses the relay's node,
 so it drains before the relay's last pass; a request-driven producer, as every domain service
 is, needs no edge, since the server drains first.

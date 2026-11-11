@@ -1,6 +1,7 @@
 // Package app is the composition root. [New] describes slab's dependencies
 // as one go-core graph and builds the command tree on go-cli-sdk over it;
-// [App.Run] dispatches the process arguments over that tree. The package is
+// [App.Run] dispatches the process arguments over that tree as a
+// go-cli-sdk cli.Program. The package is
 // one file per layer, so its table of contents is slab's layer list:
 //
 //   - app.go: [App], [New], and [Nodes], which call the layer files'

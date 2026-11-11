@@ -95,7 +95,8 @@ domain's store with its statements, and `data.NewStorage(db, …)` records blobf
 `Seeder.Verify` checks every recorded store, including one that seeds nothing, and no list in the
 composition root can leave a store out. The admin service runs `Verify` in its startup, before
 it seeds. The composition root's graph sets the startup order: each node starts after the nodes
-it uses, and `After` edges, which order two nodes without passing a value, complete it, leaving
+it uses, and `After` edges, declared with `graph.After` on a node's Define line, which order two
+nodes without passing a value, complete it, leaving
 the server alone in the top layer; `internal/app`'s package doc lists the edges. The order stays in the composition root, never in
 a library or a domain. The base layers (`data`,
 `domain/<layer>`, `admin/<service>`) are root-level packages because the domain packages import

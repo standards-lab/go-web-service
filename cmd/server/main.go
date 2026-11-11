@@ -23,5 +23,5 @@ func run(stdout, stderr io.Writer) int {
 		return process.Fail(stderr, "config load failed", err)
 	}
 
-	return app.New(cfg, stdout).Run(ctx)
+	return app.New(cfg, stdout).Run(ctx, stderr)
 }

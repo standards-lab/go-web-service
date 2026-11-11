@@ -4,7 +4,7 @@
 // the architecture's layer list:
 //
 //   - infrastructure.go: defineInfrastructure, the configuration, the
-//     logger, the database pool, the object store, the NATS broker, and
+//     lifecycle config, the logger, the database pool, the object store, the NATS broker, and
 //     the two the domains see the first two through, the sql session and
 //     the files store;
 //   - telemetry.go: defineTelemetry, the trace and meter providers, which
@@ -31,11 +31,11 @@
 // and cannot fail. [App.Graph] and [App.Nodes] publish the graph and its
 // handles, so a caller can Observe or Replace a node before Run, as
 // internal/apptest's fixtures do. [App.Run]
-// is the hot start plus shutdown: it builds the graph from the config, the
-// logger, the server, the schema, and the reactors group as roots, hands the
-// System to go-core's lifecycle Coordinator, and returns the process exit
-// code. A constructor's error is reported there as the service failing; a
-// wiring mistake panics during Build.
+// is the hot start plus shutdown: it runs a go-web-sdk web.Service, which
+// builds [App.Roots], the server and the reactors group, plus the lifecycle
+// config node, hands the System to go-core's lifecycle Coordinator, and
+// returns the process exit code. A constructor's error is reported there
+// as the service failing, on stderr; a wiring mistake panics during Build.
 //
 // What a node takes part in is inferred from its value's methods: a
 // lifecycle.Starter or Stopper is started or stopped, a Subsystem is both,

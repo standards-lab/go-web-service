@@ -8,6 +8,7 @@ import (
 	bfdata "github.com/standards-lab/blobfs/data"
 	blobfspg "github.com/standards-lab/blobfs/postgres"
 	"github.com/standards-lab/go-core/graph"
+	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-core/logging"
 	"github.com/standards-lab/go-database"
 	"github.com/standards-lab/go-database/postgres"
@@ -24,7 +25,8 @@ import (
 )
 
 // defineInfrastructure defines the infrastructure nodes on g into n: the
-// configuration cfg, the logger written to w, and the services the
+// configuration cfg, the lifecycle config the Coordinator is configured
+// from, the logger written to w, and the services the
 // application is composed on. database is the database's lifecycle object,
 // the provider's pool with its start, readiness, and shutdown, which the
 // schema node administers; the domains never see it. storage is the object
@@ -52,12 +54,21 @@ func defineInfrastructure(g *graph.Graph, n *Nodes, cfg *config.Config, w io.Wri
 	n.Config = g.Define("config", func(*graph.Scope) (*config.Config, error) {
 		return cfg, nil
 	})
+	n.LifecycleConfig = g.Define("lifecycle config", newLifecycleConfig(n))
 	n.Logger = g.Define("logger", newLogger(n, w))
 	n.Database = g.Define("database", newDatabase(n), graph.After(n.Telemetry))
 	n.Storage = g.Define("storage", newStorage(n), graph.After(n.Telemetry))
 	n.Broker = g.Define("broker", newBroker(n), graph.After(n.Telemetry))
 	n.SQL = g.Define("sql", newSQL(n))
 	n.Files = g.Define("files", newFiles(n))
+}
+
+// newLifecycleConfig returns the config node's lifecycle block, the
+// configuration [App.Run] hands the lifecycle Coordinator.
+func newLifecycleConfig(n *Nodes) func(*graph.Scope) (lifecycle.Config, error) {
+	return func(s *graph.Scope) (lifecycle.Config, error) {
+		return s.Use(n.Config).Config, nil
+	}
 }
 
 // newLogger constructs the service's logger over w from the config node's

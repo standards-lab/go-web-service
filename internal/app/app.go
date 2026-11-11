@@ -8,7 +8,6 @@ import (
 	"github.com/standards-lab/go-core/event"
 	"github.com/standards-lab/go-core/graph"
 	"github.com/standards-lab/go-core/lifecycle"
-	"github.com/standards-lab/go-core/logging"
 	"github.com/standards-lab/go-core/reactor"
 	"github.com/standards-lab/go-database"
 	"github.com/standards-lab/go-database/admin"
@@ -26,13 +25,10 @@ import (
 )
 
 // App is the application layer: the dependency graph that describes the
-// service, the [Nodes] that name its parts, and the configuration and log
-// writer it was described over.
+// service and the [Nodes] that name its parts.
 type App struct {
 	graph *graph.Graph
 	nodes Nodes
-	cfg   *config.Config
-	w     io.Writer
 	ran   bool
 }
 
@@ -45,13 +41,14 @@ type App struct {
 // built inside that node's constructor rather than as a node of its own.
 type Nodes struct {
 	// Infrastructure (infrastructure.go).
-	Config   *graph.Node[*config.Config] // "config"
-	Logger   *graph.Node[*slog.Logger]   // "logger"
-	Database *graph.Node[*database.DB]   // "database"
-	Storage  *graph.Node[*storage.Store] // "storage"
-	Broker   *graph.Node[*nats.Broker]   // "broker"
-	SQL      *graph.Node[*data.Database] // "sql"
-	Files    *graph.Node[*data.Storage]  // "files"
+	Config          *graph.Node[*config.Config]   // "config"
+	LifecycleConfig *graph.Node[lifecycle.Config] // "lifecycle config"
+	Logger          *graph.Node[*slog.Logger]     // "logger"
+	Database        *graph.Node[*database.DB]     // "database"
+	Storage         *graph.Node[*storage.Store]   // "storage"
+	Broker          *graph.Node[*nats.Broker]     // "broker"
+	SQL             *graph.Node[*data.Database]   // "sql"
+	Files           *graph.Node[*data.Storage]    // "files"
 
 	// Telemetry (telemetry.go).
 	Telemetry     *graph.Node[*Telemetry]           // "telemetry"
@@ -89,7 +86,7 @@ type Nodes struct {
 // themselves after its node at their Define, and an After takes a handle
 // already defined; every other layer follows lowest first.
 func New(cfg *config.Config, w io.Writer) *App {
-	a := &App{graph: graph.New(), cfg: cfg, w: w}
+	a := &App{graph: graph.New()}
 	defineTelemetry(a.graph, &a.nodes)
 	defineInfrastructure(a.graph, &a.nodes, cfg, w)
 	defineAdmin(a.graph, &a.nodes)
@@ -109,41 +106,41 @@ func (a *App) Graph() *graph.Graph { return a.graph }
 // or Observe.
 func (a *App) Nodes() Nodes { return a.nodes }
 
-// Run builds the graph, hands the System to a lifecycle Coordinator with the
-// config node's lifecycle block, and runs it until ctx ends, returning the
-// process exit code. The Build's roots are every node Run reads (the config,
-// the logger, the server), the schema, and the reactors group. Once the
-// server has bound, the ready record names its address. Run logs "server
-// stopped" and returns 0 after a clean drain, or logs "service failed" with
-// the error and returns 1 on a Build, startup, runtime, or shutdown failure.
-// An App runs once: a second Run panics before it builds anything.
-func (a *App) Run(ctx context.Context) int {
+// Roots returns the service's root set, the nodes a Build of the whole
+// service starts from: the server, which reaches the router, the
+// readiness, the logger, the config, telemetry, the schema, and the
+// domains through its Uses and theirs, and the reactors group, whose
+// members no Use reaches. [App.Run] builds this set plus the lifecycle
+// config node the Coordinator is configured from.
+func (a *App) Roots() []graph.Ref {
+	n := a.nodes
+	return []graph.Ref{n.Server, n.Reactors}
+}
+
+// Run runs the service as a web.Service over [App.Roots] until ctx ends,
+// and returns the process exit code. It builds the root set and the
+// lifecycle config node and hands the System to a lifecycle Coordinator
+// configured from that node. Once the server has bound, it logs "server
+// ready" with the bound address. It logs "server stopped" and returns 0
+// after a clean drain, or logs "service failed" with the error, which
+// names the failing node, and returns 1 on a startup, runtime, or shutdown
+// failure. A Build failure is written to stderr instead, as "service
+// failed: " and the error, since the logger node may be what failed. An
+// App runs once: a second Run panics before it builds anything.
+func (a *App) Run(ctx context.Context, stderr io.Writer) int {
+	// web.Service holds no state between Runs, so the once-only guard is
+	// the App's.
 	if a.ran {
 		panic("app: Run called twice; an App runs once")
 	}
 	a.ran = true
 
 	n := a.nodes
-	sys, err := a.graph.Build(n.Config, n.Logger, n.Server, n.Schema, n.Reactors)
-	if err != nil {
-		// The logger node may be what failed, so the Build failure is
-		// reported through a logger of Run's own over the same writer and
-		// log configuration.
-		logging.New(a.w, a.cfg.Log).Error("service failed", "error", err)
-		return 1
-	}
-
-	logger := sys.Get(n.Logger)
-	server := sys.Get(n.Server)
-	lc := lifecycle.New(sys, sys.Get(n.Config).Config)
-	lc.OnReady(func() {
-		logger.Info("server ready", "addr", server.Addr())
-	})
-
-	if err := lc.Run(ctx); err != nil {
-		logger.Error("service failed", "error", err)
-		return 1
-	}
-	logger.Info("server stopped")
-	return 0
+	return web.Service{
+		Graph:           a.graph,
+		LifecycleConfig: n.LifecycleConfig,
+		Logger:          n.Logger,
+		Server:          n.Server,
+		Roots:           a.Roots(),
+	}.Run(ctx, stderr)
 }

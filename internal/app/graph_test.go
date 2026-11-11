@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"maps"
 	"net"
 	"regexp"
 	"slices"
@@ -35,19 +34,65 @@ import (
 // App.Graph and App.Nodes, as does the Build-failure case, which
 // substitutes a failing constructor.
 
-// buildAsRun builds a's graph from the roots Run builds from, the config,
-// the logger, the server, the schema, and the reactors, plus extra.
-// TestGraph_ServerAloneInTopLayer holds these roots to Run's by observing a
-// real Run.
+// runSet returns the set Run builds, App.Roots plus the lifecycle config
+// node, plus extra. TestGraph_RootsBuildAsRun holds this set to Run's by
+// observing a real Run.
+func runSet(a *app.App, extra ...graph.Ref) []graph.Ref {
+	return append(append(a.Roots(), a.Nodes().LifecycleConfig), extra...)
+}
+
+// buildAsRun builds a's graph from runSet(a, extra...).
 func buildAsRun(t *testing.T, a *app.App, extra ...graph.Ref) *graph.System {
 	t.Helper()
-	n := a.Nodes()
-	roots := []graph.Ref{n.Config, n.Logger, n.Server, n.Schema, n.Reactors}
-	sys, err := a.Graph().Build(append(roots, extra...)...)
+	sys, err := a.Graph().Build(runSet(a, extra...)...)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	return sys
+}
+
+// observeRun runs a with a context already ended, so the Run builds and
+// starts nothing, and returns the handle of every node its Build
+// constructed.
+func observeRun(t *testing.T, a *app.App) []graph.Ref {
+	t.Helper()
+	var ran []graph.Ref
+	a.Graph().Observe(func(r graph.Ref) { ran = append(ran, r) })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if code := a.Run(ctx, io.Discard); code != 0 {
+		t.Fatalf("Run = %d, want 0", code)
+	}
+	return ran
+}
+
+// App.Roots is the server and the reactors group, and a Build of it plus
+// the lifecycle config node constructs exactly the nodes a real Run
+// constructs, compared by handle: every node Run built is in the System,
+// and the System holds no node Run did not build. It holds the tests
+// below, which inspect that set, to what Run reaches.
+func TestGraph_RootsBuildAsRun(t *testing.T) {
+	a := app.New(configtest.Config(t), io.Discard)
+	n := a.Nodes()
+	if got, want := a.Roots(), []graph.Ref{n.Server, n.Reactors}; !slices.Equal(got, want) {
+		t.Errorf("Roots = %v, want the server and the reactors group", got)
+	}
+
+	ran := observeRun(t, a)
+	sys := buildAsRun(t, a)
+	for _, r := range ran {
+		if !sys.Has(r) {
+			t.Errorf("Run built %s, the root set's Build did not", r.Name())
+		}
+	}
+	for _, d := range sys.Dependencies() {
+		if !slices.Contains(ran, d.Ref) {
+			t.Errorf("the root set's Build built %s, Run did not", d.Name)
+		}
+	}
+	if t.Failed() {
+		t.Logf("layers:\n%s", sys)
+	}
 }
 
 // serverAloneOnTop reports whether the System's last layer holds the server
@@ -92,27 +137,7 @@ func names(layer []graph.Dependency) []string {
 func TestGraph_ServerAloneInTopLayer(t *testing.T) {
 	t.Run("as defined", func(t *testing.T) {
 		a := app.New(configtest.Config(t), io.Discard)
-
-		// Run's own Build, observed, so the Build below inspects the nodes
-		// Run reaches rather than a set this test chose. The context ends
-		// before startup, so the Run starts nothing.
-		ran := map[string]bool{}
-		a.Graph().Observe(func(r graph.Ref) { ran[r.Name()] = true })
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		if code := a.Run(ctx); code != 0 {
-			t.Fatalf("Run = %d, want 0", code)
-		}
-		ranNames := slices.Sorted(maps.Keys(ran))
-
 		sys := buildAsRun(t, a)
-		var built []string
-		for _, layer := range sys.Layers() {
-			built = append(built, names(layer)...)
-		}
-		if slices.Sort(built); !slices.Equal(built, ranNames) {
-			t.Fatalf("buildAsRun built %v, Run built %v; their roots differ", built, ranNames)
-		}
 		if top, ok := serverAloneOnTop(sys, a.Nodes()); !ok {
 			t.Errorf("top layer = %+v, want the server node alone", names(top))
 		}
@@ -536,30 +561,29 @@ func TestTelemetry_ShutdownWithoutStart(t *testing.T) {
 	}
 }
 
-// A constructor's error fails Run's Build: Run returns 1 and logs the
-// failure, labelled with the failing node's name, through a logger of its
-// own, since the node that failed may be the logger itself. Nothing reports
-// ready.
+// A constructor's error fails Run's Build: Run returns 1 and writes the
+// failure to stderr, labelled with the failing node's name. It logs
+// nothing, since the node that failed may be the logger itself, and
+// nothing reports ready.
 func TestRun_BuildFailureExitsOne(t *testing.T) {
-	var log syncBuffer
+	var log, stderr syncBuffer
 	a := app.New(configtest.Config(t), &log)
 	a.Graph().Replace(a.Nodes().Logger, func(*graph.Scope) (*slog.Logger, error) {
-		return nil, errors.New("logger unavailable")
+		return nil, errors.New("unavailable")
 	})
 
 	// Cancelled up front, so a Build that wrongly succeeds drains at once
 	// and fails the exit-code check instead of hanging.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if code := a.Run(ctx); code != 1 {
+	if code := a.Run(ctx, &stderr); code != 1 {
 		t.Errorf("Run = %d, want 1", code)
 	}
-	out := log.String()
-	failure := regexp.MustCompile(`msg="service failed" error="[^"]*logger[^"]*logger unavailable`)
-	if !failure.MatchString(out) {
-		t.Errorf("log = %q, want a service failure naming the logger node and its error", out)
+	failure := regexp.MustCompile(`^service failed: .*\blogger\b.*unavailable`)
+	if got := stderr.String(); !failure.MatchString(got) {
+		t.Errorf("stderr = %q, want a service failure naming the logger node and its error", got)
 	}
-	if strings.Contains(out, "server ready") {
-		t.Errorf("log = %q, want no ready record", out)
+	if got := log.String(); got != "" {
+		t.Errorf("log = %q, want nothing logged", got)
 	}
 }

@@ -199,6 +199,14 @@ accumulate under [Unreleased] until the first cut.
 
 ### Changed
 
+- Pins: go-core v0.12.0, from v0.11.0, go-web-sdk v0.17.0, from v0.16.0, sqlate v0.7.0 with
+  sqlate/postgres v0.7.0, from v0.6.1 and postgres/v0.6.0, blobfs v0.8.0, from v0.7.0, and
+  go-messaging/nats v0.3.0, from v0.2.0, in both modules. In the base module, go-web-sdk's
+  middleware/rate-limit v0.5.0, from v0.4.0, blobfs/postgres v0.6.0, from v0.5.0, go-database
+  v0.12.0 with postgres/v0.7.0, from v0.11.0 and postgres/v0.6.0, go-messaging v0.3.0 with
+  postgres/v0.3.0, from v0.2.0, go-observability v0.4.0 with otlp/v0.4.0, from v0.3.0, and
+  go-storage v0.8.0 with azureblob/v0.7.0, from v0.7.0 and azureblob/v0.6.0. In slab's,
+  go-cli-sdk v0.4.0, from v0.3.0. Their own changes are in their CHANGELOGs.
 - The composition root declares each node's order and membership where it defines it:
   `graph.After` on the node's `Define` line, in place of `s.After` in its constructor, and the
   sweeper and the relay join the `reactors` group with `graph.In`, so `Nodes.Reactors` is a

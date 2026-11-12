@@ -330,11 +330,11 @@ func (s *store) moveDirectory(ctx context.Context, organizationID, id string, ve
 // ensuring the root when the directory is its alias, by blobfs's two-phase
 // write, whose first transaction runs the scope check with the pending
 // row's insert and whose completion's transaction emits FileUploaded, by
-// its OnComplete hook. A put or completion that fails, the event's write
-// among them, abandons the row and commits no event, and the sweep
-// finishes one whose abandon fails too. A completion refused as deleting
-// (a blobfs.DeletingError, which names whose delete it was) deletes the
-// object just put.
+// its WriteFileRequest.OnComplete hook. A put or completion that fails, the
+// event's write among them, abandons the row and commits no event, and the
+// sweep finishes one whose abandon fails too. A completion refused as
+// deleting (a blobfs.DeletingError, which names whose delete it was)
+// deletes the object just put.
 func (s *store) uploadFile(ctx context.Context, organizationID, directoryID, name string, u web.Upload) (Identity, error) {
 	st := s.storage
 	directoryID, err := s.writable(ctx, organizationID, directoryID)
@@ -383,9 +383,9 @@ func (s *store) content(ctx context.Context, organizationID, id string) (Content
 
 // deleteFile removes the file at version by blobfs's two-phase delete, its
 // scope checked in the transaction that begins the delete, which emits
-// FileDeleted, by its OnDelete hook, at the version that left the file
-// deleting. No row of the layer references a file, so no reference is
-// removed before the delete. A file deleting already is the delete's
+// FileDeleted, by its RemoveOptions.OnDelete hook, at the version that left
+// the file deleting. No row of the layer references a file, so no reference
+// is removed before the delete. A file deleting already is the delete's
 // retry, which converges at any version, so a delete is never refused as
 // deleting; the retry emits nothing and finishes the purge, and the purge
 // emits nothing. A refused delete, out of scope or at a stale version,
@@ -495,13 +495,13 @@ func (s *store) seedEntries(ctx context.Context, organizationID, root, parent st
 
 // seedEntry ensures one entry under the entry's id: a directory by
 // seedDirectory, then its entries, and a file by blobfs's retry-safe write,
-// whose completion's transaction emits FileUploaded, by its OnComplete
-// hook, when this call completes the file, as an upload's does; a file
-// found complete, or completed by another writer, emits nothing. An entry
-// the seed does not own is left as it stands and counts nothing: one there
-// by name under another id (its directory's contents are still ensured),
-// one whose id a row carries under another name, and one whose delete is
-// under way.
+// whose completion's transaction emits FileUploaded, by its
+// EnsureFileRequest.OnComplete hook, when this call completes the file, as
+// an upload's does; a file found complete, or completed by another writer,
+// emits nothing. An entry the seed does not own is left as it stands and
+// counts nothing: one there by name under another id (its directory's
+// contents are still ensured), one whose id a row carries under another
+// name, and one whose delete is under way.
 func (s *store) seedEntry(ctx context.Context, organizationID, root, parent string, e seedEntry) (int, error) {
 	st := s.storage
 	isDir, err := e.directory()

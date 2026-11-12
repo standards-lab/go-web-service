@@ -53,12 +53,12 @@ type Seed interface {
 // files name already stand.
 type FileSeed interface {
 	Contribution
-	// Write stores the files rows declare, the state's JSON under Key,
-	// each through blobfs's retry-safe write (Storage.FS.EnsureFile, with
-	// an OnComplete hook where the file's event commits in the
+	// Write stores the files rows declare, the state's JSON under Key, each
+	// through blobfs's retry-safe write (Storage.FS.EnsureFile, with an
+	// EnsureFileRequest.OnComplete hook where the file's event commits in the
 	// completion), and returns how many it stored. A file already there is
-	// left as it is, and every row carries its id, so a rerun finds each
-	// file and a reset writes it again under the same key.
+	// left as it is, and every row carries its id, so a rerun finds each file
+	// and a reset writes it again under the same key.
 	// fixtures holds the bytes a row names by path; rows decode strictly
 	// (SeedRows).
 	Write(ctx context.Context, rows json.RawMessage, fixtures fs.FS) (int, error)

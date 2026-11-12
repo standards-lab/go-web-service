@@ -487,16 +487,17 @@ hook, which runs in the transaction that makes the change true, where the domain
 event. A hook's error rolls that transaction back, so the change and the event commit together
 or not at all.
 
-- `Store.WriteFile`, blobfs's two-phase write, with `OnComplete`: the hook runs in the
-  completion's transaction once the row is available, and never on a refused completion. The
-  document upload runs it.
+- `Store.WriteFile`, blobfs's two-phase write, with `WriteFileRequest.OnComplete`: the hook runs
+  in the completion's transaction once the row is available, and never on a refused completion.
+  The document upload runs it.
 - `Store.EnsureFile`, the two-phase write's retry-safe form under a fixed id, with
-  `OnComplete`: the hook runs as `WriteFile`'s does, and only when this call completes the file;
-  a file found complete, or completed by another writer, runs none. The document seed's files
-  run it.
-- `Store.RemoveFile`, blobfs's two-phase delete, with `OnDelete`: the hook runs in the delete's
-  first transaction once the row is deleting; a retry that finds the row deleting already skips
-  it and finishes the purge, and the purge runs no hook. The document file delete runs it.
+  `EnsureFileRequest.OnComplete`: the hook runs as `WriteFile`'s does, and only when this call
+  completes the file; a file found complete, or completed by another writer, runs none. The
+  document seed's files run it.
+- `Store.RemoveFile`, blobfs's two-phase delete, with `RemoveOptions.OnDelete`: the hook runs in
+  the delete's first transaction once the row is deleting; a retry that finds the row deleting
+  already skips it and finishes the purge, and the purge runs no hook. The document file delete
+  runs it.
 
 The logo needs none: its write and its seed complete through blobfs's own protocols, and its
 event commits in the activation's transaction that follows.

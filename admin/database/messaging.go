@@ -33,7 +33,7 @@ func OnReset(db *sqlate.DB, events *Recorder) func(ctx context.Context, state st
 		_, err := db.Transact(ctx, events.Emit(ctx, func(_ *sqlate.Tx, q *event.Queue) (struct{}, error) {
 			StateReset.Raise(q, state, state)
 			return struct{}{}, nil
-		}))
+		}), nil)
 		return err
 	}
 }

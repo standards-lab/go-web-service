@@ -25,16 +25,17 @@ type FilesReclaimer struct {
 
 // FilesReclaimer returns blobfs's sweep over db and the object store as a
 // reclaimer, each pass reclaiming the pending and deleting file rows older
-// than staleAge (blobfs's StaleOlderThan) and logging its counts to logger.
+// than staleAge (blobfs's SweepOptions.StaleOlderThan) and logging its
+// counts to logger.
 func (s *Storage) FilesReclaimer(db *sqlate.DB, staleAge time.Duration, logger *slog.Logger) *FilesReclaimer {
 	return &FilesReclaimer{storage: s, db: db, staleAge: staleAge, logger: logger}
 }
 
 // Pass runs one pass of blobfs's sweep handling at most budget records
-// (blobfs's Batch), and reports the pass's More and its error, which
-// gathers the refusals the pass met. Every step of the sweep is idempotent
-// and its work is found in the database, so a refused record is left for a
-// later pass, and the sweeper reports the error at warn.
+// (blobfs's SweepOptions.Batch), and reports the pass's More and its error,
+// which gathers the refusals the pass met. Every step of the sweep is
+// idempotent and its work is found in the database, so a refused record is
+// left for a later pass, and the sweeper reports the error at warn.
 //
 // A pass that did work or met refusals is logged at info as "sweep pass"
 // with its counts: the files, directories, and stale rows it removed, and
@@ -44,7 +45,7 @@ func (s *Storage) FilesReclaimer(db *sqlate.DB, staleAge time.Duration, logger *
 // refusal is logged once at warn and its counts once at info.
 func (r *FilesReclaimer) Pass(ctx context.Context, budget int) (bool, error) {
 	res, err := r.storage.FS.Sweep(ctx, r.db, r.storage.Objects,
-		bfdata.Batch(budget), bfdata.StaleOlderThan(r.staleAge))
+		bfdata.SweepOptions{Batch: budget, StaleOlderThan: r.staleAge})
 	if err != nil || res.Files+res.Directories+res.Stale > 0 {
 		r.logger.InfoContext(ctx, "sweep pass",
 			"files", res.Files, "directories", res.Directories, "stale", res.Stale, "more", res.More)

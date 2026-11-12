@@ -58,7 +58,7 @@ func (n *nudges) Nudge() { n.seen = append(n.seen, n.rec.Ops()) }
 // serviceNudged is serviceOver with the sweeper the service nudges.
 func serviceNudged(t *testing.T, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *storagetest.Fake, *nudges) {
 	t.Helper()
-	return serviceOn(t, nil, responses...)
+	return serviceOn(t, bfdata.Options{}, responses...)
 }
 
 // serviceOnPostgres is serviceNudged with blobfs on the Postgres engine the
@@ -66,20 +66,20 @@ func serviceNudged(t *testing.T, responses ...sqltest.Response) (*document.Servi
 // answers, where the baseline's is a no-op that runs none.
 func serviceOnPostgres(t *testing.T, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *storagetest.Fake, *nudges) {
 	t.Helper()
-	return serviceOn(t, []bfdata.Option{bfdata.WithEngine(blobfspg.Engine)}, responses...)
+	return serviceOn(t, bfdata.Options{Engine: blobfspg.Engine}, responses...)
 }
 
 // serviceOn is serviceNudged with blobfs built with opts.
-func serviceOn(t *testing.T, opts []bfdata.Option, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *storagetest.Fake, *nudges) {
+func serviceOn(t *testing.T, opts bfdata.Options, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *storagetest.Fake, *nudges) {
 	t.Helper()
 	dialect := sqltest.ReturningDialect{}
 	pool, rec := sqltest.Open(t, responses...)
 	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
-	fs, err := bfdata.New(catalog, dialect, opts...)
+	fs, err := bfdata.New(catalog, dialect, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fake := storagetest.NewFake()
+	fake := storagetest.NewFake(storagetest.Options{})
 	cfg := storage.Config{Container: "test"}
 	if err := cfg.Finalize(""); err != nil {
 		t.Fatal(err)
@@ -232,7 +232,7 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 // recorded: the layer's store registers itself.
 func TestSeed_VerifiesTheRegisteredStores(t *testing.T) {
 	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
-	fs, err := bfdata.New(catalog, sqltest.Dialect{})
+	fs, err := bfdata.New(catalog, sqltest.Dialect{}, bfdata.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

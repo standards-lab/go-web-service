@@ -39,7 +39,7 @@ func middleware(s *graph.Scope, n *Nodes) []web.Middleware {
 	s.Use(n.Telemetry)
 	return []web.Middleware{
 		observability.NewMiddleware(observabilityConfig(cfg)),
-		mw.RequestID(mw.WithIDSource(observability.RequestIDSource)),
+		mw.RequestID(mw.RequestIDOptions{Source: observability.RequestIDSource}),
 		mw.RequestLogger(logger),
 		mw.Recoverer(logger),
 		mw.Maybe(ratelimit.New(cfg.RateLimit), mw.NotProbe),

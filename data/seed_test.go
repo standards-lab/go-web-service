@@ -117,7 +117,7 @@ var widgets = fstest.MapFS{
 // is built and are still verified.
 func TestSeeder_VerifiesEveryRegisteredStore(t *testing.T) {
 	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
-	fs, err := bfdata.New(catalog, sqltest.Dialect{})
+	fs, err := bfdata.New(catalog, sqltest.Dialect{}, bfdata.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,7 +439,7 @@ func TestLock_TakesTheNamedLockInsideTheTransaction(t *testing.T) {
 	db, rec := newDatabase(t, sqltest.Response{Affected: 0})
 	_, err := db.Transact(context.Background(), func(tx *sqlate.Tx) (struct{}, error) {
 		return struct{}{}, db.Lock(context.Background(), tx, data.LockOrganizationTree)
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

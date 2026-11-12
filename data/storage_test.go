@@ -40,7 +40,7 @@ func objects(t *testing.T, fake *storagetest.Fake) *data.Objects {
 	}
 	t.Cleanup(func() { _ = store.Shutdown(context.Background()) })
 	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
-	fs, err := bfdata.New(catalog, sqltest.Dialect{})
+	fs, err := bfdata.New(catalog, sqltest.Dialect{}, bfdata.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func objects(t *testing.T, fake *storagetest.Fake) *data.Objects {
 }
 
 func TestObjects_PutEchoesTheDeclaredType(t *testing.T) {
-	o := objects(t, storagetest.NewFake())
+	o := objects(t, storagetest.NewFake(storagetest.Options{}))
 
 	obj, err := o.PutObject(context.Background(), "1/logo.png", strings.NewReader("png"), "image/png", 3)
 	if err != nil {
@@ -71,7 +71,7 @@ func TestObjects_PutEchoesTheDeclaredType(t *testing.T) {
 // The delete is idempotent: an object deleted twice, or never stored, is
 // success, as blobfs's ObjectDeleter requires.
 func TestObjects_DeleteObjectIsIdempotent(t *testing.T) {
-	o := objects(t, storagetest.NewFake())
+	o := objects(t, storagetest.NewFake(storagetest.Options{}))
 	ctx := context.Background()
 
 	if _, err := o.PutObject(ctx, "1/q3.txt", strings.NewReader("q3"), "text/plain", 2); err != nil {
@@ -94,7 +94,7 @@ func TestObjects_DeleteObjectIsIdempotent(t *testing.T) {
 // storage.ErrContainerNotFound, never an absent object, so a delete is not
 // read as done, and Status answers each 503.
 func TestObjects_AMissingContainerIsRefused(t *testing.T) {
-	fake := storagetest.NewFake()
+	fake := storagetest.NewFake(storagetest.Options{})
 	o := objects(t, fake)
 	ctx := context.Background()
 	if _, err := o.PutObject(ctx, "1/logo.png", strings.NewReader("png"), "image/png", 3); err != nil {
@@ -124,7 +124,7 @@ func TestObjects_AMissingContainerIsRefused(t *testing.T) {
 // A put that fails because the upload's body did is ErrBodyRead, a 400,
 // never the 503 a lost database connection's io.ErrUnexpectedEOF is.
 func TestObjects_ABodyCutShortIsTheRequests(t *testing.T) {
-	o := objects(t, storagetest.NewFake())
+	o := objects(t, storagetest.NewFake(storagetest.Options{}))
 
 	body := io.MultiReader(strings.NewReader("pn"), iotest.ErrReader(io.ErrUnexpectedEOF))
 	_, err := o.PutObject(context.Background(), "1/logo.png", body, "image/png", 3)
@@ -145,7 +145,7 @@ func TestObjects_ABodyReadTimeoutIsTheClients(t *testing.T) {
 		"context deadline": context.DeadlineExceeded,
 	} {
 		t.Run(name, func(t *testing.T) {
-			fake := storagetest.NewFake()
+			fake := storagetest.NewFake(storagetest.Options{})
 			o := objects(t, fake)
 			fake.SetDown(true)
 
@@ -164,7 +164,7 @@ func TestObjects_ABodyReadTimeoutIsTheClients(t *testing.T) {
 // A body cut short is the request's even when the store fails too: the
 // client's failure takes precedence over the provider's report of it.
 func TestObjects_ABodyCutShortOutranksTheStoresError(t *testing.T) {
-	fake := storagetest.NewFake()
+	fake := storagetest.NewFake(storagetest.Options{})
 	o := objects(t, fake)
 	fake.SetDown(true)
 
@@ -176,7 +176,7 @@ func TestObjects_ABodyCutShortOutranksTheStoresError(t *testing.T) {
 }
 
 func TestObjects_ValidateKeyIsTheStoresRule(t *testing.T) {
-	o := objects(t, storagetest.NewFake())
+	o := objects(t, storagetest.NewFake(storagetest.Options{}))
 
 	if err := o.ValidateKey("1/logo.png"); err != nil {
 		t.Errorf("ValidateKey(valid) = %v", err)
@@ -202,11 +202,11 @@ func protocols(t *testing.T, responses ...sqltest.Response) (*data.Storage, *sql
 	pool, rec := sqltest.Open(t, responses...)
 	dialect := sqltest.ReturningDialect{}
 	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
-	fs, err := bfdata.New(catalog, dialect)
+	fs, err := bfdata.New(catalog, dialect, bfdata.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	fake := storagetest.NewFake()
+	fake := storagetest.NewFake(storagetest.Options{})
 	cfg := storage.Config{Container: "test"}
 	if err := cfg.Finalize(""); err != nil {
 		t.Fatal(err)

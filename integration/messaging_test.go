@@ -43,12 +43,12 @@ func emitProbe(t *testing.T, db *sqlate.DB) string {
 		t.Fatal(err)
 	}
 	id := fmt.Sprintf("probe-%d", time.Now().UnixNano())
-	rec := event.NewRecorder(ob.Sink(), "web-service", event.IDs(func() string { return id }))
+	rec := event.NewRecorder(ob.Sink(), "web-service", event.Options{IDs: func() string { return id }})
 	ctx := context.Background()
 	_, err = sqlate.Transact(ctx, db, rec.Emit(ctx, func(_ *sqlate.Tx, q *event.Queue) (struct{}, error) {
 		probe.Raise(q, "probe", probeData{Note: t.Name()})
 		return struct{}{}, nil
-	}))
+	}), nil)
 	if err != nil {
 		t.Fatalf("emit the probe event: %v", err)
 	}

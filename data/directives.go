@@ -75,9 +75,9 @@ func Read[T any](ctx context.Context, s sqlate.Session, p query.Projection[T], q
 func ReadListing[T any](ctx context.Context, s sqlate.Session, l bfdata.Listing[T], id string, q web.Query) (query.Collection[T], error) {
 	d := Directives(q)
 	if q.Cursor != "" {
-		return l.Continue(ctx, s, id, d, query.Cursor(q.Cursor), q.Size)
+		return l.Continue(ctx, s, id, d, bfdata.CursorPage{After: query.Cursor(q.Cursor), Size: q.Size}, bfdata.ListOptions{})
 	}
-	return l.List(ctx, s, id, d, query.Page{Number: q.Page, Size: q.Size})
+	return l.List(ctx, s, id, d, query.Page{Number: q.Page, Size: q.Size}, bfdata.ListOptions{})
 }
 
 // Paging reports a collection read's outcome in the envelope's terms: the

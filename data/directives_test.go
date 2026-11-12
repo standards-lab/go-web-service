@@ -94,13 +94,13 @@ type fakeListing struct {
 	err    error
 }
 
-func (f *fakeListing) List(_ context.Context, _ sqlate.Session, id string, d query.Directives, page query.Page, _ ...bfdata.ListOption) (query.Collection[string], error) {
+func (f *fakeListing) List(_ context.Context, _ sqlate.Session, id string, d query.Directives, page query.Page, _ bfdata.ListOptions) (query.Collection[string], error) {
 	f.call, f.id, f.d, f.page = "list", id, d, page
 	return query.Collection[string]{Items: []string{"a"}, Total: 1}, f.err
 }
 
-func (f *fakeListing) Continue(_ context.Context, _ sqlate.Session, id string, d query.Directives, after query.Cursor, size int, _ ...bfdata.ListOption) (query.Collection[string], error) {
-	f.call, f.id, f.d, f.cursor, f.size = "continue", id, d, after, size
+func (f *fakeListing) Continue(_ context.Context, _ sqlate.Session, id string, d query.Directives, page bfdata.CursorPage, _ bfdata.ListOptions) (query.Collection[string], error) {
+	f.call, f.id, f.d, f.cursor, f.size = "continue", id, d, page.After, page.Size
 	return query.Collection[string]{Items: []string{"b"}, Total: query.NoTotal, More: true, Next: "c3"}, f.err
 }
 

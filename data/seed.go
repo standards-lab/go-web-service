@@ -180,7 +180,7 @@ func (s *Seeder) Seed(ctx context.Context, name string) (admin.Seeded, error) {
 			}
 		}
 		return n, nil
-	})
+	}, nil)
 	if err != nil {
 		return n, err
 	}

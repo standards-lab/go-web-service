@@ -334,7 +334,7 @@ func TestSweepClaimAcrossReplicas(t *testing.T) {
 	policy := sweep.Policy{Interval: interval, Budget: 1}
 	start := func(regs ...sweep.Registration) *sweep.Sweeper {
 		t.Helper()
-		sw, err := sweep.New(integration.Database(t), regs, 10*time.Second, slog.New(slog.DiscardHandler))
+		sw, err := sweep.New(integration.Database(t), regs, 10*time.Second, slog.New(slog.DiscardHandler), sweep.Options{})
 		if err != nil {
 			t.Fatalf("sweep.New: %v", err)
 		}

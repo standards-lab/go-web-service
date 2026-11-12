@@ -44,7 +44,7 @@ func (s *Storage) FilesReclaimer(db *sqlate.DB, staleAge time.Duration, logger *
 // refusal is logged once at warn and its counts once at info.
 func (r *FilesReclaimer) Pass(ctx context.Context, budget int) (bool, error) {
 	res, err := r.storage.FS.Sweep(ctx, r.db, r.storage.Objects,
-		bfdata.Batch(budget), bfdata.StaleOlderThan(r.staleAge))
+		bfdata.SweepOptions{Batch: budget, StaleOlderThan: r.staleAge})
 	if err != nil || res.Files+res.Directories+res.Stale > 0 {
 		r.logger.InfoContext(ctx, "sweep pass",
 			"files", res.Files, "directories", res.Directories, "stale", res.Stale, "more", res.More)

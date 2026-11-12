@@ -57,11 +57,11 @@ func serviceLogging(t *testing.T, logger *slog.Logger, dialect sqlate.Dialect, r
 	t.Helper()
 	pool, rec := sqltest.Open(t, responses...)
 	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
-	fs, err := bfdata.New(catalog, dialect)
+	fs, err := bfdata.New(catalog, dialect, bfdata.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	fake := storagetest.NewFake()
+	fake := storagetest.NewFake(storagetest.Options{})
 	cfg := storage.Config{Container: "test"}
 	if err := cfg.Finalize(""); err != nil {
 		t.Fatal(err)
@@ -104,7 +104,7 @@ func seederOver(t *testing.T, responses ...sqltest.Response) (*data.Seeder, *dat
 	t.Helper()
 	pool, rec := sqltest.Open(t, responses...)
 	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
-	fs, err := bfdata.New(catalog, sqltest.Dialect{})
+	fs, err := bfdata.New(catalog, sqltest.Dialect{}, bfdata.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func seederOver(t *testing.T, responses ...sqltest.Response) (*data.Seeder, *dat
 // from blobfs's.
 func blobfsStatements(t *testing.T) []string {
 	t.Helper()
-	fs, err := bfdata.New(query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns()), sqltest.Dialect{})
+	fs, err := bfdata.New(query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns()), sqltest.Dialect{}, bfdata.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

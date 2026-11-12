@@ -25,8 +25,10 @@ var Time = time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
 // Stamped is the recorder the composition root injects, over sink, with
 // the id and the time it stamps fixed to ID and Time.
 func Stamped(sink event.Sink[*sqlate.Tx]) *event.Recorder[*sqlate.Tx] {
-	return event.NewRecorder(sink, Source,
-		event.IDs(func() string { return ID }), event.Clock(func() time.Time { return Time }))
+	return event.NewRecorder(sink, Source, event.Options{
+		IDs:   func() string { return ID },
+		Clock: func() time.Time { return Time },
+	})
 }
 
 // IsWrite reports whether c is the outbox's insert of an event.

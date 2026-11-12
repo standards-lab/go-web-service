@@ -135,7 +135,7 @@ func (n *Nodes) newSweeper(s *graph.Scope) (*sweep.Sweeper, error) {
 		return nil, err
 	}
 	sw, err := sweep.New(db, regs, cfg.ShutdownTimeout.Duration(), logger,
-		sweep.Gated(s.Use(n.Gate)), sweep.OnPass(s.Use(n.SweepMetrics)))
+		sweep.Options{Gate: s.Use(n.Gate), OnPass: s.Use(n.SweepMetrics)})
 	if err != nil {
 		return nil, err
 	}
@@ -172,8 +172,10 @@ func registrations(built map[string]sweep.Reclaimer, policy sweep.Policy) ([]swe
 // participant; the broker beneath it and the reactors it builds are.
 func (n *Nodes) newRuntime(s *graph.Scope) (*messaging.Runtime, error) {
 	cfg := s.Use(n.Config)
-	return messaging.New(cfg.Messaging, s.Use(n.Broker), msgpg.Outbox(), msgpg.Inbox(),
-		cfg.ShutdownTimeout.Duration(), s.Use(n.Logger), messaging.Gated(s.Use(n.Gate)))
+	return messaging.Setup{
+		Config: cfg.Messaging, Broker: s.Use(n.Broker), Outbox: msgpg.Outbox(), Inbox: msgpg.Inbox(),
+		Shutdown: cfg.ShutdownTimeout.Duration(), Logger: s.Use(n.Logger), Gate: s.Use(n.Gate),
+	}.Build()
 }
 
 // newRelay constructs the relay over the sql node's session. Its value is a

@@ -114,7 +114,7 @@ func (n *Nodes) newSQL(s *graph.Scope) (*data.Database, error) {
 // name.
 func (n *Nodes) newFiles(s *graph.Scope) (*data.Storage, error) {
 	sql := s.Use(n.SQL)
-	fs, err := bfdata.New(sql.Catalog, sql.Dialect(), bfdata.WithEngine(blobfspg.Engine))
+	fs, err := bfdata.New(sql.Catalog, sql.Dialect(), bfdata.Options{Engine: blobfspg.Engine})
 	if err != nil {
 		return nil, fmt.Errorf("blobfs: %w", err)
 	}

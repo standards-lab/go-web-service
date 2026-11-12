@@ -49,18 +49,22 @@ func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload
 	st := s.storage
 	// On the pool, Ensure finds the directory a concurrent first upload
 	// created between its lookup and its insert.
-	dir, _, err := st.FS.Directories.Ensure(ctx, s.db, blobfs.RootID, imagesDirectory)
+	dir, _, err := st.FS.Directories.Ensure(ctx, s.db, blobfs.RootID, imagesDirectory, bfdata.CreateOptions{})
 	if err != nil {
 		return LogoIdentity{}, err
 	}
 	id := blobfs.NewID()
-	file, err := st.FS.WriteFile(ctx, s.db.DB, st.Objects, u.Body, u.Size, func(tx *sqlate.Tx) (blobfs.File, error) {
-		// A nonexistent organization is the missing row, before the
-		// activation's foreign key would refuse it as a conflict.
-		if err := s.exists(ctx, tx, organizationID); err != nil {
-			return blobfs.File{}, err
-		}
-		return st.FS.Files.Create(ctx, tx, st.Objects, dir.ID, id+ext, u.ContentType, bfdata.WithID(id))
+	file, err := st.FS.WriteFile(ctx, bfdata.WriteFileRequest{
+		DB: s.db.DB, Objects: st.Objects, Body: u.Body, Size: u.Size,
+		Begin: func(tx *sqlate.Tx) (blobfs.File, error) {
+			// A nonexistent organization is the missing row, before the
+			// activation's foreign key would refuse it as a conflict.
+			if err := s.exists(ctx, tx, organizationID); err != nil {
+				return blobfs.File{}, err
+			}
+			spec := bfdata.FileSpec{DirectoryID: dir.ID, Name: id + ext, ContentType: u.ContentType}
+			return st.FS.Files.Create(ctx, tx, st.Objects, spec, bfdata.CreateOptions{ID: id})
+		},
 	})
 	if err != nil {
 		return LogoIdentity{}, err
@@ -69,7 +73,7 @@ func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload
 	replaced, err := s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (blobfs.File, error) {
 		// A hold refused as deleting is blobfs's blobfs.DeletingError,
 		// which names the file's own delete apart from its directory's.
-		if err := st.FS.Files.Hold(ctx, tx, file.ID); err != nil {
+		if err := st.FS.Files.Hold(ctx, tx, file.ID, bfdata.VersionOptions{}); err != nil {
 			return blobfs.File{}, err
 		}
 		current, err := s.activeLogo(ctx, tx, organizationID)
@@ -86,10 +90,10 @@ func (s *store) putLogo(ctx context.Context, organizationID string, u web.Upload
 			return blobfs.File{}, err
 		}
 		return current, raiseUploaded(q, organizationID, file)
-	}))
+	}), nil)
 	if err != nil {
 		// The activation rolled back, so no image references the new file.
-		return LogoIdentity{}, abandoned(err, st.FS.RemoveFileID(cleanup, s.db.DB, st.Objects, file.ID))
+		return LogoIdentity{}, abandoned(err, st.FS.RemoveFileID(cleanup, s.db.DB, st.Objects, file.ID, bfdata.VersionOptions{}))
 	}
 	if replaced.ID != "" {
 		s.purge(cleanup, organizationID, replaced)
@@ -128,7 +132,7 @@ func (s *store) deleteLogo(ctx context.Context, organizationID string) error {
 		}
 		LogoDeleted.Raise(q, deleting.ID, LogoDeletedData{FileID: deleting.ID, OrganizationID: organizationID, Version: deleting.Version})
 		return deleting, nil
-	}))
+	}), nil)
 	if err != nil {
 		return err
 	}
@@ -156,7 +160,7 @@ func (s *store) release(ctx context.Context, tx *sqlate.Tx, fileID string) (blob
 	if err := s.detach(ctx, tx, fileID); err != nil {
 		return blobfs.File{}, err
 	}
-	return s.storage.FS.Files.Delete(ctx, tx, fileID)
+	return s.storage.FS.Files.Delete(ctx, tx, fileID, bfdata.VersionOptions{})
 }
 
 // logoSeed is the layer's seed contribution, a file seed, to the data
@@ -230,12 +234,17 @@ func (s *store) seedLogo(ctx context.Context, l logoSeedRow, fixtures fs.FS) (bo
 		return false, err
 	}
 	st := s.storage
-	dir, _, err := st.FS.Directories.Ensure(ctx, s.db, blobfs.RootID, imagesDirectory)
+	dir, _, err := st.FS.Directories.Ensure(ctx, s.db, blobfs.RootID, imagesDirectory, bfdata.CreateOptions{})
 	if err != nil {
 		return false, err
 	}
-	file, stored, err := st.FS.EnsureFile(ctx, s.db.DB, st.Objects, l.ID, bytes.NewReader(body), int64(len(body)), func(tx *sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
-		return st.FS.Files.Ensure(ctx, tx, st.Objects, dir.ID, l.ID+ext, contentType, bfdata.WithID(l.ID))
+	file, stored, err := st.FS.EnsureFile(ctx, bfdata.EnsureFileRequest{
+		DB: s.db.DB, Objects: st.Objects, ID: l.ID,
+		Body: bytes.NewReader(body), Size: int64(len(body)),
+		Begin: func(tx *sqlate.Tx) (blobfs.File, bfdata.WriteOutcome, error) {
+			spec := bfdata.FileSpec{DirectoryID: dir.ID, Name: l.ID + ext, ContentType: contentType}
+			return st.FS.Files.Ensure(ctx, tx, st.Objects, spec, bfdata.CreateOptions{ID: l.ID})
+		},
 	})
 	switch {
 	case errors.Is(err, blobfs.ErrDeleting), errors.Is(err, blobfs.ErrIDTaken), errors.Is(err, blobfs.ErrNameTaken):
@@ -247,7 +256,7 @@ func (s *store) seedLogo(ctx context.Context, l logoSeedRow, fixtures fs.FS) (bo
 	// commits, the seeded file when this run attached it.
 	var attached bool
 	active, err := s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (string, error) {
-		if err := st.FS.Files.Hold(ctx, tx, file.ID); err != nil {
+		if err := st.FS.Files.Hold(ctx, tx, file.ID, bfdata.VersionOptions{}); err != nil {
 			return "", err
 		}
 		current, err := s.activeLogo(ctx, tx, org.ID)
@@ -262,7 +271,7 @@ func (s *store) seedLogo(ctx context.Context, l logoSeedRow, fixtures fs.FS) (bo
 			return "", err
 		}
 		return file.ID, raiseUploaded(q, org.ID, file)
-	}))
+	}), nil)
 	var ce *sqlate.ConstraintError
 	switch {
 	case err == nil && active == file.ID:
@@ -299,7 +308,7 @@ func (s *store) seedLogo(ctx context.Context, l logoSeedRow, fixtures fs.FS) (bo
 	// The activation rolled back, or another logo became active and is
 	// left alone: no image references the file this run stored, so it is
 	// retired, at the version it completed at.
-	return false, abandoned(err, st.FS.RemoveFileID(ctx, s.db.DB, st.Objects, file.ID, bfdata.AtVersion(file.Version)))
+	return false, abandoned(err, st.FS.RemoveFileID(ctx, s.db.DB, st.Objects, file.ID, bfdata.VersionOptions{Version: file.Version}))
 }
 
 // abandoned is the error of a write refused with err whose stored file was

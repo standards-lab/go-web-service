@@ -107,7 +107,7 @@ func (s *store) create(ctx context.Context, c CreateOrganization) (Identity, err
 			return Identity{}, err
 		}
 		return id, s.raiseStored(ctx, tx, q, OrganizationCreated, id.ID)
-	}))
+	}), nil)
 }
 
 // edit runs the guarded update and emits OrganizationEdited in one
@@ -119,7 +119,7 @@ func (s *store) edit(ctx context.Context, id string, version int64, e EditOrgani
 			return 0, err
 		}
 		return v, s.raiseStored(ctx, tx, q, OrganizationEdited, id)
-	}))
+	}), nil)
 	return Identity{ID: id, Version: v}, err
 }
 
@@ -148,7 +148,7 @@ func (s *store) transfer(ctx context.Context, id string, version int64, t Transf
 			return 0, err
 		}
 		return v, s.raiseStored(ctx, tx, q, OrganizationTransferred, id)
-	}))
+	}), nil)
 	return Identity{ID: id, Version: v}, err
 }
 
@@ -162,7 +162,7 @@ func (s *store) delete(ctx context.Context, id string, version int64) error {
 		}
 		OrganizationDeleted.Raise(q, id, OrganizationDeletedData{OrganizationID: id, Version: version})
 		return struct{}{}, nil
-	}))
+	}), nil)
 	return err
 }
 

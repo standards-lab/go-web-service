@@ -42,6 +42,15 @@ func TestReadFlags_SendsOnlyTheFlagsGiven(t *testing.T) {
 	}
 }
 
+// A repeated --filter sends each filter, in the order given.
+func TestReadFlags_KeepsRepeatedFiltersInOrder(t *testing.T) {
+	got, err := readQuery(t, "--filter", "name=b", "--size", "5", "--filter", "code[like]=%a%")
+	want := [][2]string{{"size", "5"}, {"name", "b"}, {"code[like]", "%a%"}}
+	if err != nil || fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("query = %v, %v; want %v", got, err, want)
+	}
+}
+
 func TestReadFlags_RefusesAFilterWithoutAName(t *testing.T) {
 	if _, err := readQuery(t, "--filter", "=x"); err == nil {
 		t.Error("a nameless filter was accepted")

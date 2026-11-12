@@ -46,7 +46,7 @@ func send(t *testing.T, h http.Handler, method, path string) (int, map[string]an
 }
 
 func TestDiagnostics_ReadsTheStore(t *testing.T) {
-	h := module(t, storagetest.NewFake())
+	h := module(t, storagetest.NewFake(storagetest.Options{}))
 
 	code, d := send(t, h, "GET", "/storage/diagnostics")
 	if code != 200 || d["ready"] != true || d["container"] != "go-web-service" || d["max_key_length"] != float64(storagetest.DefaultMaxKeyLength) {
@@ -57,7 +57,7 @@ func TestDiagnostics_ReadsTheStore(t *testing.T) {
 // A container removed out from under the running service reads not ready,
 // and the container operation restores it.
 func TestContainer_RestoresARemovedContainer(t *testing.T) {
-	fake := storagetest.NewFake()
+	fake := storagetest.NewFake(storagetest.Options{})
 	h := module(t, fake)
 	fake.DropContainer()
 
@@ -71,7 +71,7 @@ func TestContainer_RestoresARemovedContainer(t *testing.T) {
 }
 
 func TestContainer_AnUnreachableStoreIs503WithTheReason(t *testing.T) {
-	fake := storagetest.NewFake()
+	fake := storagetest.NewFake(storagetest.Options{})
 	h := module(t, fake)
 	fake.SetDown(true)
 

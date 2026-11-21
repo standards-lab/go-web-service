@@ -148,18 +148,18 @@ nothing but the repository root and the color setting.
   duplicate code, and a transfer cycle — one request each, every response's trace pointer
   located in Grafana. Resets to the seeded tree first; none of the conditions write a row, so a
   run never drifts the seed data.
-- **storage** — the service's stored files end to end. The scenario reads the two migration sets
-  (`blobfs` and `app`) from the schema status and seeds the `default` state additively. It reads
-  acme's logo, revalidates it by its ETag (304), replaces it with another seeded fixture read
-  back under a new ETag, and deletes it. It reads acme's seeded document tree, then walks its
-  top-level directories by cursor, one per page. It shows the scoped refusals: a delete with no
-  `If-Match` (428) and with a stale one (412), a taken name (409 with its curated detail), and
-  acme's directory id asked for under another organization (404). It deletes a run-named branch
-  recursively, shows its 202 and its `deleting` read, then waits out the sweep to 404 as
-  `dirs delete --wait` does. It ends with a reset to `default` and the counts the reset seeded.
-  The additive seed writes back a logo an interrupted run deleted, and the branch's name is
-  unique to the run, so the scenario runs twice in a row. Needs postgres, azurite, and the
-  service, not Grafana.
+- **storage** — the service's stored files end to end. The scenario reads the `blobfs` and `app`
+  migration sets, two of the schema's three, from the schema status and seeds the `default` state
+  additively. It reads acme's logo, revalidates it by its ETag (304), replaces it with another
+  seeded fixture read back under a new ETag, and deletes it. It reads acme's seeded document tree,
+  then walks its top-level directories by cursor, one per page. It shows the scoped refusals: a
+  delete with no `If-Match` (428) and with a stale one (412), a taken name (409 with its curated
+  detail), and acme's directory id asked for under another organization (404). It deletes a
+  run-named branch recursively, shows its 202 and its `deleting` read, then waits out the sweep to
+  404 as `dirs delete --wait` does. It ends with a reset to `default` and the counts the reset
+  seeded. The additive seed writes back a logo an interrupted run deleted, and the branch's name is
+  unique to the run, so the scenario runs twice in a row. Needs postgres, azurite, and the service,
+  not Grafana.
 - **events** — one command for each event the service publishes, meant to run while
   `mise run slab -- events watch` runs in another terminal, so the watcher prints each event's
   payload; each step names the events it makes the watcher print. It creates a run-named
@@ -251,14 +251,14 @@ that are its own.
   work goes through the gitignored `go.work`.
 - **The service's layout.** slab mirrors the service's layout. `internal/app` is the composition
   root, one file per layer, and the only package that constructs a dependency or names a mount.
-  `cmd/slab` holds process entry and nothing else. `domain/<name>` is the client-side counterpart
-  of a service domain package, and `admin/<name>` of an admin service; the two trees are
-  siblings, never nested, as in the service. Each package holds the same four files: `doc.go`,
-  `entities.go`, `client.go`, and `commands.go`. An admin package's `entities.go` restates
-  request bodies only, because its responses print as raw JSON and nothing decodes them. `events`
-  watches the stream the service publishes to rather than calling an endpoint, so it is neither:
-  a top-level family over the broker node, as the domain and admin families are over the client
-  node.
+  `cmd/slab` holds process entry and nothing else. `domain/<name>` is the client-side counterpart of
+  a service domain package, and `admin/<name>` of an admin service; the two trees are siblings,
+  never nested, as in the service. Each package holds the same four files: `doc.go`, `entities.go`,
+  `client.go`, and `commands.go`, except `admin/storage`, whose commands take no body and so has no
+  `entities.go`. An admin package's `entities.go` restates request bodies only, because its
+  responses print as raw JSON and nothing decodes them. `events` watches the stream the service
+  publishes to rather than calling an endpoint, so it is neither: a top-level family over the broker
+  node, as the domain and admin families are over the client node.
 - **Shared packages.** `output` renders every direct command's result, `input` resolves every
   request body, `style` holds all ANSI styling, and `httpx` holds everything about HTTP that is
   not specific to the service.

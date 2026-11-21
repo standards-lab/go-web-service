@@ -157,7 +157,7 @@ a failure confined to local development and scheduled to disappear once `v1.depl
 containerizes the service and its own runtime captures stdout.
 
 `log.format` is `json`, so the `json_parser` operator reads every line's structured fields —
-`trace_id` and `span_id` included, once the service is instrumented enough to have one live.
+`trace_id` and `span_id` included.
 
 ### Correlation in Grafana
 
@@ -199,12 +199,11 @@ time.
 
 `dashboards/observability-stack.json` is the first dashboard, provisioned read-only
 (`allowUiUpdates: false` in `dashboards/dashboards.yaml`, so the file stays the source of truth).
-Its Collector and Pipelines rows read the collector's own self-telemetry, the only live signal
-before the service is instrumented; its Backends row queries the service's own logs and traces and
-stays empty until then. Grafana reads the provider file once at startup but re-reads the JSON files
-it points at every `updateIntervalSeconds` (30), so an edited dashboard takes effect without a
-restart. The provider's path is the provisioned `dashboards/` directory, which also holds the
-provider file; Grafana treats only `*.json` there as dashboards, so the provider file is not
+Its Collector and Pipelines rows read the collector's own self-telemetry; its Backends row queries
+the service's own logs and traces. Grafana reads the provider file once at startup but re-reads the
+JSON files it points at every `updateIntervalSeconds` (30), so an edited dashboard takes effect
+without a restart. The provider's path is the provisioned `dashboards/` directory, which also holds
+the provider file; Grafana treats only `*.json` there as dashboards, so the provider file is not
 mistaken for one.
 
 ### Ports
@@ -226,12 +225,12 @@ port, 4319, sits beside the OTLP pair so the collector's three ingest ports read
 ### File layout
 
 ```
-compose.yml                                the project name and the included group files
-compose/postgres.yml, azurite.yml          the database and object store, no profile
-compose/observability.yml                  the five observability services, the profile gate
-compose/<service>/Dockerfile               each service's image pin, configuration, and health check
-compose/otel-collector/otel-collector.yaml receivers, processors, exporters, pipelines
-compose/loki/, tempo/, mimir/              each backend's own single-binary, local-storage config
-compose/grafana/provisioning/datasources/… the three datasources and their cross-links
-compose/grafana/provisioning/dashboards/…  the dashboard provider and observability-stack.json
+compose.yml                                 the project name and the included group files
+compose/postgres.yml, azurite.yml, nats.yml the database, object store, and broker, no profile
+compose/observability.yml                   the five observability services, the profile gate
+compose/<service>/Dockerfile                each service's image pin, configuration, and health check
+compose/otel-collector/otel-collector.yaml  receivers, processors, exporters, pipelines
+compose/loki/, tempo/, mimir/               each backend's own single-binary, local-storage config
+compose/grafana/provisioning/datasources/…  the three datasources and their cross-links
+compose/grafana/provisioning/dashboards/…   the dashboard provider and observability-stack.json
 ```

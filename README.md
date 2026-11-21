@@ -34,11 +34,11 @@ connect next, together in one layer. The schema
 starts after them: it applies any pending migration, checks every statement against the schema,
 and seeds the configured state (the `local` overlay names `default`). The [sweep](docs/sweep.md) and
 the [messaging](docs/messaging.md) relay start after the schema, and the server starts last, alone in
-the top layer. The drain runs in reverse: the server drains first, so in-flight requests
-complete before what they run on closes; the relay then makes its last pass, publishing what
-those requests committed, before the broker and the database close; and telemetry flushes
-last. The service then logs `server ready` on `localhost:8080` (the `local` overlay binds
-loopback and runs debug logging). From a second shell:
+the top layer. Once started, the service logs `server ready` on `localhost:8080` (the `local`
+overlay binds loopback and runs debug logging). The drain runs in reverse: the server drains
+first, so in-flight requests complete before what they run on closes; the relay then makes its
+last pass, publishing what those requests committed, before the broker and the database close;
+and telemetry flushes last. From a second shell:
 
 ```sh
 curl localhost:8080/healthz   # 200 {"status":"ok"}

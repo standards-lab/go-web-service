@@ -43,10 +43,15 @@ carry the design direction of planned layers:
 - **Tasks** (built): [docs/tasks.md](../docs/tasks.md).
 - **Data composition and CQRS** (planned): [data-layer.md](data-layer.md).
 - **Integration tier protocol helpers** (planned): [integration-tier.md](integration-tier.md).
-- **Auth** (planned): the coordinator's `standards-lab/roadmap/v1.auth.toml` and
-  `standards-lab/context/auth-strategy.md`.
-- **The management listener** (planned): the coordinator's
+- **Auth** (planned): authentication over OAuth 2.0 and OIDC, and an authorization model
+  evaluated as SQL against the service's own grant data; the coordinator's
+  `standards-lab/roadmap/v1.auth.toml` and `standards-lab/context/auth-strategy.md`.
+- **The management listener** (planned): the admin mount on its own listener, a composition-root
+  reshape here and in the template; the coordinator's
   `standards-lab/roadmap/v1.admin-listener.toml`.
-- **AI** (planned): the coordinator's `standards-lab/roadmap/v1.ai.toml`.
-- **Embedded client** (planned): the coordinator's `standards-lab/roadmap/v1.client.toml`.
-- **Deployment** (planned): the coordinator's `standards-lab/roadmap/v1.deployment.toml`.
+- **AI** (planned): the go-ai capability demonstrated in a documented layer; the coordinator's
+  `standards-lab/roadmap/v1.ai.toml`.
+- **Embedded client** (planned): a web client embedded in and served by the service binary; the
+  coordinator's `standards-lab/roadmap/v1.client.toml`.
+- **Deployment** (planned): deployment infrastructure in its own repository, targeting this
+  service; the coordinator's `standards-lab/roadmap/v1.deployment.toml`.

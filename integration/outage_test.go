@@ -13,11 +13,7 @@ import (
 	"github.com/standards-lab/go-web-service/integration"
 )
 
-// A database outage is a temporary condition, not a server fault: while
-// the database is unreachable the readiness probe, a read, and a command
-// each answer 503, and when it returns the service recovers without a
-// restart.
-func TestOutage(t *testing.T) {
+func TestDatabaseOutage_Answers503AndRecoversWithoutARestart(t *testing.T) {
 	f := processtest.Forward(t, integration.DatabaseAddr())
 	s := integration.Start(t, integration.Options{Seed: integration.Default, Database: f.Addr()})
 	c := s.Client()
@@ -35,7 +31,7 @@ func TestOutage(t *testing.T) {
 	_ = c.Get(t, organizations).Problem(t, http.StatusServiceUnavailable)
 	_ = c.Get(t, organizations+"/"+fin.ID).Problem(t, http.StatusServiceUnavailable)
 	_ = c.Put(t, organizations+"/"+fin.ID, edit, webtest.IfMatch(fin.Version)).Problem(t, http.StatusServiceUnavailable)
-	c.Get(t, "/healthz").Expect(t, http.StatusOK) // the process is up; only the dependency is down
+	c.Get(t, "/healthz").Expect(t, http.StatusOK)
 
 	f.Restore(t)
 
@@ -54,15 +50,7 @@ func TestOutage(t *testing.T) {
 	}
 }
 
-// An object store outage is a temporary condition, as a database outage
-// is: while the store is unreachable the readiness probe names the
-// storage check, and a download and an upload each answer 503, while the
-// metadata reads, which touch only the database, answer as before. When
-// the store returns the service recovers without a restart. The refused
-// upload's abandon is refused too, so its row holds its name until the
-// sweep's stale reclaim (TestDocumentRefusedUpload); the upload after
-// recovery takes another name.
-func TestStorageOutage(t *testing.T) {
+func TestStorageOutage_RefusesObjectsServesMetadataAndRecovers(t *testing.T) {
 	f := processtest.Forward(t, integration.StorageAddr())
 	s := integration.Start(t, integration.Options{Seed: integration.Default, Storage: f.Addr()})
 	c := s.Client()
@@ -87,8 +75,6 @@ func TestStorageOutage(t *testing.T) {
 		}
 	})
 
-	// The probe's 503 is a problem that lists every check in start order,
-	// the storage check alone not ready.
 	r := c.Get(t, "/readyz")
 	_ = r.Problem(t, http.StatusServiceUnavailable)
 	var report struct {
@@ -112,7 +98,7 @@ func TestStorageOutage(t *testing.T) {
 	for _, path := range reads {
 		c.Get(t, path).Expect(t, http.StatusOK)
 	}
-	c.Get(t, "/healthz").Expect(t, http.StatusOK) // the process is up; only the dependency is down
+	c.Get(t, "/healthz").Expect(t, http.StatusOK)
 
 	f.Restore(t)
 	restored = true
@@ -123,7 +109,8 @@ func TestStorageOutage(t *testing.T) {
 	if r := c.Get(t, content).Expect(t, http.StatusOK); string(r.Body) != "report" {
 		t.Errorf("download after recovery = %q", r.Body)
 	}
-	q5 := webtest.Decode[identity](t, c.Post(t, docs+"/directories/root/files?name=q5.txt", body), http.StatusCreated)
+	notTheRefusedUploadsName := "q5.txt"
+	q5 := webtest.Decode[identity](t, c.Post(t, docs+"/directories/root/files?name="+notTheRefusedUploadsName, body), http.StatusCreated)
 	if r := c.Get(t, docs+"/files/"+q5.ID+"/content").Expect(t, http.StatusOK); string(r.Body) != "report" {
 		t.Errorf("the upload after recovery = %q", r.Body)
 	}

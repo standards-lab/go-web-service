@@ -12,8 +12,6 @@ import (
 	"github.com/standards-lab/go-web-service/integration"
 )
 
-// The probe bodies, as the SDK writes them: a check's state, and the
-// readiness report that lists them, on a 200 and on a 503 problem alike.
 type check struct {
 	Name  string `json:"name"`
 	Ready bool   `json:"ready"`
@@ -26,12 +24,9 @@ type readiness struct {
 
 const organizations = "/api/organizations"
 
-// seededTotal is the organization count the default state carries.
 const seededTotal = 7
 
-// revert leaves the schema empty through one service, the state a startup
-// applies the migration set from, and stops that service.
-func revert(t *testing.T) {
+func revertToEmptySchema(t *testing.T) {
 	t.Helper()
 	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	integration.Revert(t, s.Client())
@@ -41,9 +36,7 @@ func revert(t *testing.T) {
 	s.Stop(t)
 }
 
-// assertCurrent asserts the service reports a migrated, seeded database:
-// the schema at the head of the set and the seed tree present.
-func assertCurrent(t *testing.T, c *webtest.Client) {
+func assertMigratedAndSeeded(t *testing.T, c *webtest.Client) {
 	t.Helper()
 	st := integration.Schema(t, c)
 	app := st.Set(integration.AppSet)
@@ -55,14 +48,8 @@ func assertCurrent(t *testing.T, c *webtest.Client) {
 	}
 }
 
-// Startup applies the migration set to an empty schema and seeds the
-// reference data; the probes report every check ready; the seed is
-// idempotent on a second run and across a second start; an interrupt
-// drains to exit 0. The sweep starts only after the schema: its
-// startup pass, which startup's own migration does not gate, runs over the
-// tables the migration created, so no pass of the process is refused.
 func TestLifecycle_StartupMigratesSeedsAndDrains(t *testing.T) {
-	revert(t)
+	revertToEmptySchema(t)
 
 	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	c := s.Client()
@@ -72,10 +59,10 @@ func TestLifecycle_StartupMigratesSeedsAndDrains(t *testing.T) {
 		t.Errorf("healthz = %v", live)
 	}
 	assertReady(t, c)
-	assertCurrent(t, c)
+	assertMigratedAndSeeded(t, c)
 
 	if n := integration.Seed(t, c, ""); n["organizations"] != 0 {
-		t.Errorf("second seed inserted %v, want zero", n)
+		t.Errorf("second seed inserted %v, want zero: the seed is idempotent", n)
 	}
 
 	if code := s.Stop(t); code != 0 {
@@ -88,24 +75,19 @@ func TestLifecycle_StartupMigratesSeedsAndDrains(t *testing.T) {
 		t.Errorf("a sweep pass was refused while the schema was empty; want the sweep started after the schema:\n%s", s.Output())
 	}
 
-	// A second start against the seeded database inserts nothing.
 	again := integration.Start(t, integration.Options{Seed: integration.Default})
-	assertCurrent(t, again.Client())
+	assertMigratedAndSeeded(t, again.Client())
 	if n := integration.Seed(t, again.Client(), ""); n["organizations"] != 0 {
 		t.Errorf("seed after a second start inserted %v, want zero", n)
 	}
 }
 
-// With no set configured the service starts against the schema and
-// refuses a seed naming none with a 403 that says why; a named state still
-// resets and a named set still seeds, since the policy is the name, not a
-// switch.
-func TestLifecycle_SeedForbiddenWithNoSet(t *testing.T) {
+func TestLifecycle_NoSetForbidsAnUnnamedSeedNotANamedOne(t *testing.T) {
 	s := integration.Start(t, integration.Options{})
 	c := s.Client()
 	p := c.Post(t, "/admin/database/seed", nil).Problem(t, http.StatusForbidden)
 	if p.Detail == "" {
-		t.Error("403 problem carries no detail")
+		t.Error("403 problem carries no detail; want it to say why")
 	}
 	if tr := integration.Reset(t, c, "empty"); tr.State != "empty" || !tr.Schema.Ready || tr.Seeded["organizations"] != 0 {
 		t.Errorf("reset to empty = %+v", tr)
@@ -115,20 +97,16 @@ func TestLifecycle_SeedForbiddenWithNoSet(t *testing.T) {
 	}
 }
 
-// Two composition roots starting against one empty schema both reach
-// ready: the migrator serializes the apply under the schema lock, and the
-// seed is idempotent under the unique constraint, so the database ends
-// migrated once and seeded once.
-func TestLifecycle_ConcurrentStarters(t *testing.T) {
-	revert(t)
+func TestLifecycle_ConcurrentStartersMigrateAndSeedOnce(t *testing.T) {
+	revertToEmptySchema(t)
 
 	a := integration.Launch(t, integration.Options{Seed: integration.Default})
 	b := integration.Launch(t, integration.Options{Seed: integration.Default})
 	a.Ready(t)
 	b.Ready(t)
 
-	assertCurrent(t, a.Client())
-	assertCurrent(t, b.Client())
+	assertMigratedAndSeeded(t, a.Client())
+	assertMigratedAndSeeded(t, b.Client())
 	if code := a.Stop(t); code != 0 {
 		t.Errorf("a exit = %d:\n%s", code, a.Output())
 	}

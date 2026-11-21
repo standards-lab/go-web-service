@@ -11,8 +11,6 @@ import (
 	"github.com/standards-lab/go-web-service/integration"
 )
 
-// The schema helpers walk the admin mount's verbs: Revert reverts each set
-// by name, the last declared first, down to version zero.
 func TestState_RevertWalksTheSetsDownLastFirst(t *testing.T) {
 	versions := map[string]int{"lib": 2, "app": 1}
 	var order []string
@@ -52,9 +50,7 @@ func TestState_RevertWalksTheSetsDownLastFirst(t *testing.T) {
 	}
 }
 
-// Reset is one confirmed call to the state operation, carrying the name; Seed
-// carries a name only when given one.
-func TestState_ResetIsOneCall(t *testing.T) {
+func TestState_ResetIsOneCallAndSeedNamesOnlyAGivenState(t *testing.T) {
 	var states, seeds []string
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /admin/database/state", func(w http.ResponseWriter, r *http.Request) {

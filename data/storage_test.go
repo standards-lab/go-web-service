@@ -24,10 +24,6 @@ import (
 	"github.com/standards-lab/go-web-service/data"
 )
 
-// objects starts a store over the fake, as the composition root starts the
-// real one, and returns the adapter the domains use, grouped with a blobfs
-// store as NewStorage requires, since NewStorage records that store for
-// the seeder to verify.
 func objects(t *testing.T, fake *storagetest.Fake) *data.Objects {
 	t.Helper()
 	cfg := storage.Config{Container: "test"}
@@ -68,8 +64,6 @@ func TestObjects_PutEchoesTheDeclaredType(t *testing.T) {
 	}
 }
 
-// The delete is idempotent: an object deleted twice, or never stored, is
-// success, as blobfs's ObjectDeleter requires.
 func TestObjects_DeleteObjectIsIdempotent(t *testing.T) {
 	o := objects(t, storagetest.NewFake(storagetest.Options{}))
 	ctx := context.Background()
@@ -90,9 +84,6 @@ func TestObjects_DeleteObjectIsIdempotent(t *testing.T) {
 	}
 }
 
-// A missing container refuses every operation as the store's fault:
-// storage.ErrContainerNotFound, never an absent object, so a delete is not
-// read as done, and Status answers each 503.
 func TestObjects_AMissingContainerIsRefused(t *testing.T) {
 	fake := storagetest.NewFake(storagetest.Options{})
 	o := objects(t, fake)
@@ -121,8 +112,6 @@ func TestObjects_AMissingContainerIsRefused(t *testing.T) {
 	}
 }
 
-// A put that fails because the upload's body did is ErrBodyRead, a 400,
-// never the 503 a lost database connection's io.ErrUnexpectedEOF is.
 func TestObjects_ABodyCutShortIsTheRequests(t *testing.T) {
 	o := objects(t, storagetest.NewFake(storagetest.Options{}))
 
@@ -136,8 +125,6 @@ func TestObjects_ABodyCutShortIsTheRequests(t *testing.T) {
 	}
 }
 
-// A body read that times out is the client's, ErrBodyTimeout, a 408, even
-// when the store fails too, as [data.Objects.PutObject] documents.
 func TestObjects_ABodyReadTimeoutIsTheClients(t *testing.T) {
 	for name, deadline := range map[string]error{
 		"os deadline":      os.ErrDeadlineExceeded,
@@ -161,8 +148,6 @@ func TestObjects_ABodyReadTimeoutIsTheClients(t *testing.T) {
 	}
 }
 
-// A body cut short is the request's even when the store fails too: the
-// client's failure takes precedence over the provider's report of it.
 func TestObjects_ABodyCutShortOutranksTheStoresError(t *testing.T) {
 	fake := storagetest.NewFake(storagetest.Options{})
 	o := objects(t, fake)
@@ -194,9 +179,6 @@ const (
 
 const q, x = sqltest.OpQuery, sqltest.OpExec
 
-// protocols builds Storage over the scripted driver, blobfs's store in the
-// returning dialect so each of its commands is one statement, and the fake
-// object store, started as the composition root starts the real one.
 func protocols(t *testing.T, responses ...sqltest.Response) (*data.Storage, *sqlate.DB, *sqltest.Recorder, *storagetest.Fake) {
 	t.Helper()
 	pool, rec := sqltest.Open(t, responses...)
@@ -220,8 +202,6 @@ func protocols(t *testing.T, responses ...sqltest.Response) (*data.Storage, *sql
 	return data.NewStorage(data.New(db, catalog), fs, objects), db, rec, fake
 }
 
-// file is a file row at a status and version; an available one carries
-// the size and entity tag its completion recorded.
 func file(status blobfs.Status, version int64) blobfs.File {
 	now := time.Now()
 	f := blobfs.File{ID: fileID, DirectoryID: dirID, Name: "report.txt", Status: status, Key: key, ContentType: "text/plain", Version: version, CreatedAt: now, UpdatedAt: now}
@@ -234,8 +214,6 @@ func file(status blobfs.Status, version int64) blobfs.File {
 
 func exec(n int64) sqltest.Response { return sqltest.Response{Affected: n} }
 
-// sameOps fails the test unless the recorder's operations are want and
-// every scripted response was consumed.
 func sameOps(t *testing.T, rec *sqltest.Recorder, want ...sqltest.Op) {
 	t.Helper()
 	if got := rec.Ops(); fmt.Sprint(got) != fmt.Sprint(want) {
@@ -246,9 +224,7 @@ func sameOps(t *testing.T, rec *sqltest.Recorder, want ...sqltest.Op) {
 	}
 }
 
-// Serve describes an available file and opens its object on demand; any
-// other status is not found.
-func TestServe(t *testing.T) {
+func TestServe_AnAvailableFileOpensItsObjectAndOthersAreNotFound(t *testing.T) {
 	ctx := context.Background()
 	st, _, _, fake := protocols(t)
 	if _, err := fake.Put(ctx, key, strings.NewReader("report"), storage.PutOptions{}); err != nil {
@@ -275,9 +251,6 @@ func TestServe(t *testing.T) {
 	}
 }
 
-// A download whose container is missing is an outage, not an absent file:
-// go-storage reports the open as storage.ErrContainerNotFound, never
-// storage.ErrNotFound, and Status answers it 503.
 func TestServe_AMissingContainerIsAnOutage(t *testing.T) {
 	ctx := context.Background()
 	st, _, _, fake := protocols(t)

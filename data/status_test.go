@@ -77,11 +77,6 @@ func TestStatus(t *testing.T) {
 	}
 }
 
-// Every conflict carries its curated detail and none of the error's own
-// text. The errors are shaped as the libraries wrap them, each naming its
-// operation, ids, and constraint, and the writer opts 409 into error text,
-// the worst case: the matcher's detail still wins, so nothing of the
-// error reaches the body.
 func TestStatus_ConflictsCarryACuratedDetail(t *testing.T) {
 	const dir = "0198c0de-0000-7000-8000-000000000001"
 	violation := func(sentinel error, constraint string, class error) error {
@@ -127,8 +122,6 @@ func TestStatus_ConflictsCarryACuratedDetail(t *testing.T) {
 	}
 }
 
-// noRawText fails the test when body carries any of an error's own text:
-// a library's operation prefix, an id, or a constraint's name.
 func noRawText(t *testing.T, body string) {
 	t.Helper()
 	for _, leak := range []string{"data:", "blobfs:", "blobfs_", "_uq_", "_fk_", "_pk_", "constraint", "0198c0de"} {
@@ -138,9 +131,6 @@ func noRawText(t *testing.T, body string) {
 	}
 }
 
-// A 400's detail is the refusal alone: the input the request got wrong, in
-// the typed error's words without its library prefix, and none of the
-// operation chain that wrapped it, which names the service's own ids.
 func TestStatus_ARequestsRefusalCarriesOnlyItsInput(t *testing.T) {
 	cases := []struct {
 		name string

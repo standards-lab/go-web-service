@@ -26,20 +26,10 @@ import (
 	"github.com/standards-lab/go-web-service/integration"
 )
 
-// refusedRecord is the sweeper's record of a files pass that returned
-// refusals, as the JSON log carries it: go-database's default report of a
-// pass's error, at warn.
 var refusedRecord = regexp.MustCompile(`"msg":"sweep pass failed".*"reclaimer":"files"`)
 
-// refused counts the refused files passes in a process's output.
 func refused(output string) int { return len(refusedRecord.FindAllStringIndex(output, -1)) }
 
-// The sweeper's files reclaimer removes what a recursive delete marks,
-// through the real API and the real stores. The service sweeps in passes of
-// two records, so one cycle runs several passes while each reports More,
-// and its object store is relayed through a forwarder a case severs to have
-// the sweep refused. Every cycle here is the delete's own nudge, or a
-// repeated delete's, never the interval.
 func TestDocumentSweep(t *testing.T) {
 	f := processtest.Forward(t, integration.StorageAddr())
 	s := integration.Start(t, integration.Options{
@@ -60,7 +50,6 @@ func TestDocumentSweep(t *testing.T) {
 		t.Helper()
 		return webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": parent, "name": name}), http.StatusCreated)
 	}
-	// put uploads a file and returns its object key, blobfs's id/name.
 	put := func(t *testing.T, docs, dir, name string) string {
 		t.Helper()
 		id := webtest.Decode[identity](t, c.Post(t, docs+"/directories/"+dir+"/files?name="+name, webtest.Raw{ContentType: "text/plain", Body: []byte(name)}), http.StatusCreated)
@@ -74,8 +63,6 @@ func TestDocumentSweep(t *testing.T) {
 		}
 		return err == nil
 	}
-	// swept waits until every path given reads 404 and asserts that no
-	// key given is left in the store.
 	swept := func(t *testing.T, paths, keys []string) {
 		t.Helper()
 		processtest.WaitFor(t, "the branch swept", func() bool {
@@ -108,7 +95,6 @@ func TestDocumentSweep(t *testing.T) {
 			}
 		}
 
-		// Seven records in passes of two: one cycle finishes them in four.
 		markBranch(t, c, docs, reports.ID)
 		paths := []string{docs + "/directories/" + reports.ID, docs + "/directories/" + archive.ID, docs + "/directories/" + old.ID}
 		for _, k := range keys {
@@ -133,10 +119,6 @@ func TestDocumentSweep(t *testing.T) {
 		key := put(t, docs, reports.ID, "q3.txt")
 		refusals := refused(s.Output())
 
-		// The store severed, the pass the mark nudges is refused q3's
-		// object: the refusal is logged, not a failure, so the service
-		// runs on with the branch left deleting behind the file. The empty
-		// archive beneath it is removed all the same.
 		f.Sever()
 		restored := false
 		t.Cleanup(func() {
@@ -154,8 +136,6 @@ func TestDocumentSweep(t *testing.T) {
 		}
 		_ = c.Get(t, docs+"/directories/"+archive.ID).Problem(t, http.StatusNotFound)
 
-		// The store back, the repeated delete is accepted and nudges the
-		// sweep again, which finishes what the refused pass left.
 		f.Restore(t)
 		restored = true
 		c.Delete(t, docs+"/directories/"+reports.ID+"?recursive=true", webtest.IfMatch(reports.Version)).Expect(t, http.StatusAccepted)
@@ -167,17 +147,12 @@ func TestDocumentSweep(t *testing.T) {
 		keys := []string{put(t, docs, reports.ID, "q3.txt"), put(t, docs, "root", "readme.txt")}
 		root := webtest.Decode[directory](t, c.Get(t, docs+"/directories/root"), http.StatusOK)
 
-		// The sweep removes the root last, and its owner row goes with it
-		// through the row's cascading foreign key, so the organization
-		// reads as one without a root: the alias is not found, and its
-		// listing is empty.
 		markBranch(t, c, docs, "root")
 		swept(t, []string{docs + "/directories/root", docs + "/directories/" + root.ID, docs + "/directories/" + reports.ID}, keys)
 		if p := webtest.Decode[directoryPage](t, c.Get(t, docs+"/directories/root/directories"), http.StatusOK); len(p.Items) != 0 || p.Total == nil || *p.Total != 0 {
 			t.Errorf("the rootless organization's listing = %+v; want an empty page", p)
 		}
 
-		// The next write ensures a new root.
 		mkdir(t, docs, "root", "reports")
 		if again := webtest.Decode[directory](t, c.Get(t, docs+"/directories/root"), http.StatusOK); again.ID == root.ID || again.Status != "active" {
 			t.Errorf("root after the next write = %+v; want a new, active root", again)
@@ -185,12 +160,6 @@ func TestDocumentSweep(t *testing.T) {
 	})
 }
 
-// A branch a process marked but never swept is swept at the next
-// process's start, not an interval later: every reclaimer is due at the
-// sweeper's start. The first process marks the branch with its object store
-// severed, so its sweep is refused and leaves the branch deleting, and
-// stops. The second starts with the store back and an interval of an
-// hour, so only the startup cycle can sweep the branch within the wait.
 func TestSweepAtStartup(t *testing.T) {
 	f := processtest.Forward(t, integration.StorageAddr())
 	opts := integration.Options{
@@ -234,18 +203,6 @@ func TestSweepAtStartup(t *testing.T) {
 	}
 }
 
-// A reset never meets a sweep pass: the reset holds the process's quiesce
-// gate exclusively and each pass holds it shared, so a pass in flight
-// finishes before the revert begins and none starts until the reset is
-// done. Unguarded, the two deadlock: the revert of organization_directory
-// and a pass's cascading directory removal lock the two tables in the
-// opposite order, the reset fails with SQLSTATE 40P01, and a pass that
-// runs while the tables are dropped is refused on every statement. Each
-// round marks a branch of many directories, whose removals are the
-// cascading deletes, so the mark's nudge has the sweep working in passes
-// of five, and resets at a staggered offset into that work. The rounds run
-// in one process, since the startup sweep and a nudged one are the same
-// pass; a round costs well under a second.
 func TestSweepUnderReset(t *testing.T) {
 	s := integration.Start(t, integration.Options{
 		Seed: integration.Default,
@@ -262,7 +219,6 @@ func TestSweepUnderReset(t *testing.T) {
 		}
 		markBranch(t, c, docs, branch.ID)
 		time.Sleep(time.Duration(round%5) * 5 * time.Millisecond)
-		// The reset under test: Reset fails the round on anything but 200.
 		integration.Reset(t, c, integration.Default)
 	}
 	if n := refused(s.Output()) - refusals; n != 0 {
@@ -270,9 +226,8 @@ func TestSweepUnderReset(t *testing.T) {
 	}
 }
 
-// holding is a reclaimer that records its passes: each pass counts itself,
-// waits until hold is closed, and notes any pass of another holding
-// reclaimer on the same active count that ran at the same time.
+const unclaimedPassWindow = 5 * time.Millisecond
+
 type holding struct {
 	hold    <-chan struct{}
 	active  *atomic.Int32
@@ -291,13 +246,10 @@ func (r *holding) Pass(ctx context.Context, _ int) (bool, error) {
 	case <-ctx.Done():
 		return false, ctx.Err()
 	}
-	// Long enough for a pass of the other replica's, were it unclaimed,
-	// to land inside this one.
-	time.Sleep(5 * time.Millisecond)
+	time.Sleep(unclaimedPassWindow)
 	return false, nil
 }
 
-// counting is a reclaimer whose passes only count themselves.
 type counting struct{ passes atomic.Int32 }
 
 func (r *counting) Pass(context.Context, int) (bool, error) {
@@ -305,18 +257,6 @@ func (r *counting) Pass(context.Context, int) (bool, error) {
 	return false, nil
 }
 
-// Two replicas on one database never run the files reclaimer's cycle at
-// once: each sweeper over Postgres, as the service builds it, claims
-// "sweep.files" (the lock registry's data.LockSweepPrefix) for its cycle,
-// and a replica that finds the claim held runs no pass. The first
-// sweeper's pass holds until the test releases it; while it does, the
-// second runs none, and a third session is refused the lock. Released, the
-// second takes its turn, and the two then cycle with no pass of one inside
-// a pass of the other. Each sweeper has its own pool, as each replica
-// would. A cycle whose claim is refused reports nothing, so the second
-// sweeper also runs a probe reclaimer listed after files: a delivery that
-// nudged both runs files' cycle before the probe's pass, so each probe pass
-// the test waits for marks a files cycle the second replica attempted.
 func TestSweepClaimAcrossReplicas(t *testing.T) {
 	const interval = 50 * time.Millisecond
 	var active atomic.Int32
@@ -328,8 +268,6 @@ func TestSweepClaimAcrossReplicas(t *testing.T) {
 	second := &holding{hold: released, active: &active, overlap: &overlap}
 	probe := new(counting)
 
-	// Each shutdown releases the first's pass first, so a failed assertion
-	// leaves no pass holding the drain.
 	releaseFirst := sync.OnceFunc(func() { close(holdFirst) })
 	policy := sweep.Policy{Interval: interval, Budget: 1}
 	start := func(regs ...sweep.Registration) *sweep.Sweeper {
@@ -351,9 +289,7 @@ func TestSweepClaimAcrossReplicas(t *testing.T) {
 		})
 		return sw
 	}
-	// attempts has the second replica attempt n files cycles, each nudged
-	// with the probe and awaited through the probe's pass.
-	attempts := func(other *sweep.Sweeper, n int) {
+	attemptFilesCycles := func(other *sweep.Sweeper, n int) {
 		t.Helper()
 		for range n {
 			before := probe.passes.Load()
@@ -369,7 +305,7 @@ func TestSweepClaimAcrossReplicas(t *testing.T) {
 		sweep.Registration{Name: "files", Reclaimer: second, Policy: policy},
 		sweep.Registration{Name: "probe", Reclaimer: probe, Policy: policy},
 	)
-	attempts(other, 5)
+	attemptFilesCycles(other, 5)
 	if n := second.passes.Load(); n != 0 {
 		t.Fatalf("the second replica ran %d passes while the first held the claim; want none", n)
 	}
@@ -388,15 +324,13 @@ func TestSweepClaimAcrossReplicas(t *testing.T) {
 	processtest.WaitFor(t, "the second replica's pass", func() bool { return second.passes.Load() > 0 })
 	for range 10 {
 		mine.Nudge("files")
-		attempts(other, 1)
+		attemptFilesCycles(other, 1)
 	}
 	if overlap.Load() {
 		t.Error("a pass of one replica ran inside a pass of the other")
 	}
 }
 
-// exec runs one statement on db beneath the API, failing the test on its
-// error.
 func exec(t *testing.T, db *sqlate.DB, query string, args ...any) {
 	t.Helper()
 	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
@@ -404,8 +338,6 @@ func exec(t *testing.T, db *sqlate.DB, query string, args ...any) {
 	}
 }
 
-// holds reports whether db holds a row the query, a SELECT 1 over one
-// table, finds.
 func holds(t *testing.T, db *sqlate.DB, query string, args ...any) bool {
 	t.Helper()
 	rows, err := db.QueryContext(context.Background(), query, args...)
@@ -420,14 +352,6 @@ func holds(t *testing.T, db *sqlate.DB, query string, args ...any) bool {
 	return held
 }
 
-// The sweeper's outbox and inbox reclaimers delete the messaging rows past
-// their ages on the running service, and no other. The service runs with
-// both ages at an hour and an interval of 100ms, so a row the test
-// backdates two hours with SQL is reclaimed within a few intervals while
-// every row it leaves younger, or never published, outlives many. Rows are
-// told apart by event id, or, in the inbox, by a consumer of the test's
-// own. Each case waits for its aged row to go, so the pass that removed it
-// ran with the rows it must keep in place; one statement weighs them all.
 func TestSweepRetention(t *testing.T) {
 	f := processtest.Forward(t, integration.NATSAddr())
 	s := integration.Start(t, integration.Options{
@@ -435,7 +359,6 @@ func TestSweepRetention(t *testing.T) {
 		NATS: f.Addr(),
 		Env: []string{
 			"APP_SWEEP_INTERVAL=100ms", "APP_SWEEP_OUTBOX_AGE=1h", "APP_SWEEP_INBOX_AGE=1h",
-			// A publish to the severed broker gives up within a second.
 			"APP_MESSAGING_RELAY_TIMEOUT=1s",
 		},
 	})
@@ -459,13 +382,9 @@ func TestSweepRetention(t *testing.T) {
 	})
 
 	t.Run("published outbox rows past the outbox age are deleted", func(t *testing.T) {
-		// Published: the relay publishes both, then the test backdates
-		// one's publication past the age.
 		aged, recent := emitProbe(t, db), emitProbe(t, db)
 		drained(t, db)
 
-		// Unpublished: NATS severed, the relay cannot publish the probe,
-		// whose row is created two hours ago.
 		f.Sever()
 		restored := false
 		t.Cleanup(func() {
@@ -476,8 +395,6 @@ func TestSweepRetention(t *testing.T) {
 		unpublished := emitProbe(t, db)
 		exec(t, db, "UPDATE messaging_outbox SET created_at = now() - interval '2 hours' WHERE id = $1", unpublished)
 
-		// Quarantined: a row the relay set aside two hours ago, written
-		// directly, as no route can make one.
 		quarantined := fmt.Sprintf("quarantined-%d", time.Now().UnixNano())
 		exec(t, db, `INSERT INTO messaging_outbox (source, id, header, created_at, quarantined_at, quarantine_reason)
 			VALUES ('web-service', $1, '{}', now() - interval '2 hours', now() - interval '2 hours', 'integration: quarantined')`, quarantined)

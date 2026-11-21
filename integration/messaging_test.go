@@ -22,20 +22,12 @@ import (
 	"github.com/standards-lab/go-web-service/integration"
 )
 
-// probeData is the payload of the suite's probe event.
 type probeData struct {
 	Note string `json:"note"`
 }
 
-// probe is the suite's own event kind, under the service's prefix so the
-// broker accepts it. The suite is its producer, beneath the API: emitProbe
-// commits an event through go-messaging's outbox, the path a domain's
-// command takes, at a moment no request could, and the running service's
-// relay publishes it as it would a domain's.
 var probe = event.Define[probeData]("web-service.integration.probe")
 
-// emitProbe commits one probe event to the outbox through db, in its own
-// transaction, under the service's CloudEvents source, and returns its id.
 func emitProbe(t *testing.T, db *sqlate.DB) string {
 	t.Helper()
 	ob, err := outbox.New(msgpg.Outbox())
@@ -55,7 +47,6 @@ func emitProbe(t *testing.T, db *sqlate.DB) string {
 	return id
 }
 
-// pending counts the outbox rows awaiting publication.
 func pending(t *testing.T, db *sqlate.DB) int {
 	t.Helper()
 	n, err := msgpg.Pending(context.Background(), db)
@@ -65,15 +56,11 @@ func pending(t *testing.T, db *sqlate.DB) int {
 	return n
 }
 
-// drained waits until the outbox holds nothing pending: every event
-// committed so far, a seed's among them, is published.
 func drained(t *testing.T, db *sqlate.DB) {
 	t.Helper()
 	processtest.WaitFor(t, "the outbox drained", func() bool { return pending(t, db) == 0 })
 }
 
-// outboxHolds reports whether the outbox holds the row of the event with
-// id, published or not.
 func outboxHolds(t *testing.T, db *sqlate.DB, id string) bool {
 	t.Helper()
 	rows, err := db.QueryContext(context.Background(), "SELECT 1 FROM messaging_outbox WHERE id = $1", id)
@@ -88,7 +75,6 @@ func outboxHolds(t *testing.T, db *sqlate.DB, id string) bool {
 	return held
 }
 
-// eventRecords is out's records with msg msg naming the event id.
 func eventRecords(out, msg, id string) []map[string]any {
 	var matched []map[string]any
 	for _, r := range withMsg(out, msg) {
@@ -99,12 +85,9 @@ func eventRecords(out, msg, id string) []map[string]any {
 	return matched
 }
 
-// unreadyChecks is the names of the readiness report's checks that are not
-// ready, in its order.
 func unreadyChecks(t *testing.T, c *webtest.Client) (status int, unready []string) {
 	t.Helper()
 	r := c.Get(t, "/readyz")
-	// The checks alone: a 503 is a problem, whose status is its number.
 	var report struct {
 		Checks []check `json:"checks"`
 	}
@@ -120,14 +103,6 @@ func unreadyChecks(t *testing.T, c *webtest.Client) (status int, unready []strin
 	return r.Status, unready
 }
 
-// The relay publishes a committed outbox event to the broker: the row the
-// probe commits is published once, the service logging the event it sent,
-// and then marked published, so the outbox holds nothing pending. The
-// reset commits its own event and its seed's first, so the case waits for
-// them to drain before it commits the probe, and the probe's row is then
-// the only one the relay has to publish. The relay logs the publish before
-// it marks the row in the same pass, so the case waits for the mark rather
-// than reading the outbox the moment the log appears.
 func TestMessaging_RelayPublishesCommittedEvents(t *testing.T) {
 	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	c := s.Client()
@@ -149,10 +124,6 @@ func TestMessaging_RelayPublishesCommittedEvents(t *testing.T) {
 	}
 }
 
-// A broker outage is a temporary condition, as a database outage is: while
-// NATS is unreachable the process keeps running and the readiness probe
-// answers 503 naming the broker check alone, and when NATS returns the
-// broker reconnects and the service is ready again without a restart.
 func TestMessaging_BrokerOutage(t *testing.T) {
 	f := processtest.Forward(t, integration.NATSAddr())
 	s := integration.Start(t, integration.Options{NATS: f.Addr()})
@@ -171,7 +142,7 @@ func TestMessaging_BrokerOutage(t *testing.T) {
 		status, unready := unreadyChecks(t, c)
 		return status == http.StatusServiceUnavailable && slices.Equal(unready, []string{"broker"})
 	})
-	c.Get(t, "/healthz").Expect(t, http.StatusOK) // the process is up; only the dependency is down
+	c.Get(t, "/healthz").Expect(t, http.StatusOK)
 	if s.Exited() {
 		t.Fatalf("the service exited during the outage:\n%s", s.Output())
 	}
@@ -188,34 +159,16 @@ func TestMessaging_BrokerOutage(t *testing.T) {
 	}
 }
 
-// A state reset with an event pending returns while the relay runs: the
-// relay holds the quiesce gate for each row and the reset holds it
-// exclusively, so the reset waits out the row in flight and the relay
-// claims nothing while the messaging set is reverted and applied again.
-// The event is held pending by severing NATS, so its publish fails and its
-// row stays in the outbox until the reset reverts it. The reset commits its
-// own web-service.database.reset, then its seed its creations' events,
-// every seed event type, to the outbox applied again, and their publishes
-// fail too while NATS is severed. From the reset's start the relay reports
-// no failure but those refused publishes, a database error among them,
-// and once NATS returns the service is ready, the relay check with it,
-// with nothing pending.
 func TestMessaging_StateResetUnderTheRelay(t *testing.T) {
 	f := processtest.Forward(t, integration.NATSAddr())
 	s := integration.Start(t, integration.Options{
 		Seed: integration.Default,
 		NATS: f.Addr(),
-		// A publish to the severed broker gives up within a second, so the
-		// row in flight releases the gate promptly, and the relay polls
-		// again within milliseconds, so an ungated relay would claim while
-		// the reset runs rather than a poll after it.
-		Env: []string{"APP_MESSAGING_RELAY_TIMEOUT=1s", "APP_MESSAGING_RELAY_POLL=5ms"},
+		Env:  []string{"APP_MESSAGING_RELAY_TIMEOUT=1s", "APP_MESSAGING_RELAY_POLL=5ms"},
 	})
 	c := s.Client()
 	integration.Reset(t, c, integration.Default)
 	db := integration.Database(t)
-	// The reset committed its event and its seed's; the probe's row is to
-	// be the only one pending once NATS is severed.
 	drained(t, db)
 
 	f.Sever()
@@ -233,9 +186,6 @@ func TestMessaging_StateResetUnderTheRelay(t *testing.T) {
 		t.Fatalf("pending = %d before the reset, want the probe's row", n)
 	}
 
-	// The window the gate must cover is the reset itself, while the
-	// messaging set is reverted and applied again, so the failures read
-	// below are every one from here on.
 	before := len(s.Output())
 	tr := integration.Reset(t, c, integration.Default)
 	if m := tr.Schema.Set("messaging"); m.Version != m.Latest || m.Latest < 1 || !tr.Schema.Ready {
@@ -252,8 +202,6 @@ func TestMessaging_StateResetUnderTheRelay(t *testing.T) {
 	})
 	assertReady(t, c)
 	drained(t, db)
-	// The reset's event, held pending while NATS was severed, is published
-	// once NATS returns, about the state the reset applied.
 	var resets []map[string]any
 	for _, r := range withMsg(s.Output()[before:], "event published") {
 		if r["type"] == stateReset {
@@ -263,11 +211,6 @@ func TestMessaging_StateResetUnderTheRelay(t *testing.T) {
 	if len(resets) != 1 || resets[0]["subject"] != integration.Default {
 		t.Errorf("published %s records = %v; want one about %s", stateReset, resets, integration.Default)
 	}
-	// The probe's row reports its refused publish until the reset reverts
-	// it, the row in flight as the reset began among them, and the reset's
-	// event or a seed's, of any type a seed commits, its refused publish
-	// until NATS returns; any other failure, such as a claim against the
-	// reverted outbox, is the relay's running beside the reset.
 	resetTypes := append([]string{stateReset}, seedTypes...)
 	for _, r := range withMsg(s.Output()[before:], "messaging failure") {
 		committed := slices.Contains(resetTypes, fmt.Sprint(r["type"])) && strings.Contains(fmt.Sprint(r["error"]), "nats: publish")
@@ -280,7 +223,6 @@ func TestMessaging_StateResetUnderTheRelay(t *testing.T) {
 	}
 }
 
-// indexOf is the position in out of the first record with msg msg, or -1.
 func indexOf(out, msg string, id string) int {
 	for i, r := range logRecords(out) {
 		if r["msg"] == msg && (id == "" || r["event"] == id) {
@@ -290,22 +232,11 @@ func indexOf(out, msg string, id string) int {
 	return -1
 }
 
-// The drain runs the server before the relay: an event committed while the
-// server drains, with a request still in flight, is published before the
-// process exits. The request is an upload held open partway, so the server
-// is still draining; the event is the suite's probe, committed beneath the
-// API once the server has stopped accepting connections, while the server
-// still drains. Once the request is released the process exits cleanly, and
-// its log records the publish before "server stopped". The request-driven
-// case, the held upload's own event, is
-// TestEvents_AnUploadInFlightAtTheInterruptIsPublished.
 func TestMessaging_EventCommittedDuringTheDrainIsPublished(t *testing.T) {
 	s := integration.Start(t, integration.Options{Seed: integration.Default})
 	c := s.Client()
 	integration.Reset(t, c, integration.Default)
 	db := integration.Database(t)
-	// The reset committed its event and its seed's; the drain is to
-	// publish the probe's.
 	drained(t, db)
 	held := hold(t, s, "/api/documents/"+tree(t, c)[docsOrg].ID+"/directories/root/files?name=held.txt")
 

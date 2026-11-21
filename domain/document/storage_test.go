@@ -24,7 +24,6 @@ import (
 	"github.com/standards-lab/go-web-service/domain/document"
 )
 
-// textUpload is a six-byte text upload as the handler reads it.
 func textUpload(t *testing.T) web.Upload {
 	t.Helper()
 	r := httptest.NewRequest("PUT", "/", strings.NewReader("report"))
@@ -36,7 +35,6 @@ func textUpload(t *testing.T) web.Upload {
 	return u
 }
 
-// sameOps fails the test unless the recorder's operations are want.
 func sameOps(t *testing.T, rec *sqltest.Recorder, want ...sqltest.Op) {
 	t.Helper()
 	if got := rec.Ops(); fmt.Sprint(got) != fmt.Sprint(want) {
@@ -53,28 +51,21 @@ const (
 	rollback      = sqltest.OpRollback
 )
 
-// The file protocols end to end over the scripted driver and the fake
-// object store: the upload into a directory of the root, the metadata and
-// content reads, the move into the root by its alias, and the delete, each
-// step on the session its protocol gives it, the scope checked first.
 func TestStore_FileProtocols(t *testing.T) {
 	ctx := context.Background()
-	s, rec, fake := serviceOver(t,
-		// UploadFile: the pending row with its scope in one transaction, the
-		// put, the completion and its event in another.
-		root(rootID), within(true), datatest.FileRows(file(fileID, dirID, blobfs.StatusPending, 1)),
-		datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), exec(1),
-		// Content: the owner row, the file, its directory's scope.
-		root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), within(true),
-		// MoveFile to the root by its alias, and its event.
+	pendingRowWithItsScope := []sqltest.Response{root(rootID), within(true), datatest.FileRows(file(fileID, dirID, blobfs.StatusPending, 1))}
+	completionWithItsEvent := []sqltest.Response{datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), written()}
+	content := []sqltest.Response{root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), within(true)}
+	moveToTheRootByItsAlias := []sqltest.Response{
 		root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), within(true),
 		datatest.FileRows(file(fileID, rootID, blobfs.StatusAvailable, 3)), written(),
-		// DeleteFile: the scope, the delete begun, and its event in one
-		// transaction, the object deleted, the purge on the pool.
+	}
+	deleteBegunWithItsEventThenPurged := []sqltest.Response{
 		root(rootID), datatest.FileRows(file(fileID, rootID, blobfs.StatusAvailable, 3)),
 		datatest.FileRows(file(fileID, rootID, blobfs.StatusDeleting, 4)), written(),
-		exec(1),
-	)
+		purged(),
+	}
+	s, rec, fake := serviceOver(t, slices.Concat(pendingRowWithItsScope, completionWithItsEvent, content, moveToTheRootByItsAlias, deleteBegunWithItsEventThenPurged)...)
 	id, err := s.UploadFile(ctx, orgID, dirID, "report.txt", textUpload(t))
 	if err != nil || id != (document.Identity{ID: fileID, Version: 2}) {
 		t.Fatalf("UploadFile = %+v, %v", id, err)
@@ -118,8 +109,6 @@ func TestStore_FileProtocols(t *testing.T) {
 	)
 }
 
-// An upload into the alias of an organization without a root ensures it
-// first, the directory and its owner row in one transaction.
 func TestStore_UploadFileEnsuresTheRoot(t *testing.T) {
 	s, rec, _ := serviceOver(t,
 		root(), organization(), datatest.DirectoryRows(), datatest.DirectoryRows(directory(rootID, blobfs.RootID, orgID, 1)), exec(1), exec(1),
@@ -135,8 +124,6 @@ func TestStore_UploadFileEnsuresTheRoot(t *testing.T) {
 	)
 }
 
-// A first write for an organization that does not exist is the missing
-// row, before any directory is written.
 func TestStore_EnsureRootForAMissingOrganizationIsNoRows(t *testing.T) {
 	s, rec, _ := serviceOver(t, root(), sqltest.Response{Columns: []string{"id"}})
 	_, err := s.CreateDirectory(context.Background(), orgID, document.CreateDirectory{ParentID: document.RootAlias, Name: "reports"})
@@ -146,8 +133,6 @@ func TestStore_EnsureRootForAMissingOrganizationIsNoRows(t *testing.T) {
 	sameOps(t, rec, q, begin, q, sqltest.OpRollback)
 }
 
-// A put that fails retires the pending row, so the name is free for a
-// retry, and emits nothing: the completion never runs.
 func TestStore_AFailedPutRetiresThePendingRow(t *testing.T) {
 	s, rec, fake := serviceOver(t,
 		root(rootID), within(true), datatest.FileRows(file(fileID, dirID, blobfs.StatusPending, 1)),
@@ -161,10 +146,6 @@ func TestStore_AFailedPutRetiresThePendingRow(t *testing.T) {
 	noEvent(t, rec)
 }
 
-// The directory reads: the metadata with its path relative to the root
-// and its status, and the listings, lowered onto blobfs's with the
-// request's sort and filters and blobfs's own filter hiding deleting rows,
-// each followed by blobfs's read of the listed directory.
 func TestStore_DirectoryReads(t *testing.T) {
 	ctx := context.Background()
 	ancestors := sqltest.Response{
@@ -192,8 +173,6 @@ func TestStore_DirectoryReads(t *testing.T) {
 	if err != nil || r.Path != "/" || r.Name != "/" || r.ParentID != nil || r.ID != rootID {
 		t.Fatalf("Directory(root) = %+v, %v", r, err)
 	}
-	// Each metadata read's scope, row, and path read one tree, in one
-	// transaction.
 	if ops := fmt.Sprint(rec.Ops()); ops != fmt.Sprint([]sqltest.Op{begin, q, q, q, q, commit, begin, q, q, q, commit}) {
 		t.Errorf("metadata reads = %v; want each in its own transaction", ops)
 	}
@@ -217,10 +196,6 @@ func TestStore_DirectoryReads(t *testing.T) {
 	}
 }
 
-// A directory in a branch marked for its delete reads by id with its
-// status, while its listings are not found: blobfs refuses them as
-// deleting, and a listing answers that as the missing directory, not a
-// conflict.
 func TestStore_ADeletingDirectory(t *testing.T) {
 	ctx := context.Background()
 	marked := deleting(directory(dirID, rootID, "reports", 1))
@@ -246,12 +221,6 @@ func TestStore_ADeletingDirectory(t *testing.T) {
 	}
 }
 
-// An organization without a root lists nothing under the alias, once the
-// organization is read, and a specific id is not found. The alias runs
-// the listing itself over an id minted for the read, so its empty page
-// reports what an empty root's would (a total of 0 on the first page, none
-// on a later page) and it refuses what a real root refuses: a sort field
-// the read does not know, or a cursor it did not issue.
 func TestStore_ReadsBeforeTheRoot(t *testing.T) {
 	ctx := context.Background()
 	empty := func() []sqltest.Response {
@@ -292,8 +261,6 @@ func TestStore_ReadsBeforeTheRoot(t *testing.T) {
 	}
 }
 
-// The alias's listing of an organization that does not exist is the
-// missing row, as every other route answers it, not an empty page.
 func TestStore_ReadsOfAMissingOrganization(t *testing.T) {
 	ctx := context.Background()
 	s, rec, _ := serviceOver(t,
@@ -310,14 +277,14 @@ func TestStore_ReadsOfAMissingOrganization(t *testing.T) {
 	sameOps(t, rec, q, q, q, q)
 }
 
-// A directory move: the scope of the directory and of its destination in
-// the move's transaction, then blobfs's cycle check and guarded update.
 func TestStore_MoveDirectory(t *testing.T) {
+	directoryInScope, destinationInScope, noCycle := within(true), within(true), within(false)
+	guardedUpdate := datatest.DirectoryRows(directory(subID, dirID, "archive", 2))
 	s, rec, _ := serviceOver(t,
-		root(rootID), within(true), within(true), // the directory and its destination in scope
-		within(false), // blobfs's cycle check
-		datatest.DirectoryRows(directory(subID, dirID, "archive", 2)), // the guarded update
-		exec(1), // its event
+		root(rootID), directoryInScope, destinationInScope,
+		noCycle,
+		guardedUpdate,
+		written(),
 	)
 	id, err := s.MoveDirectory(context.Background(), orgID, subID, 1, document.MoveDirectory{ParentID: dirID, Name: "archive"})
 	if err != nil || id != (document.Identity{ID: subID, Version: 2}) {
@@ -326,8 +293,6 @@ func TestStore_MoveDirectory(t *testing.T) {
 	sameOps(t, rec, begin, q, q, q, q, q, x, commit)
 }
 
-// The root is not moved, by its alias before any I/O or by its id once
-// the owner row names it.
 func TestStore_MoveDirectoryRefusesTheRoot(t *testing.T) {
 	s, rec, _ := serviceOver(t, root(rootID))
 	m := document.MoveDirectory{ParentID: dirID, Name: "x"}
@@ -340,11 +305,10 @@ func TestStore_MoveDirectoryRefusesTheRoot(t *testing.T) {
 	sameOps(t, rec, begin, q, sqltest.OpRollback)
 }
 
-// A destination outside the organization's root is not found, and nothing
-// moves.
 func TestStore_MoveOutsideTheRootIsNotFound(t *testing.T) {
+	directoryInScope, destinationOutside := within(true), within(false)
 	s, rec, _ := serviceOver(t,
-		root(rootID), within(true), within(false), // the directory in scope, the destination not
+		root(rootID), directoryInScope, destinationOutside,
 		root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), within(true), within(false),
 	)
 	ctx := context.Background()
@@ -357,8 +321,6 @@ func TestStore_MoveOutsideTheRootIsNotFound(t *testing.T) {
 	sameOps(t, rec, begin, q, q, q, sqltest.OpRollback, begin, q, q, q, q, sqltest.OpRollback)
 }
 
-// Without recursive, a directory with contents is not empty: the foreign
-// key's refusal, classified by blobfs.
 func TestStore_DeleteOfANonEmptyDirectoryIsNotEmpty(t *testing.T) {
 	s, _, _ := serviceOver(t, root(rootID), within(true), sqltest.Response{Err: notEmpty()})
 	if err := s.DeleteDirectory(context.Background(), orgID, dirID, 1); !errors.Is(err, blobfs.ErrNotEmpty) {
@@ -366,30 +328,24 @@ func TestStore_DeleteOfANonEmptyDirectoryIsNotEmpty(t *testing.T) {
 	}
 }
 
-// notEmpty is the engine's refusal of a directory's removal while a child
-// directory references it, as the driver classifies it.
 func notEmpty() error {
 	return &sqlate.ConstraintError{Constraint: "blobfs_fk_directory_parent", Class: sqlate.ErrForeignKeyViolation, Err: errors.New("fk")}
 }
 
-// takenName is the engine's refusal of a file's insert under a name its
-// directory already holds.
 func takenName() error {
 	return &sqlate.ConstraintError{Constraint: "blobfs_uq_file_directory_name", Class: sqlate.ErrUniqueViolation, Err: errors.New("unique")}
 }
 
-// A recursive delete marks the branch in one transaction with its scope
-// check, the directory at the If-Match version, and nudges the sweep once,
-// after the commit. The tree lock precedes the directory's read, and the
-// mark takes it again.
 func TestStore_DeleteBranchMarksThenNudges(t *testing.T) {
+	readActiveBeforeItsMark := datatest.DirectoryRows(directory(dirID, rootID, "reports", 1))
+	readForItsEvent := datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1)))
 	s, rec, _, sweep := serviceOnPostgres(t,
-		root(rootID), within(true), exec(0), // the tree locked
-		datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)), // the directory read active before its mark
-		exec(0), // the mark's own lock, held already
-		exec(2), // the directory and one beneath it marked
-		exec(3), // their files marked
-		datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), exec(1), // the directory read for its event, written
+		root(rootID), within(true), treeLocked(),
+		readActiveBeforeItsMark,
+		treeLocked(),
+		directoriesMarked(2),
+		filesMarked(3),
+		readForItsEvent, written(),
 	)
 	id, err := s.DeleteBranch(context.Background(), orgID, dirID, 1)
 	if err != nil || id != dirID {
@@ -411,14 +367,11 @@ func TestStore_DeleteBranchMarksThenNudges(t *testing.T) {
 	}
 }
 
-// A repeated recursive delete, once the branch is deleting, is the mark's
-// retry: at the version the client read before the mark, which the mark
-// advanced, it converges and is accepted again, nudging the sweep again.
 func TestStore_DeleteBranchRetryConverges(t *testing.T) {
 	marked := deleting(directory(dirID, rootID, "reports", 1))
 	s, rec, _, sweep := serviceOnPostgres(t,
 		root(rootID), within(true), exec(0), datatest.DirectoryRows(marked),
-		exec(0), exec(0), datatest.DirectoryRows(marked), // nothing newly marked; the read finds it deleting
+		treeLocked(), directoriesMarked(0), datatest.DirectoryRows(marked),
 		exec(0),
 	)
 	if _, err := s.DeleteBranch(context.Background(), orgID, dirID, 1); err != nil {
@@ -430,8 +383,6 @@ func TestStore_DeleteBranchRetryConverges(t *testing.T) {
 	}
 }
 
-// A stale version marks nothing, rolls back, and nudges no sweep; the root
-// is marked like any directory, by its alias.
 func TestStore_DeleteBranchAtAStaleVersion(t *testing.T) {
 	s, rec, _, sweep := serviceOnPostgres(t,
 		root(rootID), within(true), exec(0), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2)), exec(0), exec(0), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2)),
@@ -450,12 +401,10 @@ func TestStore_DeleteBranchAtAStaleVersion(t *testing.T) {
 	sameOps(t, rec, begin, q, q, x, q, x, x, q, sqltest.OpRollback, begin, q, x, q, x, x, x, q, x, commit)
 }
 
-// The deletes guard on the If-Match version: a file or an empty directory
-// at another version is a version mismatch, and nothing is removed.
 func TestStore_DeletesAtAStaleVersion(t *testing.T) {
 	s, _, fake := serviceOver(t,
 		root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), within(true),
-		datatest.FileRows(), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), // the guarded delete matches nothing; the read tells the version
+		guardedUpdateMatchesNothing(), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)),
 		root(rootID), within(true), exec(0), datatest.DirectoryRows(directory(dirID, rootID, "reports", 2)),
 	)
 	ctx := context.Background()
@@ -474,20 +423,12 @@ func TestStore_DeletesAtAStaleVersion(t *testing.T) {
 	}
 }
 
-// The writer rule: a completion refused because a mark reached the row,
-// the stale reclaim began its delete, or the sweep removed it, deletes the
-// object the put stored under the key the write holds, and leaves the row
-// to the sweep. blobfs reads a deleting row's directory and says whose
-// delete refused it: in a marked branch the directory's, and in an active
-// directory the file's own.
 func TestStore_ACompletionTheSweepRefusedDeletesTheObject(t *testing.T) {
-	// The completion's update matches no pending row, and blobfs reads the
-	// row to tell why: deleting, with its directory, or gone.
 	deletingRow := datatest.FileRows(file(fileID, dirID, blobfs.StatusDeleting, 2))
 	cases := map[string]struct {
-		reads    []sqltest.Response
-		want     error
-		deleting *bool // whose delete refused it: the directory's (true) or the file's (false)
+		reads           []sqltest.Response
+		want            error
+		directoryDelete *bool
 	}{
 		"marked":    {[]sqltest.Response{deletingRow, datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1)))}, blobfs.ErrDeleting, new(true)},
 		"reclaimed": {[]sqltest.Response{deletingRow, datatest.DirectoryRows(directory(dirID, rootID, "reports", 1))}, blobfs.ErrDeleting, new(false)},
@@ -497,13 +438,13 @@ func TestStore_ACompletionTheSweepRefusedDeletesTheObject(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			s, rec, fake := serviceOver(t, append([]sqltest.Response{
 				root(rootID), within(true), datatest.FileRows(file(fileID, dirID, blobfs.StatusPending, 1)),
-				datatest.FileRows(),
+				guardedUpdateMatchesNothing(),
 			}, c.reads...)...)
 			_, err := s.UploadFile(context.Background(), orgID, dirID, "report.txt", textUpload(t))
 			if !errors.Is(err, c.want) {
 				t.Fatalf("UploadFile = %v; want %v", err, c.want)
 			}
-			wantDeleting(t, err, c.deleting)
+			wantDeleting(t, err, c.directoryDelete)
 			if fake.Puts() != 1 {
 				t.Errorf("puts = %d; want the object put once", fake.Puts())
 			}
@@ -520,9 +461,6 @@ func TestStore_ACompletionTheSweepRefusedDeletesTheObject(t *testing.T) {
 	}
 }
 
-// wantDeleting fails the test unless err's blobfs.DeletingError names the
-// directory's delete (directory true) or the file's own (false); with
-// directory nil, err must carry none.
 func wantDeleting(t *testing.T, err error, directory *bool) {
 	t.Helper()
 	var de *blobfs.DeletingError
@@ -536,12 +474,10 @@ func wantDeleting(t *testing.T, err error, directory *bool) {
 	}
 }
 
-// A move refused as deleting is the file's own delete when the file is
-// deleting in an active directory, and the directory's when the file sits
-// in a marked branch or the destination is deleting: blobfs reads the
-// directories and says which.
 func TestStore_AMoveOfADeletingFile(t *testing.T) {
 	deletingFile := file(fileID, dirID, blobfs.StatusDeleting, 3)
+	activeDirectory := datatest.DirectoryRows(directory(dirID, rootID, "reports", 1))
+	deletingDestination := datatest.DirectoryRows(deleting(directory(subID, rootID, "archive", 1)))
 	scope := func(f blobfs.File) []sqltest.Response {
 		return []sqltest.Response{root(rootID), datatest.FileRows(f), within(true), within(true)}
 	}
@@ -550,17 +486,17 @@ func TestStore_AMoveOfADeletingFile(t *testing.T) {
 		directory bool
 	}{
 		"its own delete": {append(scope(deletingFile),
-			datatest.FileRows(), datatest.FileRows(deletingFile), // the move matches nothing; blobfs reads the row: deleting
-			datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)), // in an active directory
+			guardedUpdateMatchesNothing(), datatest.FileRows(deletingFile),
+			activeDirectory,
 		), false},
 		"a marked branch": {append(scope(deletingFile),
-			datatest.FileRows(), datatest.FileRows(deletingFile),
+			guardedUpdateMatchesNothing(), datatest.FileRows(deletingFile),
 			datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))),
 		), true},
 		"a deleting destination": {append(scope(file(fileID, dirID, blobfs.StatusAvailable, 2)),
-			datatest.FileRows(), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), // the move matches nothing; the row is active
-			datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)),           // blobfs reads its directory: active
-			datatest.DirectoryRows(deleting(directory(subID, rootID, "archive", 1))), // and the destination: deleting
+			guardedUpdateMatchesNothing(), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)),
+			activeDirectory,
+			deletingDestination,
 		), true},
 	}
 	for name, c := range cases {

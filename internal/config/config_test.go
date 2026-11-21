@@ -40,9 +40,8 @@ func TestConfig_MergeOverlaysSetFields(t *testing.T) {
 	if base.Database.Host != "db.internal" {
 		t.Errorf("Database.Host = %s, want db.internal", base.Database.Host)
 	}
-	// A field the overlay leaves unset keeps the base value.
 	if base.Database.Name != "app" {
-		t.Errorf("Database.Name = %s, want app", base.Database.Name)
+		t.Errorf("Database.Name = %s, want app, the base value the overlay leaves unset", base.Database.Name)
 	}
 	if got := base.ShutdownTimeout.Duration(); got != 10*time.Second {
 		t.Errorf("ShutdownTimeout = %s, want 10s", got)
@@ -58,9 +57,8 @@ func TestConfig_FinalizeDefaults(t *testing.T) {
 		t.Fatalf("Finalize: %v", err)
 	}
 
-	// Pins the documented default shutdown timeout.
 	if got := cfg.ShutdownTimeout.Duration(); got != 10*time.Second {
-		t.Errorf("ShutdownTimeout = %s, want 10s", got)
+		t.Errorf("ShutdownTimeout = %s, want the documented 10s default", got)
 	}
 	if cfg.Log.Level != logging.LevelInfo {
 		t.Errorf("Log.Level = %s, want info", cfg.Log.Level)
@@ -76,10 +74,6 @@ func TestConfig_FinalizeDefaults(t *testing.T) {
 	}
 }
 
-// Every environment-variable name derives from the prefix Finalize receives —
-// in production, the one envPrefix const Load passes, the single place a
-// seeded service renames — so a renamed prefix reads its own variables and
-// ignores the default namespace.
 func TestConfig_FinalizeReadsEnvUnderPrefix(t *testing.T) {
 	t.Setenv("SVC_LOG_LEVEL", "debug")
 	t.Setenv("SVC_SERVER_PORT", "9090")
@@ -149,8 +143,6 @@ func TestConfig_FinalizeRejectsNonPositiveShutdownTimeout(t *testing.T) {
 	}
 }
 
-// A value the duration parser refuses fails the load with the variable's
-// name, so the operator sees which setting to fix.
 func TestConfig_FinalizeRejectsUnparsableShutdownTimeout(t *testing.T) {
 	t.Setenv("APP_SHUTDOWN_TIMEOUT", "soon")
 
@@ -164,8 +156,6 @@ func TestConfig_FinalizeRejectsUnparsableShutdownTimeout(t *testing.T) {
 	}
 }
 
-// The empty prefix composes no variable name, so no environment value
-// reaches the shutdown timeout: the hermetic form tests use.
 func TestConfig_FinalizeEmptyPrefixReadsNoShutdownOverride(t *testing.T) {
 	t.Setenv("APP_SHUTDOWN_TIMEOUT", "30s")
 	t.Setenv("SHUTDOWN_TIMEOUT", "30s")
@@ -179,8 +169,6 @@ func TestConfig_FinalizeEmptyPrefixReadsNoShutdownOverride(t *testing.T) {
 	}
 }
 
-// minimalFile is a config.json carrying the required fields, plus extra,
-// raw JSON members appended at the top level.
 func minimalFile(extra string) string {
 	body := `"database": {"name": "app"}, "storage": {"container": "c"}, "observability": {"endpoint": "127.0.0.1:4317"}, ` +
 		`"messaging": {"source": "web-service"}, "nats": {"stream": "WEB_SERVICE", "prefix": "web-service"}`
@@ -190,10 +178,6 @@ func minimalFile(extra string) string {
 	return "{" + body + "}"
 }
 
-// loadDir writes files into a fresh directory and runs Load there, as the
-// server binary does from its working directory. APP_ENV and
-// APP_SHUTDOWN_TIMEOUT are cleared, then env's KEY=VALUE entries applied,
-// so only what a test names reaches the load.
 func loadDir(t *testing.T, files map[string]string, env ...string) (*config.Config, error) {
 	t.Helper()
 	dir := t.TempDir()
@@ -212,8 +196,6 @@ func loadDir(t *testing.T, files map[string]string, env ...string) (*config.Conf
 	return config.Load()
 }
 
-// shutdown_timeout is a top-level key of config.json, and a file that
-// omits it takes the 10s default.
 func TestLoad_ShutdownTimeoutIsATopLevelKey(t *testing.T) {
 	cfg, err := loadDir(t, map[string]string{"config.json": minimalFile(`"shutdown_timeout": "3s"`)})
 	if err != nil {
@@ -232,7 +214,6 @@ func TestLoad_ShutdownTimeoutIsATopLevelKey(t *testing.T) {
 	}
 }
 
-// APP_SHUTDOWN_TIMEOUT overrides the file's value through Load.
 func TestLoad_EnvOverridesShutdownTimeout(t *testing.T) {
 	cfg, err := loadDir(t, map[string]string{"config.json": minimalFile(`"shutdown_timeout": "3s"`)}, "APP_SHUTDOWN_TIMEOUT=45s")
 	if err != nil {
@@ -243,8 +224,6 @@ func TestLoad_EnvOverridesShutdownTimeout(t *testing.T) {
 	}
 }
 
-// An overlay's shutdown_timeout replaces the base's; an overlay that
-// leaves it unset keeps the base's.
 func TestLoad_OverlayShutdownTimeout(t *testing.T) {
 	base := minimalFile(`"shutdown_timeout": "3s"`)
 	cfg, err := loadDir(t, map[string]string{
@@ -270,9 +249,6 @@ func TestLoad_OverlayShutdownTimeout(t *testing.T) {
 	}
 }
 
-// The root configuration declares only its JSON keys: a file naming a Go
-// field or an internal member, such as Config or Env, is refused as an
-// unknown key rather than decoded into the root.
 func TestLoad_RejectsUnknownRootKeys(t *testing.T) {
 	for _, key := range []string{"Config", "Env"} {
 		_, err := loadDir(t, map[string]string{"config.json": minimalFile(`"` + key + `": {}`)})
@@ -310,9 +286,6 @@ func TestConfig_FinalizeRequiresDatabaseName(t *testing.T) {
 	}
 }
 
-// The shipped files load together, strictly: the base, the local overlay,
-// and the example secrets, so a key the configuration does not declare
-// fails here rather than at a deployment's start.
 func TestConfig_ShippedFilesLoad(t *testing.T) {
 	t.Setenv("SHIPPED_ENV", "local")
 	cfg, err := libconfig.Load[config.Config](libconfig.Options{
@@ -326,22 +299,11 @@ func TestConfig_ShippedFilesLoad(t *testing.T) {
 	if cfg.Admin.SeedState() != "default" || cfg.Storage.Options["max_retries"] != "1" || cfg.Storage.Options["try_timeout"] == "" {
 		t.Errorf("loaded admin seed %q, storage options %v; want the overlay over the base", cfg.Admin.SeedState(), cfg.Storage.Options)
 	}
-	// A download's body resumes past a storage try's deadline, and the
-	// store's read idle timeout bounds each read with its resumptions, so
-	// the base file sets the try below the idle bound: a stalled try
-	// resumes once before the store is cut off.
 	if try, err := time.ParseDuration(cfg.Storage.Options["try_timeout"]); err != nil || try >= cfg.Storage.ReadIdleTimeout.Duration() {
-		t.Errorf("try_timeout = %q (%v), want it below read_idle_timeout, %s", cfg.Storage.Options["try_timeout"], err, cfg.Storage.ReadIdleTimeout.Duration())
+		t.Errorf("try_timeout = %q (%v), want it below read_idle_timeout, %s, so a stalled try resumes once before the store is cut off", cfg.Storage.Options["try_timeout"], err, cfg.Storage.ReadIdleTimeout.Duration())
 	}
 }
 
-// The base file's storage bounds fit the server's: a store that stalls on
-// every try is refused within write_timeout, so the 503 is written before
-// the connection's deadline passes, and azureblob reads a whole upload
-// ahead of the store (block_size × concurrency), so a store that stalls
-// never stops the body's reads and is never charged to the client as a
-// 408. The retry budget is try_timeout per try, max_retries + 1 tries, and
-// the SDK's backoff, 800ms doubled after each try.
 func TestConfig_BaseStorageBoundsFitTheServer(t *testing.T) {
 	cfg, err := libconfig.Load[config.Config](libconfig.Options{Dir: "../..", SecretsName: "secrets.example.json"})
 	if err != nil {
@@ -375,8 +337,6 @@ func TestConfig_BaseStorageBoundsFitTheServer(t *testing.T) {
 	}
 }
 
-// The messaging and nats blocks finalize under the service's prefix, as
-// the other blocks do: APP_MESSAGING_* and APP_NATS_* override the file.
 func TestConfig_FinalizeReadsMessagingAndNATSEnv(t *testing.T) {
 	t.Setenv("APP_MESSAGING_SOURCE", "web-service-b")
 	t.Setenv("APP_MESSAGING_RELAY_POLL", "1s")
@@ -396,8 +356,6 @@ func TestConfig_FinalizeReadsMessagingAndNATSEnv(t *testing.T) {
 	}
 }
 
-// An invalid messaging or nats block fails Finalize, and so startup, with
-// the error naming the block.
 func TestConfig_FinalizeNamesInvalidMessagingBlocks(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -422,8 +380,6 @@ func TestConfig_FinalizeNamesInvalidMessagingBlocks(t *testing.T) {
 	}
 }
 
-// The base file names the service's messaging: its CloudEvents source, the
-// stream it owns, its types' prefix, and a local NATS server.
 func TestConfig_BaseMessaging(t *testing.T) {
 	cfg, err := libconfig.Load[config.Config](libconfig.Options{Dir: "../..", SecretsName: "secrets.example.json"})
 	if err != nil {

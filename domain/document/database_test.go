@@ -36,18 +36,12 @@ const (
 	file2ID = "00000000-0000-7000-8000-0000000000f1"
 )
 
-// serviceOver builds the domain over the scripted driver in the returning
-// dialect, so blobfs's returning commands run as one statement each, with
-// blobfs's store compiled against the same catalog and the object store
-// over the fake, started as the composition root starts the real one.
 func serviceOver(t *testing.T, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *storagetest.Fake) {
 	t.Helper()
 	s, rec, fake, _ := serviceNudged(t, responses...)
 	return s, rec, fake
 }
 
-// nudges is the sweeper the tests inject: it records, at each nudge, the
-// operations the scripted driver had run by then.
 type nudges struct {
 	rec  *sqltest.Recorder
 	seen [][]sqltest.Op
@@ -55,21 +49,16 @@ type nudges struct {
 
 func (n *nudges) Nudge() { n.seen = append(n.seen, n.rec.Ops()) }
 
-// serviceNudged is serviceOver with the sweeper the service nudges.
 func serviceNudged(t *testing.T, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *storagetest.Fake, *nudges) {
 	t.Helper()
 	return serviceOn(t, bfdata.Options{}, responses...)
 }
 
-// serviceOnPostgres is serviceNudged with blobfs on the Postgres engine the
-// composition root gives it, whose tree lock is a statement the script
-// answers, where the baseline's is a no-op that runs none.
 func serviceOnPostgres(t *testing.T, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *storagetest.Fake, *nudges) {
 	t.Helper()
 	return serviceOn(t, bfdata.Options{Engine: blobfspg.Engine}, responses...)
 }
 
-// serviceOn is serviceNudged with blobfs built with opts.
 func serviceOn(t *testing.T, opts bfdata.Options, responses ...sqltest.Response) (*document.Service, *sqltest.Recorder, *storagetest.Fake, *nudges) {
 	t.Helper()
 	dialect := sqltest.ReturningDialect{}
@@ -94,10 +83,6 @@ func serviceOn(t *testing.T, opts bfdata.Options, responses ...sqltest.Response)
 	return document.New(db, data.NewStorage(db, fs, objects), sweep, recorder(t)), rec, fake, sweep
 }
 
-// recorder is the recorder the composition root injects, go-messaging's
-// over its Postgres outbox, with the id and the time it stamps fixed: its
-// event's write is one statement on the command's transaction, which the
-// scripted driver records.
 func recorder(t *testing.T) *document.Recorder {
 	t.Helper()
 	ob, err := outbox.New(msgpg.Outbox())
@@ -107,8 +92,6 @@ func recorder(t *testing.T) *document.Recorder {
 	return outboxtest.Stamped(ob.Sink())
 }
 
-// root scripts the owner row's read: the organization's document root, or
-// none when no id is given.
 func root(ids ...string) sqltest.Response {
 	r := sqltest.Response{Columns: []string{"directory_id"}}
 	for _, id := range ids {
@@ -117,8 +100,6 @@ func root(ids ...string) sqltest.Response {
 	return r
 }
 
-// within scripts blobfs's IsWithin: whether the directory lies in the
-// root's subtree.
 func within(in bool) sqltest.Response {
 	n := int64(0)
 	if in {
@@ -133,21 +114,31 @@ func organization() sqltest.Response {
 
 func exec(n int64) sqltest.Response { return sqltest.Response{Affected: n} }
 
-// directory is an active directory row under parent at a version.
+func treeLocked() sqltest.Response { return exec(0) }
+
+func directoriesMarked(n int64) sqltest.Response { return exec(n) }
+
+func filesMarked(n int64) sqltest.Response { return exec(n) }
+
+func purged() sqltest.Response { return exec(1) }
+
+func ownerRowBound() sqltest.Response { return exec(1) }
+
+func rootRemoved() sqltest.Response { return exec(1) }
+
+func guardedUpdateMatchesNothing() sqltest.Response { return datatest.FileRows() }
+
 func directory(id, parent, name string, version int64) blobfs.Directory {
 	now := time.Now()
 	return blobfs.Directory{ID: id, ParentID: &parent, Name: name, Status: blobfs.DirectoryStatusActive, Version: version, CreatedAt: now, UpdatedAt: now}
 }
 
-// deleting is d once its branch is marked for its delete, a version on.
 func deleting(d blobfs.Directory) blobfs.Directory {
 	d.Status = blobfs.DirectoryStatusDeleting
 	d.Version++
 	return d
 }
 
-// file is a document's file row in dir at a status and version; one past
-// pending carries the size and the entity tag its completion recorded.
 func file(id, dir string, status blobfs.Status, version int64) blobfs.File {
 	now := time.Now()
 	f := blobfs.File{ID: id, DirectoryID: dir, Name: "report.txt", Status: status, Key: id + "/report.txt", ContentType: "text/plain", Version: version, CreatedAt: now, UpdatedAt: now}
@@ -158,30 +149,19 @@ func file(id, dir string, status blobfs.Status, version int64) blobfs.File {
 	return f
 }
 
-// The wiring test: every owner-row handle binds once with its arguments,
-// through the protocol that runs them all, so a key that does not
-// match its file's parameters or a scan out of step with the SELECT list
-// fails here rather than on a request. The strict driver checks the
-// placeholder count on every call.
 func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 	ctx := context.Background()
-	s, rec, _ := serviceOver(t,
-		// CreateDirectory under the alias, the organization's first write.
-		root(),                   // no root yet
-		organization(),           // ensure: the organization exists
-		datatest.DirectoryRows(), // ensure: no directory named for it
-		datatest.DirectoryRows(directory(rootID, blobfs.RootID, orgID, 1)), // ensure: the root created
-		exec(1),      // ensure: the owner row
-		exec(1),      // ensure: the root's event
-		root(rootID), // create: the scope check
-		datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)), // create
-		exec(1), // create: its event
-		// DeleteDirectory of the root, empty: its owner row goes with it
-		// through the cascading foreign key, so no statement names the row.
-		root(rootID),
-		exec(1), // the root removed
-		exec(1), // its event
-	)
+	noRootYet := root()
+	ensureRoot := []sqltest.Response{
+		organization(),
+		datatest.DirectoryRows(),
+		datatest.DirectoryRows(directory(rootID, blobfs.RootID, orgID, 1)),
+		ownerRowBound(),
+		written(),
+	}
+	createUnderTheAlias := []sqltest.Response{root(rootID), datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)), written()}
+	deleteTheEmptyRootItsOwnerRowCascading := []sqltest.Response{root(rootID), rootRemoved(), written()}
+	s, rec, _ := serviceOver(t, slices.Concat([]sqltest.Response{noRootYet}, ensureRoot, createUnderTheAlias, deleteTheEmptyRootItsOwnerRowCascading)...)
 	id, err := s.CreateDirectory(ctx, orgID, document.CreateDirectory{ParentID: document.RootAlias, Name: "reports"})
 	if err != nil || id != (document.Identity{ID: dirID, Version: 1}) {
 		t.Fatalf("CreateDirectory = %+v, %v", id, err)
@@ -215,8 +195,9 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 		sqltest.OpQuery,
 		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpExec, sqltest.OpExec, sqltest.OpCommit,
 		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpExec, sqltest.OpCommit,
-		sqltest.OpBegin, sqltest.OpQuery, sqltest.OpExec, sqltest.OpExec, sqltest.OpCommit, // the delete, scoped in its transaction
 	}
+	deleteScopedInItsTransaction := []sqltest.Op{sqltest.OpBegin, sqltest.OpQuery, sqltest.OpExec, sqltest.OpExec, sqltest.OpCommit}
+	want = append(want, deleteScopedInItsTransaction...)
 	if len(ops) != len(want) {
 		t.Fatalf("ops = %v\nwant %v", ops, want)
 	}
@@ -227,9 +208,6 @@ func TestStore_EveryHandleBindsItsFilesParameters(t *testing.T) {
 	}
 }
 
-// The seeder's Verify prepares every statement the layer and the data
-// package registered, and blobfs's, which the storage the layer runs over
-// recorded: the layer's store registers itself.
 func TestSeed_VerifiesTheRegisteredStores(t *testing.T) {
 	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
 	fs, err := bfdata.New(catalog, sqltest.Dialect{}, bfdata.Options{})

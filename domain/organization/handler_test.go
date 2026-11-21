@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/standards-lab/blobfs/data/datatest"
 	"github.com/standards-lab/go-web-sdk"
 	"github.com/standards-lab/sqlate/sqltest"
 
@@ -18,9 +17,6 @@ import (
 	"github.com/standards-lab/go-web-service/domain/organization"
 )
 
-// module compiles the layer's route group the way the composition root
-// does, over the scripted driver with the given responses; with none
-// scripted, only the handler-local rejection paths can answer.
 func module(t *testing.T, responses ...sqltest.Response) http.Handler {
 	t.Helper()
 	svc, _ := service(t, responses...)
@@ -136,14 +132,12 @@ func TestRoutes_LibraryErrorsMapThroughTheDataMatcher(t *testing.T) {
 }
 
 func TestCreate_AnswersCreatedWithLocation(t *testing.T) {
-	rec := send(t, module(t, identity(validID, 1), stored(validID, "acme", "Acme", 1), written()), "POST", "/organizations", "", `{"code":"acme","name":"Acme"}`)
+	rec := send(t, module(t, identity(validID, 1), stored(validID, "acme", "Acme", 1), eventWritten()), "POST", "/organizations", "", `{"code":"acme","name":"Acme"}`)
 	if rec.Code != 201 || rec.Header().Get("Location") != "/organizations/"+validID {
 		t.Fatalf("status %d, Location %q, body %s", rec.Code, rec.Header().Get("Location"), rec.Body)
 	}
 }
 
-// upload sends a raw logo body with the given Content-Type, none when
-// empty, and declared length; a length of -1 is a chunked body.
 func upload(t *testing.T, h http.Handler, path, contentType, body string, length int64) *httptest.ResponseRecorder {
 	t.Helper()
 	r := httptest.NewRequest("PUT", path, strings.NewReader(body))
@@ -156,8 +150,6 @@ func upload(t *testing.T, h http.Handler, path, contentType, body string, length
 	return rec
 }
 
-// A logo the layer would refuse is refused on its headers, before any
-// statement runs or byte is stored: the module has nothing scripted.
 func TestPutLogo_RefusesBeforeAnyIO(t *testing.T) {
 	path := "/organizations/" + validID + "/logo"
 	cases := map[string]struct {
@@ -186,12 +178,10 @@ func TestPutLogo_RefusesBeforeAnyIO(t *testing.T) {
 }
 
 func TestLogo_WithoutALogoIs404(t *testing.T) {
-	h := module(t, datatest.FileRows()) // the active logo read finds no row
+	h := module(t, noFile())
 	problem(t, send(t, h, "GET", "/organizations/"+validID+"/logo", "", ""), 404)
 }
 
-// The lookup reads the path from its query, with or without the leading
-// slash, as the path field of the read model.
 func TestLookup_ReadsThePathFromTheQuery(t *testing.T) {
 	for _, path := range []string{"/acme", "acme", "%2Facme"} {
 		h := module(t, row())
@@ -202,20 +192,12 @@ func TestLookup_ReadsThePathFromTheQuery(t *testing.T) {
 }
 
 func TestDeleteLogo_WithoutALogoIs404(t *testing.T) {
-	h := module(t, datatest.FileRows()) // the active logo read finds no row
+	h := module(t, noFile())
 	problem(t, send(t, h, "DELETE", "/organizations/"+validID+"/logo", "", ""), 404)
 }
 
-// The layer's own matcher reports the cycle as a conflict with
-// data.DetailConflict, the detail data.Status gives every conflict without
-// a text of its own: one conflict, a transfer under the organization's own
-// subtree, proves the wiring, with none of the error's own text. The
-// library's conflicts reach the same writer through data.Status, whose own
-// test holds every detail; the integration suite proves each end to end.
-// The instance names the request path by design, so the leak checks look
-// for what only the error names.
 func TestRoutes_AConflictCarriesItsCuratedDetail(t *testing.T) {
-	cycle := []sqltest.Response{{Affected: 0}, {Columns: []string{"count"}, Rows: [][]driver.Value{{int64(1)}}}}
+	cycle := []sqltest.Response{treeLocked(), subtreeCount(1)}
 	rec := send(t, module(t, cycle...), "POST", "/organizations/"+validID+"/transfer", `"1"`, `{"parent_id":"`+parentID+`"}`)
 	if body := problem(t, rec, 409); body["detail"] != data.DetailConflict {
 		t.Errorf("detail = %v, want %q", body["detail"], data.DetailConflict)
@@ -227,6 +209,4 @@ func TestRoutes_AConflictCarriesItsCuratedDetail(t *testing.T) {
 	}
 }
 
-// transfer sizes the test routes' transfers at 1 MiB/s with a second's
-// grace; a recorder has no connection deadlines for it to set.
 func transfer(limit int64) web.Transfer { return web.NewTransfer(limit, 1<<20, time.Second) }

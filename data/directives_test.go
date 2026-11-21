@@ -82,8 +82,6 @@ func TestPaging_CarriesTheCollectionsReport(t *testing.T) {
 	}
 }
 
-// fakeListing records the read ReadListing chose: the anchor, the
-// directives, and the page or the cursor with its size.
 type fakeListing struct {
 	call   string
 	id     string
@@ -129,8 +127,6 @@ func TestReadListing_PagesByNumberOrContinuesPastACursor(t *testing.T) {
 	}
 }
 
-// A refusal is the listing's own, returned unchanged for the caller's
-// policy to read.
 func TestReadListing_ReturnsTheListingsRefusal(t *testing.T) {
 	refused := errors.New("refused")
 	l := fakeListing{err: refused}

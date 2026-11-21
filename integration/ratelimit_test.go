@@ -11,10 +11,7 @@ import (
 	"github.com/standards-lab/go-web-service/integration"
 )
 
-// A client over the configured limit gets a 429 problem document with
-// Retry-After and a request_id extension; the liveness and readiness
-// probes stay unaffected regardless.
-func TestRateLimit_RequestOverTheLimitIsA429(t *testing.T) {
+func TestRateLimit_RequestOverTheLimitIsA429ProbesUnaffected(t *testing.T) {
 	s := integration.Start(t, integration.Options{
 		Env: []string{"APP_RATE_LIMIT_REQUESTS=3", "APP_RATE_LIMIT_WINDOW=1m"},
 	})

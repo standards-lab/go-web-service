@@ -30,12 +30,6 @@ func newDatabase(t *testing.T, responses ...sqltest.Response) (*data.Database, *
 	return data.New(sqlate.Wrap(pool, sqltest.Dialect{}), catalog), rec
 }
 
-// contribution is a domain's seed contribution as the seeder sees it: it
-// records the rows it was handed, in the order the seeder applied it, and
-// reports each row inserted, running one statement per row so the
-// transaction's shape shows, unless err refuses the apply. It scripts its
-// own statements on rec as it runs, so no test restates how many rows a
-// state carries.
 type contribution struct {
 	key   string
 	order *[]string
@@ -62,11 +56,6 @@ func (c *contribution) Apply(ctx context.Context, tx *sqlate.Tx, raw json.RawMes
 	return len(rows), c.err
 }
 
-// fileContribution is a domain's contribution of stored files as the
-// seeder sees it: it records the rows it was handed and the database's
-// operations as they stood when it ran, so a test sees whether the row
-// transaction had committed, and reads a fixture it was handed, unless err
-// refuses the write.
 type fileContribution struct {
 	key      string
 	order    *[]string
@@ -79,8 +68,6 @@ type fileContribution struct {
 
 func (c *fileContribution) Key() string { return c.key }
 
-// verifier records that it ran and fails with err, standing in for a
-// domain's store or blobfs's.
 type verifier struct {
 	ran bool
 	err error
@@ -105,16 +92,10 @@ func (c *fileContribution) Write(_ context.Context, raw json.RawMessage, fixture
 	return len(rows), c.err
 }
 
-// widgets is a store's statement inventory as a domain compiles it, from
-// its own statements directory against the database's catalog.
 var widgets = fstest.MapFS{
 	"statements/widget.sql": {Data: []byte("--| tier: standard\n-- A widget store's read.\nSELECT 1\n")},
 }
 
-// The seeder verifies every store registered on the database: the
-// package's own, each Register's, and blobfs's, which NewStorage records.
-// Registration never closes, so the stores here register after the seeder
-// is built and are still verified.
 func TestSeeder_VerifiesEveryRegisteredStore(t *testing.T) {
 	catalog := query.MustCatalog(query.Patterns(), bfdata.Patterns(), data.Patterns())
 	fs, err := bfdata.New(catalog, sqltest.Dialect{}, bfdata.Options{})
@@ -154,8 +135,6 @@ func TestSeeder_VerifiesEveryRegisteredStore(t *testing.T) {
 	}
 }
 
-// A registered store's verifier is the one Verify runs, not its statements
-// alone, so a store that also probes a projection reports what it found.
 func TestSeeder_VerifyReportsARegisteredStoresFailure(t *testing.T) {
 	db, _ := newDatabase(t)
 	store := &verifier{err: errBoom}
@@ -166,9 +145,6 @@ func TestSeeder_VerifyReportsARegisteredStoresFailure(t *testing.T) {
 	}
 }
 
-// A verifier Record adds, a library's store with no registry entry such as
-// go-messaging's, is run by Verify and its failure reported, and it adds no
-// registry entry.
 func TestSeeder_VerifyRunsARecordedVerifier(t *testing.T) {
 	db, _ := newDatabase(t)
 	entries := len(db.Registry())
@@ -183,7 +159,6 @@ func TestSeeder_VerifyRunsARecordedVerifier(t *testing.T) {
 	}
 }
 
-// Two contributions under one key are a wiring defect.
 func TestNewSeeder_PanicsOnADuplicateKey(t *testing.T) {
 	db, _ := newDatabase(t)
 	defer func() {
@@ -195,8 +170,6 @@ func TestNewSeeder_PanicsOnADuplicateKey(t *testing.T) {
 	data.NewSeeder(db, &contribution{key: "a", order: &order}, &contribution{key: "a", order: &order})
 }
 
-// A contribution the seeder cannot run, neither a Seed nor a FileSeed or
-// both at once, is a wiring defect.
 func TestNewSeeder_PanicsOnAContributionOfNoOneKind(t *testing.T) {
 	db, _ := newDatabase(t)
 	cases := map[string]data.Contribution{
@@ -224,8 +197,6 @@ type both struct{ neither }
 func (both) Apply(context.Context, *sqlate.Tx, json.RawMessage) (int, error) { return 0, nil }
 func (both) Write(context.Context, json.RawMessage, fs.FS) (int, error)      { return 0, nil }
 
-// The states are the embedded files, by name, sorted, and each one listed
-// is a state Seed knows.
 func TestSeeder_States_ListsTheFiles(t *testing.T) {
 	db, _ := newDatabase(t)
 	s := data.NewSeeder(db)
@@ -240,8 +211,6 @@ func TestSeeder_States_ListsTheFiles(t *testing.T) {
 	}
 }
 
-// The empty state applies no contribution and still reports every one, at
-// zero, in one transaction, writing no file.
 func TestSeeder_Seed_EmptyStateInsertsNothing(t *testing.T) {
 	db, rec := newDatabase(t)
 	var order []string
@@ -259,8 +228,6 @@ func TestSeeder_Seed_EmptyStateInsertsNothing(t *testing.T) {
 	}
 }
 
-// A name with no file is the admin service's unknown-state error, before
-// any I/O.
 func TestSeeder_Seed_UnknownStateIsRefused(t *testing.T) {
 	db, rec := newDatabase(t)
 	_, err := data.NewSeeder(db).Seed(context.Background(), "nope")
@@ -272,9 +239,6 @@ func TestSeeder_Seed_UnknownStateIsRefused(t *testing.T) {
 	}
 }
 
-// A key no contribution reads is a defect in the file, refused before any
-// I/O: the default state with no contribution for any of its keys, the
-// first by name named.
 func TestSeeder_Seed_AnUnreadKeyIsRefused(t *testing.T) {
 	db, rec := newDatabase(t)
 	_, err := data.NewSeeder(db).Seed(context.Background(), "default")
@@ -286,25 +250,19 @@ func TestSeeder_Seed_AnUnreadKeyIsRefused(t *testing.T) {
 	}
 }
 
-// The default state's contributions: its organizations, their logos, and
-// its document trees.
 func defaultContributions(order *[]string, rec *sqltest.Recorder) (*contribution, *fileContribution, *fileContribution) {
 	return &contribution{key: "organizations", order: order, rec: rec},
 		&fileContribution{key: "logos", order: order, rec: rec},
 		&fileContribution{key: "documents", order: order, rec: rec}
 }
 
-// The rows apply in one transaction, in the order given; the files write
-// after it commits, in the order given, each handed the embedded
-// fixtures; the counts carry every key, and one the state does not carry
-// reports zero.
 func TestSeeder_Seed_AppliesRowsThenFilesInOrder(t *testing.T) {
 	db, rec := newDatabase(t)
 	var order []string
 	orgs, logos, docs := defaultContributions(&order, rec)
 	absent := &contribution{key: "people", order: &order}
-	// The files are given before the rows, and still run after them.
-	n, err := data.NewSeeder(db, logos, docs, orgs, absent).Seed(context.Background(), "default")
+	filesGivenBeforeRows := data.NewSeeder(db, logos, docs, orgs, absent)
+	n, err := filesGivenBeforeRows.Seed(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("Seed: %v", err)
 	}
@@ -331,7 +289,6 @@ func TestSeeder_Seed_AppliesRowsThenFilesInOrder(t *testing.T) {
 	}
 }
 
-// A row that fails rolls the transaction back, and no file is written.
 func TestSeeder_Seed_RollsBackOnFailure(t *testing.T) {
 	db, rec := newDatabase(t)
 	var order []string
@@ -346,8 +303,6 @@ func TestSeeder_Seed_RollsBackOnFailure(t *testing.T) {
 	}
 }
 
-// A file contribution that fails leaves the committed rows and stops the
-// seed there, its key named and the counts so far returned beside it.
 func TestSeeder_Seed_AFailedFileWriteStopsAfterTheCommit(t *testing.T) {
 	db, rec := newDatabase(t)
 	var order []string
@@ -365,9 +320,6 @@ func TestSeeder_Seed_AFailedFileWriteStopsAfterTheCommit(t *testing.T) {
 	}
 }
 
-// The logo fixtures are what the logo's upload accepts: PNGs that decode,
-// within its 1 MiB bound, one for each organization the default state
-// seeds.
 func TestSeedFixtures_AreLogosTheUploadAccepts(t *testing.T) {
 	db, rec := newDatabase(t)
 	var order []string
@@ -386,8 +338,6 @@ func TestSeedFixtures_AreLogosTheUploadAccepts(t *testing.T) {
 	}
 }
 
-// fixtureReader is the logos' contribution reduced to its fixtures: it
-// decodes each fixture a row names as a PNG and records its size.
 type fixtureReader struct{ sizes map[string]int }
 
 func (*fixtureReader) Key() string { return "logos" }
@@ -418,8 +368,6 @@ func (f *fixtureReader) Write(_ context.Context, raw json.RawMessage, fixtures f
 	return len(rows), nil
 }
 
-// SeedRows decodes strictly: a field the row type does not carry is a
-// defect in the file.
 func TestSeedRows_RefusesAnUnknownField(t *testing.T) {
 	type row struct {
 		Code string `json:"code"`

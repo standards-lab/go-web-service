@@ -27,27 +27,15 @@ import (
 	"github.com/standards-lab/go-web-service/data"
 )
 
-// dialect is the scripted driver's dialect with the server-version
-// capability the admin service asserts, so Diagnose runs its whole path.
 type dialect struct{ sqltest.Dialect }
 
 func (dialect) ServerVersion() string { return "SELECT version()" }
 
-// module composes the admin domain the way the composition root does, over
-// the scripted driver: the pool's lifecycle object, started so it answers
-// pings, the session, the migrator over the service's migration set
-// (unlocked, since the test dialect has no lock capability), the catalog,
-// the data package's seeder over stand-ins for the domains' seed
-// contributions, and the registry; seed names the state whose
-// set the service applies on a seed request naming none. The schema gate
-// is an open one no sweep holds.
 func module(t *testing.T, seed string, responses ...sqltest.Response) (http.Handler, *sqltest.Recorder) {
 	t.Helper()
 	return gatedModule(t, new(reactor.Gate), seed, responses...)
 }
 
-// gatedModule is module over the given schema gate, which a test holds
-// shared as a sweep pass in flight would.
 func gatedModule(t *testing.T, gate database.SchemaGate, seed string, responses ...sqltest.Response) (http.Handler, *sqltest.Recorder) {
 	t.Helper()
 	pool, rec := sqltest.Open(t, responses...)
@@ -116,8 +104,8 @@ func TestReads_NeedNoDatabase(t *testing.T) {
 }
 
 func TestSchema_ReportsAnEmptyHistoryAsPending(t *testing.T) {
-	// The set's history table does not exist: one probe reports it.
-	h, rec := module(t, "", count(0))
+	noHistoryTable := count(0)
+	h, rec := module(t, "", noHistoryTable)
 
 	st := decode(t, send(t, h, "GET", "/database/schema", ""), 200)
 	sets, _ := st["sets"].([]any)
@@ -167,10 +155,6 @@ func TestSeed_IsForbiddenWithNoSet(t *testing.T) {
 	}
 }
 
-// organizations stands in for the organization domain's seed
-// contribution, which the composition root hands the seeder: it reads the
-// state's organizations and reports each as inserted, running no
-// statement, since the domain's own tests prove its seed.
 type organizations struct{}
 
 func (organizations) Key() string { return "organizations" }
@@ -179,8 +163,6 @@ func (organizations) Apply(_ context.Context, _ *sqlate.Tx, raw json.RawMessage)
 	return len(rows), err
 }
 
-// files stands in for a domain's contribution of stored files under key:
-// it reads the state's rows and reports each as stored, writing nothing.
 type files struct{ key string }
 
 func (f files) Key() string { return f.key }
@@ -189,9 +171,6 @@ func (files) Write(_ context.Context, raw json.RawMessage, _ fs.FS) (int, error)
 	return len(rows), err
 }
 
-// defaultSeeder is the seeder module composes, over a pool of its own, so
-// a test reads what the data package's states hold rather than restating
-// them.
 func defaultSeeder(t *testing.T) *data.Seeder {
 	t.Helper()
 	pool, _ := sqltest.Open(t)
@@ -199,8 +178,6 @@ func defaultSeeder(t *testing.T) *data.Seeder {
 	return data.NewSeeder(d, organizations{}, files{"logos"}, files{"documents"})
 }
 
-// A bodyless seed applies the configured set; a body names another. Both
-// answer with the rows inserted by table.
 func TestSeed_AppliesTheConfiguredOrNamedSet(t *testing.T) {
 	want, err := defaultSeeder(t).Seed(t.Context(), "default")
 	if err != nil || len(want) == 0 {
@@ -287,8 +264,6 @@ func TestDiagnostics_PingsAndReadsTheServerVersion(t *testing.T) {
 	}
 }
 
-// sendWithin is send under a request context that ends after d, as a
-// client that gives up would.
 func sendWithin(t *testing.T, h http.Handler, d time.Duration, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), d)
@@ -299,10 +274,6 @@ func sendWithin(t *testing.T, h http.Handler, d time.Duration, path, body string
 	return rec
 }
 
-// A reset waits for the sweep pass in flight: while a pass holds the gate
-// shared, the reset reaches no statement, and once the pass releases it,
-// the reset runs, here into a scripted failure, and releases the gate in
-// turn.
 func TestState_WaitsForTheSweepPassInFlight(t *testing.T) {
 	gate := new(reactor.Gate)
 	pass, err := gate.Shared(context.Background())
@@ -344,9 +315,6 @@ func TestState_WaitsForTheSweepPassInFlight(t *testing.T) {
 	next()
 }
 
-// Every verb that changes the schema holds the gate: with a pass holding
-// it, each waits until its request gives up, having run nothing. verify,
-// force, and seed hold nothing, so each answers under the pass.
 func TestVerbs_ChangingTheSchemaHoldTheGate(t *testing.T) {
 	gate := new(reactor.Gate)
 	pass, err := gate.Shared(context.Background())

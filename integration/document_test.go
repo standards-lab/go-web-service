@@ -20,14 +20,8 @@ import (
 	"github.com/standards-lab/go-web-service/integration"
 )
 
-// docsOrg is the organization whose documents the document and sweep cases
-// work in: one the default state seeds no document tree for, so each case
-// starts from an organization without a root. The seeded tree is acme's,
-// and TestSeededStorage reads it.
 const docsOrg = "finance"
 
-// The document API's directory and file, as it presents them: the fields
-// the suite reads.
 type directory struct {
 	ID      string  `json:"id"`
 	Name    string  `json:"name"`
@@ -54,8 +48,6 @@ type filePage struct {
 	Total *int   `json:"total"`
 }
 
-// entryPage is either listing's page as the paging case reads it: each
-// entry's name and the envelope's paging fields.
 type entryPage struct {
 	Items []struct {
 		Name string `json:"name"`
@@ -66,7 +58,6 @@ type entryPage struct {
 	Next  string `json:"next"`
 }
 
-// names is the page's entries' names in order.
 func (p entryPage) names() []string {
 	out := make([]string, len(p.Items))
 	for i, e := range p.Items {
@@ -75,7 +66,6 @@ func (p entryPage) names() []string {
 	return out
 }
 
-// total is the page's counted total, or -1 when the page omitted it.
 func (p entryPage) total() int {
 	if p.Total == nil {
 		return -1
@@ -83,19 +73,12 @@ func (p entryPage) total() int {
 	return *p.Total
 }
 
-// The document API's contract, the deleting state included. The object
-// store is relayed through a forwarder, so a case that asserts a marked
-// branch holds it: with the store severed, the sweep the delete nudges is
-// refused each file's object, and a directory holding a file stays
-// deleting (the sweep's own cases are TestDocumentSweep's).
 func TestDocument(t *testing.T) {
 	f := processtest.Forward(t, integration.StorageAddr())
 	s := integration.Start(t, integration.Options{Seed: integration.Default, Storage: f.Addr()})
 	c := s.Client()
 	objects := integration.Objects(t)
-	// hold severs the store for the rest of the case, or until the case
-	// calls the restore it returns.
-	hold := func(t *testing.T) (restore func()) {
+	severStore := func(t *testing.T) (restore func()) {
 		f.Sever()
 		restored := false
 		t.Cleanup(func() {
@@ -132,10 +115,6 @@ func TestDocument(t *testing.T) {
 		}
 	})
 
-	// Both listings page by number and by cursor: each walk, in pages of
-	// two, reads every entry once in the default sort, by name, so the
-	// pages are disjoint and together complete. A cursor continues only
-	// the listing, sort, and paging mode that minted it.
 	run("the listings page by number and by cursor", func(t *testing.T, docs string) {
 		files := []string{"f0.txt", "f1.txt", "f2.txt", "f3.txt", "f4.txt"}
 		dirs := []string{"d0", "d1", "d2"}
@@ -181,18 +160,18 @@ func TestDocument(t *testing.T) {
 			}
 			cursors[listing] = first.Next
 
-			// A page past the last is empty, not an error.
 			if p := webtest.Decode[entryPage](t, c.Get(t, listing+"?size=2&page=9"), http.StatusOK); len(p.Items) != 0 || p.More {
-				t.Errorf("%s page 9 = %+v; want an empty page", listing, p)
+				t.Errorf("%s page 9 = %+v; want a page past the last empty, not an error", listing, p)
 			}
-			// A cursor with a page, one sent under another sort, and one
-			// that is not a cursor at all are each the request's error.
-			_ = c.Get(t, listing+"?page=2&cursor="+url.QueryEscape(first.Next)).Problem(t, http.StatusBadRequest)
-			_ = c.Get(t, listing+"?size=2&sort=-name&cursor="+url.QueryEscape(first.Next)).Problem(t, http.StatusBadRequest)
-			_ = c.Get(t, listing+"?cursor=not-a-cursor").Problem(t, http.StatusBadRequest)
+			t.Run("a cursor with a page, under another sort, or malformed is a 400", func(t *testing.T) {
+				_ = c.Get(t, listing+"?page=2&cursor="+url.QueryEscape(first.Next)).Problem(t, http.StatusBadRequest)
+				_ = c.Get(t, listing+"?size=2&sort=-name&cursor="+url.QueryEscape(first.Next)).Problem(t, http.StatusBadRequest)
+				_ = c.Get(t, listing+"?cursor=not-a-cursor").Problem(t, http.StatusBadRequest)
+			})
 		}
-		// Nor does one listing's cursor continue the other's.
-		_ = c.Get(t, docs+"/directories/root/directories?size=2&cursor="+url.QueryEscape(cursors[docs+"/directories/root/files"])).Problem(t, http.StatusBadRequest)
+		t.Run("one listing's cursor does not continue the other's", func(t *testing.T) {
+			_ = c.Get(t, docs+"/directories/root/directories?size=2&cursor="+url.QueryEscape(cursors[docs+"/directories/root/files"])).Problem(t, http.StatusBadRequest)
+		})
 	})
 
 	run("the deletes guard on If-Match", func(t *testing.T, docs string) {
@@ -220,31 +199,30 @@ func TestDocument(t *testing.T) {
 		c.Delete(t, docs+"/directories/"+reports.ID, webtest.IfMatch(reports.Version)).Expect(t, http.StatusNoContent)
 		root := webtest.Decode[directory](t, c.Get(t, docs+"/directories/root"), http.StatusOK)
 
-		// The owner row goes with the root, so the organization reads as
-		// one without a root: the alias is not found, and its listing is
-		// an empty page.
-		c.Delete(t, docs+"/directories/root", webtest.IfMatch(root.Version)).Expect(t, http.StatusNoContent)
-		_ = c.Get(t, docs+"/directories/root").Problem(t, http.StatusNotFound)
-		_ = c.Get(t, docs+"/directories/"+root.ID).Problem(t, http.StatusNotFound)
-		if p := webtest.Decode[directoryPage](t, c.Get(t, docs+"/directories/root/directories"), http.StatusOK); len(p.Items) != 0 || p.Total == nil || *p.Total != 0 {
-			t.Errorf("the rootless organization's listing = %+v; want an empty page", p)
-		}
+		t.Run("the owner row goes with the root, so the organization reads rootless", func(t *testing.T) {
+			c.Delete(t, docs+"/directories/root", webtest.IfMatch(root.Version)).Expect(t, http.StatusNoContent)
+			_ = c.Get(t, docs+"/directories/root").Problem(t, http.StatusNotFound)
+			_ = c.Get(t, docs+"/directories/"+root.ID).Problem(t, http.StatusNotFound)
+			if p := webtest.Decode[directoryPage](t, c.Get(t, docs+"/directories/root/directories"), http.StatusOK); len(p.Items) != 0 || p.Total == nil || *p.Total != 0 {
+				t.Errorf("the rootless organization's listing = %+v; want an empty page", p)
+			}
+		})
 
-		// The next write ensures a new root.
-		_ = webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)
-		if again := webtest.Decode[directory](t, c.Get(t, docs+"/directories/root"), http.StatusOK); again.ID == root.ID || again.Status != "active" {
-			t.Errorf("root after the next write = %+v; want a new, active root", again)
-		}
+		t.Run("the next write ensures a new root", func(t *testing.T) {
+			_ = webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)
+			if again := webtest.Decode[directory](t, c.Get(t, docs+"/directories/root"), http.StatusOK); again.ID == root.ID || again.Status != "active" {
+				t.Errorf("root after the next write = %+v; want a new, active root", again)
+			}
+		})
 	})
 
 	run("a recursive delete is accepted and repeats", func(t *testing.T, docs string) {
 		reports := webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)
 		_ = webtest.Decode[identity](t, c.Post(t, docs+"/directories/"+reports.ID+"/files?name=q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}), http.StatusCreated)
-		hold(t)
+		severStore(t)
 		deleteBranch(t, c, docs, reports.ID)
-		// The client's version is the one before the mark; the retry is
-		// accepted at it all the same.
-		r := c.Delete(t, docs+"/directories/"+reports.ID+"?recursive=true", webtest.IfMatch(reports.Version)).Expect(t, http.StatusAccepted)
+		versionBeforeTheMark := reports.Version
+		r := c.Delete(t, docs+"/directories/"+reports.ID+"?recursive=true", webtest.IfMatch(versionBeforeTheMark)).Expect(t, http.StatusAccepted)
 		if loc := r.Header.Get("Location"); loc != docs+"/directories/"+reports.ID {
 			t.Errorf("retry Location = %q", loc)
 		}
@@ -263,7 +241,7 @@ func TestDocument(t *testing.T) {
 			t.Fatalf("reports' files before the mark = %+v", f.Items)
 		}
 
-		hold(t)
+		severStore(t)
 		deleteBranch(t, c, docs, reports.ID)
 
 		for id, name := range map[string]string{reports.ID: "reports", archive.ID: "archive"} {
@@ -277,10 +255,8 @@ func TestDocument(t *testing.T) {
 		if f := webtest.Decode[file](t, c.Get(t, docs+"/files/"+q3.ID), http.StatusOK); f.Status != "deleting" {
 			t.Errorf("q3 = %+v; want it deleting", f)
 		}
-		// The branch is hidden from its parent's listing, which still
-		// lists the rest.
 		if p := webtest.Decode[directoryPage](t, c.Get(t, docs+"/directories/root/directories"), http.StatusOK); len(p.Items) != 0 || p.Total == nil || *p.Total != 0 {
-			t.Errorf("root's directories = %+v; want the deleting branch hidden", p)
+			t.Errorf("root's directories = %+v; want the deleting branch hidden from its parent's listing", p)
 		}
 		if f := webtest.Decode[filePage](t, c.Get(t, docs+"/directories/root/files"), http.StatusOK); len(f.Items) != 1 || f.Items[0].Name != "kept.txt" {
 			t.Errorf("root's files = %+v; want kept.txt alone", f.Items)
@@ -299,33 +275,28 @@ func TestDocument(t *testing.T) {
 
 		q2 := webtest.Decode[identity](t, c.Post(t, docs+"/directories/"+archive.ID+"/files?name=q2.txt", q3), http.StatusCreated)
 		q5 := webtest.Decode[identity](t, c.Post(t, docs+"/directories/"+reports.ID+"/files?name=q5.txt", q3), http.StatusCreated)
-		hold(t)
+		severStore(t)
 
-		// A delete the severed store refuses has begun: the file is
-		// deleting in an active directory, its own delete, not the
-		// directory's.
-		_ = c.Delete(t, docs+"/files/"+q5.ID, webtest.IfMatch(q5.Version)).Problem(t, http.StatusServiceUnavailable)
-		if f := webtest.Decode[file](t, c.Get(t, docs+"/files/"+q5.ID), http.StatusOK); f.Status != "deleting" {
-			t.Fatalf("q5 after the refused delete = %+v; want it deleting", f)
-		}
-		conflict(t, c.Post(t, docs+"/files/"+q5.ID+"/move", map[string]string{"directory_id": "root", "name": "q5.txt"}, webtest.IfMatch(q5.Version+1)), "the file is being deleted")
+		t.Run("a file's own refused delete is the file's, in an active directory", func(t *testing.T) {
+			_ = c.Delete(t, docs+"/files/"+q5.ID, webtest.IfMatch(q5.Version)).Problem(t, http.StatusServiceUnavailable)
+			if f := webtest.Decode[file](t, c.Get(t, docs+"/files/"+q5.ID), http.StatusOK); f.Status != "deleting" {
+				t.Fatalf("q5 after the refused delete = %+v; want it deleting", f)
+			}
+			conflict(t, c.Post(t, docs+"/files/"+q5.ID+"/move", map[string]string{"directory_id": "root", "name": "q5.txt"}, webtest.IfMatch(q5.Version+1)), "the file is being deleted")
+		})
 
-		deleteBranch(t, c, docs, archive.ID)
-		conflict(t, c.Post(t, docs+"/directories", map[string]string{"parent_id": archive.ID, "name": "q4"}), "the directory is being deleted")
-		conflict(t, c.Post(t, docs+"/directories/"+archive.ID+"/files?name=q4.txt", q3), "the directory is being deleted")
-		// A file the branch's mark made deleting is the directory's.
-		conflict(t, c.Post(t, docs+"/files/"+q2.ID+"/move", map[string]string{"directory_id": "root", "name": "q2.txt"}, webtest.IfMatch(q2.Version+1)), "the directory is being deleted")
+		t.Run("a file the branch's mark made deleting is the directory's", func(t *testing.T) {
+			deleteBranch(t, c, docs, archive.ID)
+			conflict(t, c.Post(t, docs+"/directories", map[string]string{"parent_id": archive.ID, "name": "q4"}), "the directory is being deleted")
+			conflict(t, c.Post(t, docs+"/directories/"+archive.ID+"/files?name=q4.txt", q3), "the directory is being deleted")
+			conflict(t, c.Post(t, docs+"/files/"+q2.ID+"/move", map[string]string{"directory_id": "root", "name": "q2.txt"}, webtest.IfMatch(q2.Version+1)), "the directory is being deleted")
+		})
 	})
 
-	// A file delete the severed store refuses has begun: the row is
-	// deleting, a version on, and hidden from its directory's listing,
-	// and the object is still stored. Once the store is back, the retry
-	// at the version the client read is the same delete, which finishes:
-	// the file reads 404 and its object is gone.
 	run("a refused file delete is left deleting, and its retry finishes it", func(t *testing.T, docs string) {
 		q3 := webtest.Decode[identity](t, c.Post(t, docs+"/directories/root/files?name=q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}), http.StatusCreated)
 		key := q3.ID + "/q3.txt"
-		restore := hold(t)
+		restore := severStore(t)
 
 		_ = c.Delete(t, docs+"/files/"+q3.ID, webtest.IfMatch(q3.Version)).Problem(t, http.StatusServiceUnavailable)
 		if f := webtest.Decode[file](t, c.Get(t, docs+"/files/"+q3.ID), http.StatusOK); f.Status != "deleting" || f.Version != q3.Version+1 {
@@ -345,8 +316,9 @@ func TestDocument(t *testing.T) {
 		if _, err := objects.Stat(context.Background(), key); !errors.Is(err, storage.ErrNotFound) {
 			t.Errorf("stat %s after the retried delete = %v; want not found", key, err)
 		}
-		// The name is free again.
-		c.Post(t, docs+"/directories/root/files?name=q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}).Expect(t, http.StatusCreated)
+		t.Run("the name is free again", func(t *testing.T) {
+			c.Post(t, docs+"/directories/root/files?name=q3.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}).Expect(t, http.StatusCreated)
+		})
 	})
 
 	run("an upload is a POST, answered with its metadata's Location", func(t *testing.T, docs string) {
@@ -359,23 +331,26 @@ func TestDocument(t *testing.T) {
 			t.Errorf("the Location's read = %+v; want q3.txt, available", f)
 		}
 		_ = c.Post(t, docs+"/directories/root/files", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}).Problem(t, http.StatusBadRequest)
-		// The PUT to a name is no route.
-		_ = c.Put(t, docs+"/directories/root/files/q4.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}).Problem(t, http.StatusNotFound)
+		t.Run("a PUT to a name is no route", func(t *testing.T) {
+			_ = c.Put(t, docs+"/directories/root/files/q4.txt", webtest.Raw{ContentType: "text/plain", Body: []byte("report")}).Problem(t, http.StatusNotFound)
+		})
 	})
 
 	run("an organization that does not exist lists as not found", func(t *testing.T, docs string) {
 		absent := "/api/documents/" + absentID
 		_ = c.Get(t, absent+"/directories/root/directories").Problem(t, http.StatusNotFound)
 		_ = c.Get(t, absent+"/directories/root/files").Problem(t, http.StatusNotFound)
-		// A real organization without a root still lists an empty page.
-		if p := webtest.Decode[filePage](t, c.Get(t, docs+"/directories/root/files"), http.StatusOK); len(p.Items) != 0 || p.Total == nil || *p.Total != 0 {
-			t.Errorf("the rootless organization's files = %+v; want an empty page", p)
-		}
-		// Its listing refuses what a real root's refuses.
-		for _, bad := range []string{"?sort=nope", "?nope=1", "?cursor=past"} {
-			_ = c.Get(t, docs+"/directories/root/files"+bad).Problem(t, http.StatusBadRequest)
-			_ = c.Get(t, docs+"/directories/root/directories"+bad).Problem(t, http.StatusBadRequest)
-		}
+		t.Run("a real organization without a root lists an empty page", func(t *testing.T) {
+			if p := webtest.Decode[filePage](t, c.Get(t, docs+"/directories/root/files"), http.StatusOK); len(p.Items) != 0 || p.Total == nil || *p.Total != 0 {
+				t.Errorf("the rootless organization's files = %+v; want an empty page", p)
+			}
+		})
+		t.Run("a rootless listing refuses what a real root's refuses", func(t *testing.T) {
+			for _, bad := range []string{"?sort=nope", "?nope=1", "?cursor=past"} {
+				_ = c.Get(t, docs+"/directories/root/files"+bad).Problem(t, http.StatusBadRequest)
+				_ = c.Get(t, docs+"/directories/root/directories"+bad).Problem(t, http.StatusBadRequest)
+			}
+		})
 	})
 
 	run("a download round-trips its bytes and revalidates", func(t *testing.T, docs string) {
@@ -398,13 +373,11 @@ func TestDocument(t *testing.T) {
 				t.Errorf("GET with %s = %d, body %q, ETag %q; want 304, no body, the same ETag", h.Name, r.Status, r.Body, r.Header.Get("ETag"))
 			}
 		}
-		// The download's ETag is the object's, never a version.
-		_ = c.Delete(t, docs+"/files/"+report.ID, webtest.Header{Name: "If-Match", Value: etag}).Problem(t, http.StatusBadRequest)
+		t.Run("the download's ETag is the object's, never a version", func(t *testing.T) {
+			_ = c.Delete(t, docs+"/files/"+report.ID, webtest.Header{Name: "If-Match", Value: etag}).Problem(t, http.StatusBadRequest)
+		})
 	})
 
-	// Organization B's API reaches none of organization A's documents: an
-	// A id at any B route answers exactly as an absent id does, and the
-	// root alias resolves to each organization's own root.
 	run("an organization reaches none of another's documents", func(t *testing.T, adocs string) {
 		bdocs := "/api/documents/" + tree(t, c)["engineering"].ID
 		mkdir := func(docs, parent, name string) identity {
@@ -422,9 +395,7 @@ func TestDocument(t *testing.T) {
 			t.Fatalf("both organizations' root alias = %s; want a root each", aRoot.ID)
 		}
 
-		// Each attempt is sent with an A id, then with an absent one in
-		// its place: both are 404 with the same problem.
-		attempts := map[string]func(id string) *webtest.Response{
+		attemptWithAnAIDThenAnAbsentOne := map[string]func(id string) *webtest.Response{
 			"read a directory":     func(id string) *webtest.Response { return c.Get(t, bdocs+"/directories/"+id) },
 			"read A's root":        func(id string) *webtest.Response { return c.Get(t, bdocs+"/directories/"+id) },
 			"list its directories": func(id string) *webtest.Response { return c.Get(t, bdocs+"/directories/"+id+"/directories") },
@@ -464,7 +435,7 @@ func TestDocument(t *testing.T) {
 			"move a directory": archive.ID, "delete a directory": archive.ID,
 			"read a file": q3.ID, "download a file": q3.ID, "delete a file": q3.ID, "move a file": q3.ID,
 		}
-		for name, attempt := range attempts {
+		for name, attempt := range attemptWithAnAIDThenAnAbsentOne {
 			id := reports.ID
 			if tid, ok := target[name]; ok {
 				id = tid
@@ -476,29 +447,25 @@ func TestDocument(t *testing.T) {
 			}
 		}
 
-		// Nothing of either tree moved: A's reads as it was, and each root
-		// lists its own organization's entries alone.
-		if d := webtest.Decode[directory](t, c.Get(t, adocs+"/directories/"+archive.ID), http.StatusOK); d.Status != "active" || d.Parent == nil || *d.Parent != reports.ID {
-			t.Errorf("A's archive = %+v; want it active under reports", d)
-		}
-		if r := c.Get(t, adocs+"/files/"+q3.ID+"/content").Expect(t, http.StatusOK); string(r.Body) != "q3.txt" {
-			t.Errorf("A's q3 = %q", r.Body)
-		}
-		for docs, want := range map[string]string{adocs: "reports", bdocs: "inbox"} {
-			if p := webtest.Decode[directoryPage](t, c.Get(t, docs+"/directories/root/directories"), http.StatusOK); len(p.Items) != 1 || p.Items[0].Name != want {
-				t.Errorf("%s root's directories = %+v; want %s alone", docs, p.Items, want)
+		t.Run("nothing of either tree moved", func(t *testing.T) {
+			if d := webtest.Decode[directory](t, c.Get(t, adocs+"/directories/"+archive.ID), http.StatusOK); d.Status != "active" || d.Parent == nil || *d.Parent != reports.ID {
+				t.Errorf("A's archive = %+v; want it active under reports", d)
 			}
-		}
-		if f := webtest.Decode[filePage](t, c.Get(t, bdocs+"/directories/root/files"), http.StatusOK); len(f.Items) != 1 || f.Items[0].Name != "memo.txt" {
-			t.Errorf("B root's files = %+v; want memo.txt alone", f.Items)
-		}
+			if r := c.Get(t, adocs+"/files/"+q3.ID+"/content").Expect(t, http.StatusOK); string(r.Body) != "q3.txt" {
+				t.Errorf("A's q3 = %q", r.Body)
+			}
+			for docs, want := range map[string]string{adocs: "reports", bdocs: "inbox"} {
+				if p := webtest.Decode[directoryPage](t, c.Get(t, docs+"/directories/root/directories"), http.StatusOK); len(p.Items) != 1 || p.Items[0].Name != want {
+					t.Errorf("%s root's directories = %+v; want %s alone", docs, p.Items, want)
+				}
+			}
+			if f := webtest.Decode[filePage](t, c.Get(t, bdocs+"/directories/root/files"), http.StatusOK); len(f.Items) != 1 || f.Items[0].Name != "memo.txt" {
+				t.Errorf("B root's files = %+v; want memo.txt alone", f.Items)
+			}
+		})
 	})
 }
 
-// deleteBranch deletes the directory with id recursively, as markBranch
-// does, and asserts its Location's read reports it deleting. The caller
-// holds the sweep, the object store severed with a file in each directory
-// the case reads, so the branch stays marked for the rest of the case.
 func deleteBranch(t *testing.T, c *webtest.Client, docs, id string) {
 	t.Helper()
 	loc := markBranch(t, c, docs, id)
@@ -507,11 +474,6 @@ func deleteBranch(t *testing.T, c *webtest.Client, docs, id string) {
 	}
 }
 
-// markBranch deletes the directory with id recursively at the version it
-// reads at, and asserts the 202 and its Location, the directory's read,
-// which it returns; the id may be the root's alias, whose Location names
-// the root's id. The sweep the delete nudges may remove the branch at any
-// moment after.
 func markBranch(t *testing.T, c *webtest.Client, docs, id string) string {
 	t.Helper()
 	d := webtest.Decode[directory](t, c.Get(t, docs+"/directories/"+id), http.StatusOK)
@@ -523,15 +485,7 @@ func markBranch(t *testing.T, c *webtest.Client, docs, id string) string {
 	return loc
 }
 
-// A document upload the severed store refuses is abandoned, and its
-// abandon is refused too: the put fails, then so does the abandon's
-// object delete, so the pending row is left deleting, not removed. The
-// deleting row is hidden from the listing, as every listing hides one,
-// yet it still holds its name, so the same upload answers 409, until the
-// sweep's stale reclaim finishes the row once the store is back. The
-// service runs a short interval and a one-second stale age, so the
-// reclaim follows within the wait; the retry then stores the file.
-func TestDocumentRefusedUpload(t *testing.T) {
+func TestDocumentRefusedUpload_HoldsItsNameUntilTheSweepReclaimsIt(t *testing.T) {
 	f := processtest.Forward(t, integration.StorageAddr())
 	s := integration.Start(t, integration.Options{
 		Seed:    integration.Default,
@@ -564,11 +518,9 @@ func TestDocumentRefusedUpload(t *testing.T) {
 		t.Errorf("the store after the refused upload holds %d objects (%v); want the %d before it", len(after.Objects), err, len(before.Objects))
 	}
 
-	// The hidden row holds the name, and blobfs refuses it as the deleting
-	// row it is, not as a taken name the client cannot list: the retry is
-	// refused in the begin's transaction, before any put, so it answers at
-	// once.
-	conflict(t, c.Post(t, docs+"/directories/root/files?name=q3.txt", q3), "the file is being deleted")
+	t.Run("the hidden row holds the name, and the retry is refused as the deleting row it is", func(t *testing.T) {
+		conflict(t, c.Post(t, docs+"/directories/root/files?name=q3.txt", q3), "the file is being deleted")
+	})
 
 	f.Restore(t)
 	restored = true
@@ -579,10 +531,6 @@ func TestDocumentRefusedUpload(t *testing.T) {
 	}
 }
 
-// slowPost uploads body to path on a client of its own: with the store
-// severed, the put fails once the provider's retries are spent, and the
-// abandon's object delete after it, which together outlast the harness
-// client's failsafe.
 func slowPost(t *testing.T, s *integration.Service, path string, body webtest.Raw) *webtest.Response {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, s.URL()+path, bytes.NewReader(body.Body))

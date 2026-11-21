@@ -31,8 +31,6 @@ func TestReadsConfig_MergeOverlaysSetFields(t *testing.T) {
 
 	base.Merge(overlay)
 
-	// The overlay's set field lands; the field it leaves unset keeps the
-	// base value.
 	if base.DefaultSize == nil || *base.DefaultSize != 10 {
 		t.Errorf("DefaultSize = %v, want 10", base.DefaultSize)
 	}
@@ -59,8 +57,6 @@ func TestReadsConfig_FinalizeEnvOverrides(t *testing.T) {
 	}
 }
 
-// An override points the field at its own value: the layer a merge shared
-// the pointer with keeps its value.
 func TestReadsConfig_EnvOverrideLeavesTheMergedLayer(t *testing.T) {
 	t.Setenv(libconfig.EnvName("app", "reads_default_size"), "5")
 	ten := 10

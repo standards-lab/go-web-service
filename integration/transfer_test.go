@@ -18,8 +18,6 @@ import (
 	"github.com/standards-lab/go-web-service/integration"
 )
 
-// pacedBody sends left bytes in chunks of size, pausing before each chunk:
-// a client uploading at a steady pace.
 type pacedBody struct {
 	left, size int
 	pause      time.Duration
@@ -38,20 +36,18 @@ func (p *pacedBody) Read(b []byte) (int, error) {
 	return n, nil
 }
 
-// pacedPost uploads 8 KiB to path at one chunk of 512 bytes per pause and
-// returns the response's status and how long the request took. The
-// transport's write buffer is one chunk, so each chunk reaches the server
-// when it is sent rather than 4 KiB at a time.
+const pacedChunk = 512
+
 func pacedPost(t *testing.T, s *integration.Service, path string, pause time.Duration) (int, time.Duration) {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodPost, s.URL()+path, &pacedBody{left: 8 << 10, size: 512, pause: pause})
+	req, err := http.NewRequest(http.MethodPost, s.URL()+path, &pacedBody{left: 8 << 10, size: pacedChunk, pause: pause})
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.ContentLength = 8 << 10
 	req.Header.Set("Content-Type", "text/plain")
 	start := time.Now()
-	client := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{WriteBufferSize: 512}}
+	client := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{WriteBufferSize: pacedChunk}}
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("POST %s: %v", path, err)
@@ -61,16 +57,10 @@ func pacedPost(t *testing.T, s *integration.Service, path string, pause time.Dur
 	return resp.StatusCode, time.Since(start)
 }
 
-// An upload sets its own deadline: under a one-second read timeout and a
-// transfer rate of 4 KiB/s, an 8 KiB upload is allowed three seconds. A
-// client within the rate uploads for longer than the read timeout; a
-// client slower than the rate is refused with a 408 once its three seconds
-// pass. The reset runs on a service at the default timeouts, since
-// reverting and reseeding every set is no one-second request.
-func TestTransferDeadlines(t *testing.T) {
-	setup := integration.Start(t, integration.Options{Seed: integration.Default}).Client()
-	integration.Reset(t, setup, integration.Default)
-	docs := "/api/documents/" + tree(t, setup)[docsOrg].ID
+func TestTransferDeadlines_AnUploadIsAllowedItsSizeOverTheRate(t *testing.T) {
+	atDefaultTimeouts := integration.Start(t, integration.Options{Seed: integration.Default}).Client()
+	integration.Reset(t, atDefaultTimeouts, integration.Default)
+	docs := "/api/documents/" + tree(t, atDefaultTimeouts)[docsOrg].ID
 	s := integration.Start(t, integration.Options{Seed: integration.Default, Env: []string{
 		"APP_SERVER_READ_TIMEOUT=1s",
 		"APP_SERVER_WRITE_TIMEOUT=1s",
@@ -83,21 +73,20 @@ func TestTransferDeadlines(t *testing.T) {
 	}
 	status, took = pacedPost(t, s, docs+"/directories/root/files?name=slow.txt", 400*time.Millisecond)
 	if status != http.StatusRequestTimeout || took < 2500*time.Millisecond || took > 5*time.Second {
-		t.Errorf("slow upload = %d after %s; want 408 after about 3s", status, took)
+		t.Errorf("slow upload = %d after %s; want 408 after about 3s, 8 KiB at 4 KiB/s", status, took)
 	}
 }
 
-// stallRelay forwards connections to target. Once stalled, it passes a
-// budget of bytes from target to the client and holds the rest, as a store
-// does that stops sending mid-body; Release lets them through again.
+const unlimitedBudget = -1
+
 type stallRelay struct {
 	target string
 	ln     net.Listener
 
-	mu      sync.Mutex
-	cond    *sync.Cond
-	budget  int64 // bytes still allowed downstream once stalled, across every connection; -1 is unlimited
-	stalled bool
+	mu               sync.Mutex
+	cond             *sync.Cond
+	downstreamBudget int64
+	stalled          bool
 }
 
 func newStallRelay(t *testing.T, target string) *stallRelay {
@@ -106,7 +95,7 @@ func newStallRelay(t *testing.T, target string) *stallRelay {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &stallRelay{target: target, ln: ln, budget: -1}
+	r := &stallRelay{target: target, ln: ln, downstreamBudget: unlimitedBudget}
 	r.cond = sync.NewCond(&r.mu)
 	t.Cleanup(func() {
 		r.Release()
@@ -118,17 +107,15 @@ func newStallRelay(t *testing.T, target string) *stallRelay {
 
 func (r *stallRelay) Addr() string { return r.ln.Addr().String() }
 
-// StallAfter lets n more bytes reach clients, then holds the rest.
 func (r *stallRelay) StallAfter(n int64) {
 	r.mu.Lock()
-	r.budget, r.stalled = n, true
+	r.downstreamBudget, r.stalled = n, true
 	r.mu.Unlock()
 }
 
-// Release passes every held byte and stops stalling.
 func (r *stallRelay) Release() {
 	r.mu.Lock()
-	r.budget, r.stalled = -1, false
+	r.downstreamBudget, r.stalled = unlimitedBudget, false
 	r.cond.Broadcast()
 	r.mu.Unlock()
 }
@@ -155,21 +142,19 @@ func (r *stallRelay) serve() {
 	}
 }
 
-// downstream copies from up to down, holding what exceeds the budget until
-// Release.
 func (r *stallRelay) downstream(down, up net.Conn) {
 	buf := make([]byte, 32<<10)
 	for {
 		n, err := up.Read(buf)
 		for p := buf[:n]; len(p) > 0; {
 			r.mu.Lock()
-			for r.stalled && r.budget == 0 {
+			for r.stalled && r.downstreamBudget == 0 {
 				r.cond.Wait()
 			}
 			allow := int64(len(p))
 			if r.stalled {
-				allow = min(allow, r.budget)
-				r.budget -= allow
+				allow = min(allow, r.downstreamBudget)
+				r.downstreamBudget -= allow
 			}
 			r.mu.Unlock()
 			if _, werr := down.Write(p[:allow]); werr != nil {
@@ -183,10 +168,7 @@ func (r *stallRelay) downstream(down, up net.Conn) {
 	}
 }
 
-// A store that stops sending mid-download is cut off: the read idle
-// timeout ends the response short within seconds instead of holding the
-// request open. Once the store sends again, a download is whole.
-func TestStorageStall(t *testing.T) {
+func TestStorageStall_ReadIdleTimeoutCutsTheDownloadShort(t *testing.T) {
 	relay := newStallRelay(t, integration.StorageAddr())
 	s := integration.Start(t, integration.Options{Seed: integration.Default, Storage: relay.Addr(), Env: []string{
 		"APP_STORAGE_READ_IDLE_TIMEOUT=2s",

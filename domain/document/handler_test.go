@@ -21,24 +21,18 @@ import (
 	"github.com/standards-lab/go-web-service/domain/document"
 )
 
-// module compiles the layer's route group the way the composition root
-// does, over the scripted driver with the given responses; with none
-// scripted, only the handler-local rejection paths can answer.
 func module(t *testing.T, responses ...sqltest.Response) http.Handler {
 	t.Helper()
 	svc, _, _ := serviceOver(t, responses...)
 	return routes(svc)
 }
 
-// routes mounts the layer's route group over svc as its own module.
 func routes(svc *document.Service) http.Handler {
 	r := web.NewRouter()
 	r.Mount(web.NewModule(document.Routes(svc, web.Limits{DefaultSize: 20, MaxSize: 100, Cursor: true}, transfer, slog.New(slog.DiscardHandler))))
 	return r
 }
 
-// send sends a request with an optional If-Match and body; a Content-Type
-// makes it an upload of the body at its length.
 func send(t *testing.T, h http.Handler, method, path, ifMatch, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	var r *http.Request
@@ -72,8 +66,6 @@ func problem(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int) map[s
 
 const base = "/documents/" + orgID
 
-// Every refusal the handler or a command can make from the request alone
-// answers before any statement runs: the module has nothing scripted.
 func TestRoutes_RejectBeforeAnyOperation(t *testing.T) {
 	cases := map[string]struct {
 		method, path, ifMatch, body string
@@ -127,8 +119,6 @@ func TestRoutes_RejectBeforeAnyOperation(t *testing.T) {
 	}
 }
 
-// upload POSTs a raw body with the given Content-Type, none when empty,
-// and declared length; a length of -1 is a chunked body.
 func upload(t *testing.T, h http.Handler, path, contentType, body string, length int64) *httptest.ResponseRecorder {
 	t.Helper()
 	r := httptest.NewRequest("POST", path, strings.NewReader(body))
@@ -141,8 +131,6 @@ func upload(t *testing.T, h http.Handler, path, contentType, body string, length
 	return rec
 }
 
-// An upload the layer would refuse is refused on its path, its name, and
-// its headers, before any statement runs or byte is stored.
 func TestUploadFile_RefusesBeforeAnyIO(t *testing.T) {
 	path := base + "/directories/root/files?name=report.txt"
 	cases := map[string]struct {
@@ -170,8 +158,6 @@ func TestUploadFile_RefusesBeforeAnyIO(t *testing.T) {
 	}
 }
 
-// Any media type is accepted, and the upload answers 201 with the new
-// file's identity and its metadata as the Location.
 func TestUploadFile_AnswersCreatedWithLocation(t *testing.T) {
 	h := module(t,
 		root(rootID), within(true), datatest.FileRows(file(fileID, dirID, blobfs.StatusPending, 1)),
@@ -191,9 +177,6 @@ func TestCreateDirectory_AnswersCreatedWithLocation(t *testing.T) {
 	}
 }
 
-// The scope check: an id outside the organization's root is not found,
-// exactly as an absent id is, and so is any id of an organization with no
-// root.
 func TestRoutes_OutsideTheRootIs404(t *testing.T) {
 	cases := map[string]struct {
 		responses    []sqltest.Response
@@ -229,8 +212,6 @@ func TestRoutes_OutsideTheRootIs404(t *testing.T) {
 	}
 }
 
-// An organization without a root yet lists an empty page at its alias,
-// and refuses a sort its listing does not know, as a real root's does.
 func TestListFiles_BeforeTheRootIsAnEmptyPage(t *testing.T) {
 	h := module(t, root(), organization(), sqltest.WithTotal(datatest.FileRows(), 0), datatest.DirectoryRows())
 	rec := send(t, h, "GET", base+"/directories/root/files", "", "")
@@ -240,8 +221,6 @@ func TestListFiles_BeforeTheRootIsAnEmptyPage(t *testing.T) {
 	problem(t, send(t, module(t, root(), organization()), "GET", base+"/directories/root/files?sort=nope", "", ""), 400)
 }
 
-// The alias's listings of an organization that does not exist are 404, as
-// every other route answers it.
 func TestListings_OfAMissingOrganizationAre404(t *testing.T) {
 	for _, listing := range []string{"directories", "files"} {
 		t.Run(listing, func(t *testing.T) {
@@ -251,8 +230,6 @@ func TestListings_OfAMissingOrganizationAre404(t *testing.T) {
 	}
 }
 
-// A status blobfs adds that the layer does not name yet is a server
-// fault, 500, rather than the library's text on the wire.
 func TestReads_AnUnknownStatusIs500(t *testing.T) {
 	archived := file(fileID, dirID, blobfs.StatusAvailable, 2)
 	archived.Status = "archived"
@@ -277,10 +254,6 @@ func TestReads_AnUnknownStatusIs500(t *testing.T) {
 	}
 }
 
-// The download is an attachment, never rendered inline, whatever the
-// stored type: the filename quoted, and a name outside printable ASCII,
-// or one holding a %, which some browsers percent-decode in a plain
-// filename, carried exactly in filename*.
 func TestContent_IsAnAttachment(t *testing.T) {
 	cases := map[string]struct{ name, disposition string }{
 		"plain":     {"report.txt", `attachment; filename="report.txt"`},
@@ -310,10 +283,6 @@ func TestContent_IsAnAttachment(t *testing.T) {
 	}
 }
 
-// A download whose object fails to open answers a problem that carries
-// none of the file's headers and is not cached in its place: no
-// attachment name, and no-store over the handler's private, no-cache. An
-// absent object is 404, a missing container 503.
 func TestContent_AnOpenFailureDropsTheFilesHeaders(t *testing.T) {
 	for name, c := range map[string]struct {
 		drop bool
@@ -336,14 +305,11 @@ func TestContent_AnOpenFailureDropsTheFilesHeaders(t *testing.T) {
 	}
 }
 
-// A file whose write has not completed has no content to serve.
 func TestContent_OfAPendingFileIs404(t *testing.T) {
 	h := module(t, root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusPending, 1)), within(true))
 	problem(t, send(t, h, "GET", base+"/files/"+fileID+"/content", "", ""), 404)
 }
 
-// A directory read carries its status, and a directory in a branch marked
-// for its delete still reads by id, deleting.
 func TestDirectory_CarriesItsStatus(t *testing.T) {
 	ancestors := sqltest.Response{
 		Columns: []string{"id", "parent_id", "name"},
@@ -367,8 +333,6 @@ func TestDirectory_CarriesItsStatus(t *testing.T) {
 	}
 }
 
-// A listing within a branch being deleted is not found, not a conflict:
-// the directory still reads by id, but it lists nothing.
 func TestListings_WithinADeletingBranchAre404(t *testing.T) {
 	marked := deleting(directory(dirID, rootID, "reports", 1))
 	cases := map[string]sqltest.Response{
@@ -383,12 +347,6 @@ func TestListings_WithinADeletingBranchAre404(t *testing.T) {
 	}
 }
 
-// The layer's error writer composes data.Status, whose conflicts carry a
-// curated detail: one conflict, an upload under a taken name, proves the
-// wiring, answering 409 with data.DetailNameTaken and none of the error's
-// own text, which names blobfs's operation, its ids, and its constraints.
-// data.Status's own test holds every conflict's detail, and the
-// integration suite each one's end to end.
 func TestRoutes_AConflictCarriesItsCuratedDetail(t *testing.T) {
 	h := module(t, root(rootID), within(true), sqltest.Response{Err: takenName()})
 	rec := upload(t, h, base+"/directories/"+dirID+"/files?name=report.txt", "text/plain", "report", 6)
@@ -402,9 +360,6 @@ func TestRoutes_AConflictCarriesItsCuratedDetail(t *testing.T) {
 	}
 }
 
-// A recursive delete answers 202 with no body once the branch is marked,
-// its Location the directory's read, and a repeated one, the mark's retry,
-// is accepted again. The root's alias locates the root by its id.
 func TestDeleteDirectory_RecursiveIs202(t *testing.T) {
 	cases := map[string]struct {
 		responses []sqltest.Response
@@ -427,7 +382,6 @@ func TestDeleteDirectory_RecursiveIs202(t *testing.T) {
 	}
 }
 
-// The deletes answer 204, and 412 at a version the row no longer holds.
 func TestDeletes_GuardOnIfMatch(t *testing.T) {
 	cases := map[string]struct {
 		responses     []sqltest.Response
@@ -462,8 +416,6 @@ func TestDeletes_GuardOnIfMatch(t *testing.T) {
 	}
 }
 
-// The reads' wire shape, byte for byte: the statuses are the layer's own
-// vocabulary, mapped from blobfs's, and each serializes as it always has.
 func TestReads_WireShape(t *testing.T) {
 	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	stamp := func(d blobfs.Directory) blobfs.Directory { d.CreatedAt, d.UpdatedAt = at, at; return d }
@@ -514,6 +466,4 @@ func TestReads_WireShape(t *testing.T) {
 	}
 }
 
-// transfer sizes the test routes' transfers at 1 MiB/s with a second's
-// grace; a recorder has no connection deadlines for it to set.
 func transfer(limit int64) web.Transfer { return web.NewTransfer(limit, 1<<20, time.Second) }

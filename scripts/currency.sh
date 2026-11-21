@@ -6,9 +6,8 @@
 # the project in a subdirectory, of the git top-level's. A tool directive's module
 # is reported beside the direct requirements unless the module also requires it
 # directly. An image pin is a compose or CI image: line or a compose service's
-# Dockerfile FROM line, compared with the highest tag that carries the pin's
-# variant suffix (18.6-alpine -> -alpine) and at least one dot, so a bare build
-# number (Grafana's 98813352) never counts as a release.
+# Dockerfile FROM line, compared with the highest release tag as the rolling
+# currency principle defines one.
 #
 # Each scan captures its command's output in a variable before reading it, so
 # under set -e a scan command that fails (a go list missing a go.sum entry)

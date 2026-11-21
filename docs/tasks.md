@@ -31,7 +31,8 @@ mise. `serve`'s full command also needs a shell that understands `/dev/tcp` (bas
 | `mise run db:state <state>` | `curl -d '{"state":"<state>","confirm":true}' localhost:8080/admin/database/state` | Reset the running service's database to a named state |
 | `mise run slab -- scenario <name>` | `cd tools/slab && go run ./cmd/slab` | Run a narrated scenario (`mise run slab -- scenario` lists them) — see [`tools/slab/README.md`](../tools/slab/README.md) |
 
-Every Go task runs in each module `GO_MODULES` lists in `mise.toml` (`.` and `tools/slab`). The
+`check` and `upgrade` run in each module `GO_MODULES` lists in `mise.toml` (`.` and
+`tools/slab`); `vet`, `test`, and `lint` name both modules; `tidy` runs in the root module. The
 check stops at the first Go or sqlint failure; its `go test` runs the unit tier only, the
 integration tier staying behind its build tag, while vet, fix, and lint read the integration suite
 too (`-tags integration`). `lint-context` and `lint-references` both run before either fails the
@@ -46,6 +47,6 @@ services to leave the `db:` group alone. Neither half of the `stack:` tasks depe
 so mise runs each pair in parallel.
 
 `mise run slab -- scenario storage` narrates the storage end to end against the running service: the
-two migration sets, the seeded logos and document tree, the validators and refusals, and a
-recursive delete waited out through the sweep. `mise run slab -- scenario events` runs a
+`blobfs` and `app` migration sets, the seeded logos and document tree, the validators and
+refusals, and a recursive delete waited out through the sweep. `mise run slab -- scenario events` runs a
 command for every event type, for `events watch` ([Adding an event](messaging.md#adding-an-event)) to print.

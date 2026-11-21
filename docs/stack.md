@@ -44,16 +44,19 @@ Only the composition root (`internal/app`) imports a provider. `infrastructure.g
 pool through go-database's provider, takes the dialect from sqlate's, builds the object store's
 client through go-storage's `azureblob` and the broker through go-messaging's `nats`, and
 installs blobfs's `postgres` engine; `admin.go` declares blobfs's and go-messaging's `postgres`
-migration sets, and `reactors.go` gives the messaging runtime go-messaging's `postgres` outbox
-and inbox. The configuration, `internal/config`, imports go-messaging's `nats` too, for its
-`nats` block alone: go-messaging keeps the broker's settings with its provider, not in its base,
-as go-database and go-storage keep theirs. Every other package is provider-free, and native use
-stays in SQL files. There are
-two exceptions, both outside the service's process: the integration harness, which builds its
-own clients (go-database's `postgres` pool, `azureblob`, and go-messaging's `nats` broker) to
-reach the database, the store, and the stream beneath the API; and the tool module's
-`tools/slab/events`, which imports go-messaging's `nats` and nats.go to watch the stream. The
-boundary is a convention; no linter enforces it.
+migration sets, `reactors.go` gives the messaging runtime go-messaging's `postgres` outbox and
+inbox, and `app.go` types the graph's broker node as go-messaging's `nats` broker. The
+configuration, `internal/config`, imports go-messaging's `nats` too, for its `nats` block alone:
+go-messaging keeps the broker's settings with its provider, not in its base, as go-database and
+go-storage keep theirs. Every other package is provider-free, and native use stays in SQL files.
+There are three exceptions, all outside the service's process: the integration harness, which
+builds its own clients (go-database's `postgres` pool, `azureblob`, and go-messaging's `nats`
+broker) to reach the database, the store, and the stream beneath the API; the tool module's
+`tools/slab/events`, which imports go-messaging's `nats` and nats.go to watch the stream; and
+slab's sqlate scenario, which compiles a statement for sqlate's `postgres`. Unit tests import
+engines as well: the domains' and `admin/database`'s tests take go-messaging's `postgres` outbox
+(and the document domain's, blobfs's `postgres` engine), and slab's `statement` tests compile
+against sqlate's `postgres` dialect. The boundary is a convention; no linter enforces it.
 
 ## What a provider swap changes
 

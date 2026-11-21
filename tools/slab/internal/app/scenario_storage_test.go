@@ -178,7 +178,7 @@ func TestScenario_StorageNarratesEachStepAsNoteRequestResponse(t *testing.T) {
 	out := runStorageOK(t, newStorageFake(t))
 	logo := organization.Organizations + "/" + fakeAcmeID + "/logo"
 	for _, c := range []struct{ heading, note, request, status string }{
-		{"[1/16]", "two migration sets", "GET " + schemaRoute, "HTTP 200 OK"},
+		{"[1/16]", "three migration sets", "GET " + schemaRoute, "HTTP 200 OK"},
 		{"[2/16]", "A seed is additive", "POST " + seedRoute, "HTTP 200 OK"},
 		{"[3/16]", "served by proxy", "GET " + logo, "HTTP 200 OK"},
 		{"[4/16]", "If-None-Match", "GET " + logo, "HTTP 304 Not Modified"},

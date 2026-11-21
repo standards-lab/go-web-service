@@ -59,8 +59,8 @@ The object storage admin service is mounted under `/admin/storage`:
 | `POST` | `/admin/storage/container` | Create the configured container if it is missing, then answer with the diagnostics |
 
 A store that cannot be reached answers 503 with the provider's reason. The admin mount serves on
-the API listener until the management listener lands; it is not for a public deployment as it
-stands.
+the API listener until the management listener, the admin mount on its own listener, lands
+([planned](../context/README.md)); it is not for a public deployment as it stands.
 
 A container deleted while the service runs makes every storage operation a 503, a download's
 read included, and takes the storage check on `/readyz` down; the rows are untouched. `POST

@@ -20,28 +20,14 @@ section the code comes to express is deleted.
 - The layer spans the SDKs and this service. The reads and writes slices are coordinated
   sessions — a library slice and the service slice that proves it, planned together, each
   repository on its own branch with its own pull request. The domain slices are service-only.
-- Documentation waits for the effort to close: integration documentation joins the root `docs/`
-  pages once the surfaces stop churning. Until then the README carries identity and
-  getting-started, and its `docs/` pages carry the stack, the API and admin surfaces, the sweep,
-  messaging, tasks, tests, and configuration.
-
-## Reads and writes
-
-The organization and document domains run on authored SQL; `docs/domain-architecture.md` holds
-the rules the next layer is built by, and the first multi-entity layer refines its role files.
-Ids are database-minted (`uuidv7()`) and `RETURNING` is the application's identity pattern, both on the port list. Base packages outside `internal/` are
-importable by other modules, a deliberate choice for a reference service, with the wiring kept
-compiler-private under `internal/`.
 
 ## Domain direction (candidate until a task settles it)
 
 The service models a human organization, structured with patterns drawn from game data systems:
 catalog templates with owned instances, and category branches composed over a generic base.
 
-- **organization**: a self-referencing `parent_id`, sibling-scoped unique slug codes (the
-  property that makes paths unique), and the path a read-time projection from a recursive CTE.
-  The closure table that authorization needs is planned in the auth strategy at the
-  coordinator repository, standards-lab.
+- **organization**: the closure table authorization needs is planned in the coordinator's auth
+  strategy.
 - **people** (`v1.data.people`): `person` is the stable UUID anchor, with a record-status enum
   other domains react to, a unit FK, and activate, deactivate, and transfer-unit action
   commands.

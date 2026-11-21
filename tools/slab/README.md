@@ -148,8 +148,9 @@ nothing but the repository root and the color setting.
   duplicate code, and a transfer cycle — one request each, every response's trace pointer
   located in Grafana. Resets to the seeded tree first; none of the conditions write a row, so a
   run never drifts the seed data.
-- **storage** — the service's stored files end to end. The scenario reads the two migration sets
-  (`blobfs` and `app`) from the schema status and seeds the `default` state additively. It reads
+- **storage** — the service's stored files end to end. The scenario reads the `blobfs` and `app`
+  migration sets, two of the schema's three, from the schema status and seeds the `default` state
+  additively. It reads
   acme's logo, revalidates it by its ETag (304), replaces it with another seeded fixture read
   back under a new ETag, and deletes it. It reads acme's seeded document tree, then walks its
   top-level directories by cursor, one per page. It shows the scoped refusals: a delete with no
@@ -254,7 +255,8 @@ that are its own.
   `cmd/slab` holds process entry and nothing else. `domain/<name>` is the client-side counterpart
   of a service domain package, and `admin/<name>` of an admin service; the two trees are
   siblings, never nested, as in the service. Each package holds the same four files: `doc.go`,
-  `entities.go`, `client.go`, and `commands.go`. An admin package's `entities.go` restates
+  `entities.go`, `client.go`, and `commands.go`, except `admin/storage`, whose commands take no
+  body and so has no `entities.go`. An admin package's `entities.go` restates
   request bodies only, because its responses print as raw JSON and nothing decodes them. `events`
   watches the stream the service publishes to rather than calling an endpoint, so it is neither:
   a top-level family over the broker node, as the domain and admin families are over the client

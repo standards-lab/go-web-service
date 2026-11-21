@@ -19,5 +19,5 @@ The judgement calls the standards-reviewer applies to go-web-service, beyond wha
 - `architecture/principles/service-tiers.md`: provider imports confined to the `internal/app` package (`infrastructure.go`, `admin.go`, `reactors.go`, `app.go`), the `internal/config` package's `nats` block, the integration harness, and `tools/slab`'s `events` package and sqlate scenario, and `docs/stack.md` as the declared boundary and port list.
 - `architecture/principles/composition-root.md`: `internal/app` builds each domain service from the infrastructure nodes it uses, never from `Nodes` itself.
 - `architecture/principles/validation-first.md`: the configuration's Finalize, each command's `Validate` before its store call, and `Seeder.Verify` in the schema's startup.
-- `architecture/principles/context-architecture.md`: the README, its docs/ pages, and each `doc.go` are the homes.
+- `architecture/principles/context-architecture.md`: the README, `docs/`, and each `doc.go`.
 - `architecture/principles/comments.md`: every comment; a configuration file's reasoning lives in the README or the docs/ page its `See` line names.

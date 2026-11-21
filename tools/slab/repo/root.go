@@ -76,9 +76,6 @@ func Find(dir string) (string, error) {
 	}
 }
 
-// declares reports whether the go.mod at path exists and its module
-// directive names Module. A missing file is not an error: it is the common
-// case on the walk.
 func declares(path string) (bool, error) {
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -87,7 +84,7 @@ func declares(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer func() { _ = f.Close() }() // read-only; nothing to act on
+	defer func() { _ = f.Close() }()
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())

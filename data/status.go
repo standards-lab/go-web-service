@@ -106,11 +106,6 @@ func Status(err error) (web.Problem, bool) {
 	return web.Problem{}, false
 }
 
-// requestDetail is the detail of a 400: the text of the typed refusal the
-// libraries report, the one that names the request's own input (a name,
-// an id, a sort or filter field, a filter value, a cursor), without its
-// library prefix or the operation chain that wrapped it. A refusal with no
-// typed error is its sentinel's text.
 func requestDetail(err error) string {
 	var (
 		name     *blobfs.NameError

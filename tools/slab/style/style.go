@@ -16,9 +16,6 @@ func ColorEnabled(w io.Writer, noColor bool) bool {
 	return !noColor && os.Getenv("NO_COLOR") == "" && isTerminal(w)
 }
 
-// isTerminal reports whether w is an open terminal: an *os.File whose
-// descriptor answers as one. Any other writer (a buffer, a pipe wrapped in
-// something else) is not.
 func isTerminal(w io.Writer) bool {
 	f, ok := w.(*os.File)
 	return ok && term.IsTerminal(int(f.Fd()))

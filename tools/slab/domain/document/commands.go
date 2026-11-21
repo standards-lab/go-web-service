@@ -18,9 +18,6 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/output"
 )
 
-// octetStream is the media type an upload is sent under when its file's
-// extension names none and --content-type is unset. The service accepts any
-// type, so an unknown extension is no reason to refuse.
 const octetStream = "application/octet-stream"
 
 // Commands builds the docs command with a dirs group and a files group, one
@@ -69,8 +66,6 @@ func Commands(client *graph.Node[*httpx.Client], out output.Source) []*cli.Comma
 	return []*cli.Command{docs}
 }
 
-// dirsCreateCommand is POST Documents/{org}/directories. The body is --body
-// verbatim, or CreateDirectory built from --parent-id and --name.
 func dirsCreateCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		raw, parent, name string
@@ -104,8 +99,6 @@ func dirsCreateCommand(client *graph.Node[*httpx.Client], out output.Source) *cl
 	return cmd
 }
 
-// dirsGetCommand is GET Documents/{org}/directories/{id}: the directory's
-// metadata, with its path from the root.
 func dirsGetCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	return &cli.Command{
 		Name:     "get",
@@ -119,8 +112,6 @@ func dirsGetCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.C
 	}
 }
 
-// dirsListCommand is GET Documents/{org}/directories/{id}/directories under
-// the read grammar: a directory's child directories, a page at a time.
 func dirsListCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		read  input.ReadFlags
@@ -144,10 +135,6 @@ func dirsListCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.
 	return cmd
 }
 
-// dirsMoveCommand is POST Documents/{org}/directories/{id}/move under
-// If-Match. The body is --body verbatim, or MoveDirectory built from
-// --parent-id and --name, both required since the service defaults neither;
-// the version is resolved by input.GuardedBody.
 func dirsMoveCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		raw, parent, name string
@@ -183,14 +170,6 @@ func dirsMoveCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.
 	return cmd
 }
 
-// dirsDeleteCommand is DELETE Documents/{org}/directories/{id} under
-// If-Match. There is no body, so --version is simply required. The service
-// removes an empty directory, 204, and refuses one that is not; --recursive
-// asks it to mark the whole branch deleting instead, answered 202 with the
-// directory's read as the Location, and the sweep removes the branch after.
-// --wait then polls that Location until it answers 404, for at most the
-// duration given. A --wait without --recursive, or a negative one, is
-// refused in Validate.
 func dirsDeleteCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		recursive bool
@@ -250,14 +229,13 @@ func dirsDeleteCommand(client *graph.Node[*httpx.Client], out output.Source) *cl
 	return cmd
 }
 
-// pollInterval is how long AwaitSweep waits between reads of the Location.
-// The delete nudges the sweep, so a small branch is usually gone by the
-// first or second read.
 const pollInterval = 250 * time.Millisecond
 
 // AwaitSweep reads location until it answers 404, the sweep having removed
 // the branch, and returns how long that took. A 200 is the directory still
-// deleting, read again after pollInterval; any other status is returned as
+// deleting, read again after pollInterval, a quarter second: the delete
+// nudges the sweep, so a small branch is usually gone by the first or
+// second read. Any other status is returned as
 // output.Expect's error. When limit passes first, or ctx ends, it returns
 // the reason. It is exported because it is --wait's one definition: the
 // storage and events scenarios wait for the sweep through it rather than
@@ -288,8 +266,6 @@ func AwaitSweep(ctx context.Context, client *Client, location string, limit time
 	}
 }
 
-// filesListCommand is GET Documents/{org}/directories/{id}/files under the
-// read grammar: the files in a directory, a page at a time.
 func filesListCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		read  input.ReadFlags
@@ -313,14 +289,6 @@ func filesListCommand(client *graph.Node[*httpx.Client], out output.Source) *cli
 	return cmd
 }
 
-// filesPutCommand is POST Documents/{org}/directories/{id}/files?name={name}
-// with the file's bytes as the raw body; the command keeps the name put,
-// the verb a user reaches for, though the upload is a POST. The stored name
-// is --name, or the file's base name; the Content-Type is --content-type,
-// or the one the extension names, or application/octet-stream, since the
-// service accepts any type. Both are resolved from the file's name alone;
-// the file is read in Run, so a file that cannot be read is a failure, not
-// a usage error.
 func filesPutCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var name, contentType string
 	cmd := &cli.Command{
@@ -353,8 +321,6 @@ func filesPutCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.
 	return cmd
 }
 
-// filesShowCommand is GET Documents/{org}/files/{id}: the file's metadata,
-// never its bytes.
 func filesShowCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	return &cli.Command{
 		Name:     "show",
@@ -368,11 +334,6 @@ func filesShowCommand(client *graph.Node[*httpx.Client], out output.Source) *cli
 	}
 }
 
-// filesGetCommand is GET Documents/{org}/files/{id}/content. It prints the
-// status and the object headers, Content-Disposition's filename among them,
-// and writes the bytes to --out rather than to the terminal.
-// --if-none-match sends a revalidation, answered 304 when the file is
-// unchanged.
 func filesGetCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var dest, etag string
 	cmd := &cli.Command{
@@ -406,9 +367,6 @@ func filesGetCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.
 	return cmd
 }
 
-// filesMoveCommand is POST Documents/{org}/files/{id}/move under If-Match.
-// The body is --body verbatim, or MoveFile built from --directory-id and
-// --name, both required; the version is resolved by input.GuardedBody.
 func filesMoveCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		raw, directory, name string
@@ -444,8 +402,6 @@ func filesMoveCommand(client *graph.Node[*httpx.Client], out output.Source) *cli
 	return cmd
 }
 
-// filesDeleteCommand is DELETE Documents/{org}/files/{id} under If-Match.
-// There is no body, so --version is simply required.
 func filesDeleteCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var version int64
 	cmd := &cli.Command{

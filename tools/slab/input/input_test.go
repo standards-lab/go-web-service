@@ -12,16 +12,11 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/input"
 )
 
-// fields is a stand-in for the wire type a command builds from its flags.
 type fields struct {
 	Code string `json:"code"`
 	Name string `json:"name"`
 }
 
-// parsed dispatches a command with the --body and --version flags every
-// body-sending command binds over args, and returns the Invocation it ran
-// with, along with the flag values as the command's Validate would hold
-// them.
 func parsed(t *testing.T, args ...string) (inv *cli.Invocation, raw string, version int64) {
 	t.Helper()
 	cmd := &cli.Command{Name: "x", Run: func(_ context.Context, got *cli.Invocation) error {
@@ -37,13 +32,10 @@ func parsed(t *testing.T, args ...string) (inv *cli.Invocation, raw string, vers
 	return inv, raw, version
 }
 
-// built is a fromFlags that returns v.
 func built(v any) func() (any, error) {
 	return func() (any, error) { return v, nil }
 }
 
-// never is a fromFlags that fails the test if called: the --body path does
-// not consult the field flags.
 func never(t *testing.T) func() (any, error) {
 	return func() (any, error) {
 		t.Error("fromFlags was called on the --body path")

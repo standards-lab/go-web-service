@@ -33,8 +33,6 @@ func TestSweepConfig_MergeOverlaysSetFields(t *testing.T) {
 
 	base.Merge(overlay)
 
-	// The overlay's set fields land; the fields it leaves unset keep the
-	// base values.
 	if base.Interval.Duration() != time.Minute || *base.Batch != 10 || base.StaleAge.Duration() != 2*time.Hour {
 		t.Errorf("merged = {%s %d %s}, want {1m 10 2h}", base.Interval, *base.Batch, base.StaleAge)
 	}
@@ -85,15 +83,12 @@ func TestSweepConfig_FinalizeRejectsInvalidValues(t *testing.T) {
 		t.Errorf("Finalize with an unparsable interval = %v, want the variable named", err)
 	}
 
-	// An age its variable sets non-positive is refused, naming the key.
-	// The variable applies after the defaults, so "0s" lands as zero
-	// rather than reading as unset.
 	t.Setenv(libconfig.EnvName("app", "sweep_interval"), "")
 	for _, key := range []string{"outbox_age", "inbox_age"} {
 		for _, v := range []string{"-1h", "0s"} {
 			t.Setenv(libconfig.EnvName("app", "sweep_"+key), v)
 			if err := configtest.Minimal().Finalize("app"); err == nil || !strings.Contains(err.Error(), "sweep: "+key) {
-				t.Errorf("Finalize with %s %s = %v, want a sweep: %s error", key, v, err, key)
+				t.Errorf("Finalize with %s %s = %v, want a sweep: %s error; the variable applies after the defaults, so 0s lands as zero", key, v, err, key)
 			}
 			t.Setenv(libconfig.EnvName("app", "sweep_"+key), "")
 		}

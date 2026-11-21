@@ -28,24 +28,18 @@ func NewClient(c *httpx.Client) *Client {
 	return &Client{http: c}
 }
 
-// directories is Documents/{org}/directories.
 func directories(org string) string {
 	return Documents + "/" + url.PathEscape(org) + "/directories"
 }
 
-// directory is Documents/{org}/directories/{id}, id a directory id or the
-// root alias.
 func directory(org, id string) string {
 	return directories(org) + "/" + url.PathEscape(id)
 }
 
-// file is Documents/{org}/files/{id}.
 func file(org, id string) string {
 	return Documents + "/" + url.PathEscape(org) + "/files/" + url.PathEscape(id)
 }
 
-// withQuery appends query, name=value pairs joined by httpx.RawQuery, to
-// path; no pairs appends nothing.
 func withQuery(path string, query [][2]string) string {
 	if len(query) == 0 {
 		return path

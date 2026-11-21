@@ -7,9 +7,6 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
-// The terminal Open gives reads as one to style.ColorEnabled, which then
-// yields to the flag and NO_COLOR. The test lives here, not in style,
-// because a root-level package's tests import nothing under internal/.
 func TestColorEnabled_OnATerminalYieldsToTheFlagAndNO_COLOR(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	tty := termtest.Open(t).Writer()

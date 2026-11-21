@@ -10,15 +10,15 @@ require (
 	github.com/standards-lab/go-database/postgres v0.7.0
 	github.com/standards-lab/go-messaging v0.3.0
 	github.com/standards-lab/go-messaging/nats v0.3.0
-	github.com/standards-lab/go-messaging/postgres v0.3.0
+	github.com/standards-lab/go-messaging/postgres v0.4.0
 	github.com/standards-lab/go-observability v0.4.0
 	github.com/standards-lab/go-observability/otlp v0.4.0
 	github.com/standards-lab/go-storage v0.8.0
 	github.com/standards-lab/go-storage/azureblob v0.7.0
-	github.com/standards-lab/go-web-sdk v0.17.0
+	github.com/standards-lab/go-web-sdk v0.18.0
 	github.com/standards-lab/go-web-sdk/middleware/rate-limit v0.5.0
 	github.com/standards-lab/sqlate v0.7.0
-	github.com/standards-lab/sqlate/postgres v0.7.0
+	github.com/standards-lab/sqlate/postgres v0.8.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/metric v1.47.0
 	go.opentelemetry.io/otel/sdk/metric v1.47.0

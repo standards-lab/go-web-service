@@ -1,4 +1,11 @@
+# See architecture/standards/go-elemental/principles/release-and-ci.md
+# See docs/tasks.md
+# See compose/README.md
+[settings]
+task.run_auto_install = false
+
 [tools]
+"github:standards-lab/claude-plugins" = { version = "0.22.0", version_prefix = "marathon/v" }
 go = "1.27.4"
 golangci-lint = "2.15.0"
 jq = "1.8.2"
@@ -6,17 +13,10 @@ jq = "1.8.2"
 
 [env]
 APP_ENV = "local"
-# The repository's Go modules, as directories; tasks run in each one. slab is
-# its own module under tools/ (see the slab task).
 GO_MODULES = ". tools/slab"
 
-# The one check: read-only and deterministic, stopping at the first failure.
-# vet, fix, and lint read the integration suite too (-tags integration), as
-# the vet and lint tasks do; go test runs the unit tier only, the integration
-# tier staying behind its build tag. sqlint then reads the SQL files against
-# the base module's requirements.
 [tasks.check]
-description = "Build, vet, format, fix, tidy, test, and lint every module, then sqlint the SQL files; writes nothing"
+description = "Build, vet, format, fix, tidy, test, and lint every module, sqlint the SQL files, then run lint-context and lint-references; writes nothing"
 run = '''
 set -eu
 export GOWORK=off
@@ -35,9 +35,18 @@ done
 echo "check: sqlint"
 cd "$MISE_PROJECT_ROOT"
 go tool sqlint
+fail=0
+for lint in lint-context lint-references; do
+  if ! command -v "$lint" >/dev/null; then
+    echo "FAIL: $lint is not on PATH; run mise install" >&2
+    fail=1
+  elif ! "$lint"; then
+    fail=1
+  fi
+done
+exit "$fail"
 '''
 
-# Currency: report what trails its latest, and the convenience that upgrades it.
 [tasks.currency]
 description = "Report every requirement, Go version, tool, action pin, and image tag behind its latest; writes nothing"
 run = "scripts/currency.sh"
@@ -47,7 +56,6 @@ description = "Upgrade every module's go directive and direct requirements and t
 run = '''
 set -eu
 export GOWORK=off
-# The go directive follows the current Go minor, with no toolchain line.
 go_minor=$(mise latest go | cut -d. -f1,2)
 for mod in $GO_MODULES; do
   cd "$MISE_PROJECT_ROOT/$mod"
@@ -64,21 +72,8 @@ mise upgrade --bump --local
 description = "Run go vet, the integration suite and the slab module included"
 run = "go vet -tags integration ./... && cd tools/slab && go vet ./..."
 
-# Start the observability profile first (`mise run otel:up`): the task opens a
-# TCP connection to the collector's log port before it builds anything and
-# exits when nothing answers. tee then copies every stdout line to the terminal
-# and to that socket. If the collector goes away while the service runs, the
-# chain breaks on a later log write and SIGPIPE kills the service, so restart
-# the profile only while serve is stopped. The shell is bash, not sh, because
-# /dev/tcp is a bash pseudo-device.
-#
-# Ctrl-C reaches every process in the pipeline at once. The server drains and
-# logs "server stopped" a moment later, so tee has to outlive the signal
-# (-i ignores it) or that last write hits a dead pipe and SIGPIPE kills the
-# server instead. A socket cannot be opened by path, so it takes tee's stdout
-# through a dup, and the terminal, saved on fd 4, is the path argument.
 [tasks.serve]
-description = "Run the service locally, streaming its logs to the observability collector"
+description = "Run the service locally, streaming its logs to the observability collector, which `otel:up` must start first"
 shell = "bash -c"
 run = '''
 exec 3>/dev/tcp/127.0.0.1/${OTEL_LOG_PORT:-4319} || exit
@@ -90,12 +85,8 @@ go run ./cmd/server | tee -i /dev/fd/4 >&3
 description = "Run the unit tier, the slab module included"
 run = "go test -race ./... && cd tools/slab && go test -race ./..."
 
-# The integration tier runs the same compose definition as its own project on
-# its own ports, so the developer's stack and data are never touched, and tears
-# it down with its volumes when the suite ends, pass or fail, printing the
-# stack's logs first on a failure. CI runs this task as it is.
 [tasks.integration]
-description = "Start an isolated compose stack, run the integration tier against it, and tear it down"
+description = "Start an isolated compose stack on its own ports, run the integration tier against it, print the stack's logs on a failure, and tear it down with its volumes"
 run = '''
 set -e
 export COMPOSE_PROJECT_NAME=go-web-service-integration POSTGRES_PORT=5433 AZURITE_BLOB_PORT=10001 NATS_PORT=4223
@@ -116,18 +107,11 @@ run = "go mod tidy"
 description = "Run golangci-lint, the integration suite and the slab module included, then sqlint over the SQL files"
 run = "golangci-lint run --build-tags integration ./... && go tool sqlint && cd tools/slab && golangci-lint run ./..."
 
-# slab is its own module under tools/ so go-cli-sdk, x/term, and x/sys never
-# enter cmd/server's dependency graph. Running from that directory, rather
-# than passing through at the root, means a clone without a go.work still
-# resolves slab's dependencies against the published releases.
 [tasks.slab]
-description = "Run slab, the narrated-scenario runner (`mise run slab -- scenario <name>`)"
+description = "Run slab, the narrated-scenario runner, from its own module (`mise run slab -- scenario <name>`)"
 dir = "tools/slab"
 run = "go run ./cmd/slab"
 
-# The development stacks: compose.yml's PostgreSQL, Azurite, and NATS (db:) and its
-# observability profile (otel:), whose data lives in named volumes that each
-# group's down keeps and its reset drops.
 [tasks."db:up"]
 description = "Build and start the compose PostgreSQL, Azurite, and NATS and wait until they are healthy"
 run = "docker compose up -d --wait --build"
@@ -140,14 +124,8 @@ run = "docker compose down"
 description = "Stop the compose PostgreSQL, Azurite, and NATS and drop their volumes"
 run = "docker compose down -v"
 
-# `up` always starts the unprofiled services alongside an activated profile,
-# so naming the five services here keeps it from also starting the db: group.
-# Mimir's HTTP endpoint answers ready before its querier ring finishes joining
-# (compose/README.md), and its image has no shell for a HEALTHCHECK, so
-# --wait alone does not cover it. Poll a synthetic query (no series to read,
-# just the query path itself) until it succeeds instead of trusting /ready.
 [tasks."otel:up"]
-description = "Build and start the observability profile (collector, Loki, Tempo, Mimir, Grafana) and wait for health"
+description = "Build and start the observability profile (collector, Loki, Tempo, Mimir, Grafana), wait for health, and poll Mimir until it answers a query"
 run = '''
 set -e
 docker compose --profile observability up -d --wait --build otel-collector loki tempo mimir grafana
@@ -159,8 +137,6 @@ echo "mimir did not become queryable within 30s" >&2
 exit 1
 '''
 
-# `down` is project-wide by default; naming the five services here keeps it
-# from also stopping the services db:up started.
 [tasks."otel:down"]
 description = "Stop the observability profile (keep data)"
 run = "docker compose --profile observability down otel-collector loki tempo mimir grafana"
@@ -169,9 +145,6 @@ run = "docker compose --profile observability down otel-collector loki tempo mim
 description = "Stop the observability profile and drop its data"
 run = "docker compose --profile observability down -v otel-collector loki tempo mimir grafana"
 
-# The whole local stack, PostgreSQL, Azurite, and NATS and the observability
-# profile together.
-# Neither half depends on the other, so mise runs each pair in parallel.
 [tasks."stack:up"]
 description = "Build and start PostgreSQL, Azurite, and NATS and the observability profile and wait for health"
 depends = ["db:up", "otel:up"]
@@ -184,10 +157,7 @@ depends = ["db:down", "otel:down"]
 description = "Stop PostgreSQL, Azurite, and NATS and the observability profile and drop their data"
 depends = ["db:reset", "otel:reset"]
 
-# The running service does the work through its admin mount, confirmed as it
-# requires: every migration set reverted, the sets applied, the named state
-# seeded.
 [tasks."db:state"]
-description = "Reset the running service's database to a named state"
+description = "Reset the running service's database to a named state through its admin mount: revert every migration set, apply them, and seed the state"
 usage = 'arg "<state>" help="The state to reset to, one of GET /admin/database/states"'
 run = 'curl -sS --fail-with-body -H "Content-Type: application/json" -d "{\"state\":\"$usage_state\",\"confirm\":true}" http://127.0.0.1:8080/admin/database/state && echo'

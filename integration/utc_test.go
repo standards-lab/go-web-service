@@ -13,14 +13,11 @@ import (
 	"github.com/standards-lab/go-web-service/integration"
 )
 
-// stamped is any API resource's timestamps, as the JSON carries them.
 type stamped struct {
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 }
 
-// utc asserts that both of the resource's times are RFC 3339 in UTC: the
-// text ends in Z, not in the offset of the zone the service runs in.
 func utc(t *testing.T, what string, r stamped) {
 	t.Helper()
 	for field, v := range map[string]string{"created_at": r.CreatedAt, "updated_at": r.UpdatedAt} {
@@ -30,17 +27,9 @@ func utc(t *testing.T, what string, r stamped) {
 	}
 }
 
-// Every time the API returns is in UTC, whatever zone the service runs in:
-// the libraries return each time.Time in time.UTC, so the JSON encodes it
-// with a Z. The service runs in integration.ServiceZone, so a time left in
-// time.Local would carry its offset, +05:30, on any date. The
-// organization's times are the service's own rows, read through sqlate;
-// the directory's and the file's are blobfs's.
 func TestJSONTimesUTC(t *testing.T) {
-	// The service resolves TZ from this host's zone database, as this
-	// lookup does; without the zone it would run in UTC and prove nothing.
 	if _, err := time.LoadLocation(integration.ServiceZone); err != nil {
-		t.Fatalf("the host has no zone database entry for %s: %v", integration.ServiceZone, err)
+		t.Fatalf("the host has no zone database entry for %s: %v; without it the service runs in UTC and the test proves nothing", integration.ServiceZone, err)
 	}
 
 	s := integration.Start(t, integration.Options{Seed: integration.Default})

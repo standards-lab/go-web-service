@@ -11,12 +11,8 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
 )
 
-// absentID is the well-formed id the not-found step asks for, which no
-// seeded row carries.
 const absentID = "00000000-0000-7000-8000-000000000000"
 
-// runProblems runs the problems scenario against a fresh orgFake,
-// expecting it to succeed.
 func runProblems(t *testing.T) (*orgFake, string) {
 	t.Helper()
 	fake := newOrgFake()
@@ -41,10 +37,6 @@ func TestScenario_ProblemsRunsTwelveStepsInOrder(t *testing.T) {
 	})
 }
 
-// problemSections is each condition's step: its heading, a phrase from its
-// note, the request line it sends, the status line it expects, and the
-// problem detail the fake writes with the real service's wording (empty
-// where the status carries none).
 var problemSections = []struct {
 	heading, note, request, status, detail string
 }{
@@ -65,17 +57,14 @@ func TestScenario_ProblemsNarratesEachConditionAsNoteRequestResponseTrace(t *tes
 	_, out := runProblems(t)
 	for _, c := range problemSections {
 		text := step(t, out, c.heading)
-		// The note wraps at 80 columns, so its phrase is sought with the
-		// step's whitespace collapsed; the request line is the first place
-		// its text appears, ahead of the problem's instance member.
-		flat := strings.Join(strings.Fields(text), " ")
-		note, request := strings.Index(flat, c.note), strings.Index(flat, c.request+" ")
-		status, trace := strings.Index(flat, c.status), strings.Index(flat, "Observability Grafana : ")
-		if note < 0 || request < 0 || status < 0 || trace < 0 || !strings.Contains(flat, "Trace ID : "+fakeTrace) {
+		unwrapped := strings.Join(strings.Fields(text), " ")
+		note, firstRequestLine := strings.Index(unwrapped, c.note), strings.Index(unwrapped, c.request+" ")
+		status, trace := strings.Index(unwrapped, c.status), strings.Index(unwrapped, "Observability Grafana : ")
+		if note < 0 || firstRequestLine < 0 || status < 0 || trace < 0 || !strings.Contains(unwrapped, "Trace ID : "+fakeTrace) {
 			t.Errorf("step %s lacks its note %q, request %q, status %q, or trace pointer:\n%s", c.heading, c.note, c.request, c.status, text)
 			continue
 		}
-		if note > request || request > status || status > trace {
+		if note > firstRequestLine || firstRequestLine > status || status > trace {
 			t.Errorf("step %s does not run note, request, response, trace in that order:\n%s", c.heading, text)
 		}
 		for _, want := range []string{`"type": "about:blank"`, `"status": ` + c.status[5:8], `"request_id": "` + fakeTrace + `"`, "Content-Type: application/problem+json", "X-Request-Id: " + fakeTrace} {
@@ -95,10 +84,9 @@ func TestScenario_ProblemsNarratesEachConditionAsNoteRequestResponseTrace(t *tes
 
 func TestScenario_ProblemsShowsTheOversizedBodyAsItsStandIn(t *testing.T) {
 	fake, out := runProblems(t)
-	// The stand-in is JSON, so the request block shows it indented.
-	const standIn = `"code": "<65537 bytes>"`
-	if !strings.Contains(step(t, out, "[5/12]"), standIn) {
-		t.Errorf("the oversized body's step lacks the stand-in %s:\n%s", standIn, out)
+	const indentedJSONStandIn = `"code": "<65537 bytes>"`
+	if !strings.Contains(step(t, out, "[5/12]"), indentedJSONStandIn) {
+		t.Errorf("the oversized body's step lacks the stand-in %s:\n%s", indentedJSONStandIn, out)
 	}
 	if strings.Contains(out, strings.Repeat("a", 64)) {
 		t.Errorf("output shows the filler itself:\n%s", out)
@@ -110,10 +98,9 @@ func TestScenario_ProblemsShowsTheOversizedBodyAsItsStandIn(t *testing.T) {
 
 func TestScenario_ProblemsSendsEachConditionsRequestAsNarrated(t *testing.T) {
 	fake, _ := runProblems(t)
-	// The two start probes, the reset and list Initialization makes, then
-	// one request per condition.
-	if got := len(fake.requests); got != 2+2+11 {
-		t.Errorf("the fake saw %d requests, want 15:\n%s", got, strings.Join(fake.requests, "\n"))
+	const startProbes, initialization, conditions = 2, 2, 11
+	if got := len(fake.requests); got != startProbes+initialization+conditions {
+		t.Errorf("the fake saw %d requests, want the 2 start probes, Initialization's reset and list, and one per condition, 15 in all:\n%s", got, strings.Join(fake.requests, "\n"))
 	}
 	acme := fakeID(1)
 	for _, want := range []string{
@@ -153,11 +140,6 @@ func TestScenario_ProblemsWritesNoRow(t *testing.T) {
 	}
 }
 
-// An expected problem status is the step's success; a status the step did
-// not narrate, a success included, is the step's failure, which the
-// dispatcher reports once on stderr naming the step, and no later step
-// runs. The fake answers the not-found step's id with a row, as a service
-// that minted it would.
 func TestScenario_ProblemsFailsTheStepWhenTheStatusIsNotTheOneNarrated(t *testing.T) {
 	fake := newOrgFake()
 	minted := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

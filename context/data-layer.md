@@ -1,33 +1,35 @@
 # The data layer
 
 This note holds the design direction for the data composition and CQRS layer: its strategy and
-its planned domain model. The layer is goal `v1.data` in the workspace roadmap, which holds the
-tasks and their order. Direction here is a candidate until a task's session settles it; a
+its planned domain model. The layer is goal `v1.data` in the workspace roadmap
+(`standards-lab/roadmap/index.toml`), whose goal file holds the tasks and their order. Direction here is a candidate until a task's session settles it; a
 section the code comes to express is deleted.
 
 ## Strategy
 
 - The service demonstrates both tiers of the database capability on purpose: standard SQL
   in authored files throughout, and native Postgres features where they earn it, each in a
-  file that declares it in its header and so enters the port list (the README's Stack section).
+  file that declares it in its header and so enters the port list
+  ([`docs/stack.md`](../docs/stack.md)).
   Standard SQL is preferred where it costs nothing; a native choice is a choice, named as such.
 - A library change is prototyped natively in the SDK repository that owns it: go-database for
   the persistence surface, go-web-sdk for the web surface. During development the local
   gitignored `go.work` links that repository into this one. A convention proven here before its
-  library is settled stages in the flat root `sdk` package (`domain-architecture.md`); nothing
+  library is settled stages in the flat root `sdk` package (`docs/domain-architecture.md`); nothing
   is staged under a `pkg/` tree.
 - The layer spans the SDKs and this service. The reads and writes slices are coordinated
   sessions — a library slice and the service slice that proves it, planned together, each
   repository on its own branch with its own pull request. The domain slices are service-only.
-- Documentation waits for the effort to close: integration documentation lands in the root
-  `docs/` tier once the surfaces stop churning. Until then the README carries identity, the
-  stack, getting-started, the API and admin surfaces, tasks, tests, and configuration.
+- Documentation waits for the effort to close: integration documentation joins the root `docs/`
+  pages once the surfaces stop churning. Until then the README carries identity and
+  getting-started, and its `docs/` pages carry the stack, the API and admin surfaces, the sweep,
+  messaging, tasks, tests, and configuration.
 
 ## Reads and writes
 
-The organization and document domains run on authored SQL; `domain-architecture.md` holds the
-rules the next layer is built by. Ids are database-minted (`uuidv7()`) and `RETURNING` is the
-application's identity pattern, both on the port list. Base packages outside `internal/` are
+The organization and document domains run on authored SQL; `docs/domain-architecture.md` holds
+the rules the next layer is built by, and the first multi-entity layer refines its role files.
+Ids are database-minted (`uuidv7()`) and `RETURNING` is the application's identity pattern, both on the port list. Base packages outside `internal/` are
 importable by other modules, a deliberate choice for a reference service, with the wiring kept
 compiler-private under `internal/`.
 
@@ -79,7 +81,7 @@ shared status matcher and the directives lowering, which the template cannot sca
 stays engine-free. A generic seed helper is a fit question for the evaluation: it promotes to
 go-database when its shape is the library's own, not when a second service repeats the per-table
 loop. It also decides whether a linter (`depguard`, denying the provider modules outside the
-composition root) enforces the provider import boundary the README's Stack section states.
+composition root) enforces the provider import boundary [`docs/stack.md`](../docs/stack.md) states.
 
 ## Prior R&D
 

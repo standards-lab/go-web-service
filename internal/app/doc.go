@@ -11,7 +11,11 @@
 //     start before the connections and flush after them, the meter
 //     provider the service's own instruments are created on, and the
 //     sweep metrics, the sweeper's per-pass hook over its instruments,
-//     sweep.passes and sweep.backlogged;
+//     sweep.passes and sweep.backlogged. The meter provider node resolves
+//     the otel global at each call rather than holding the SDK provider,
+//     which the telemetry node already shuts down. The service.name every
+//     signal carries is repeated, character for character, in
+//     compose/otel-collector/otel-collector.yaml for its log correlation;
 //   - admin.go: defineAdmin, the quiesce gate and the schema service, and
 //     the /admin mount;
 //   - domain.go: defineDomain, the domain services, and the /api mount;
@@ -45,7 +49,9 @@
 // joins the readiness probe, though a Ready alone does not, and a Monitored
 // has its runtime error watched. Nodes start in layer order and drain in
 // reverse.
-// No layer file registers anything with the Coordinator. The order is
+// No layer file registers anything with the Coordinator, and no
+// constructor opens a connection: connectivity belongs to each
+// participant's Start, so a failed Build leaks none. The order is
 // computed from what each node uses, plus seven After edges, each declared
 // with graph.After on the later node's Define line and each ordering two
 // nodes without passing a value. The database, the object store, and the
@@ -66,10 +72,25 @@
 // Routes and reactors are the two ways work enters the running process: a
 // caller drives a route, and an occurrence drives a reactor. A reactor
 // commonly dispatches to a domain service; the sweeper's dispatches to its
-// reclaimers, the libraries' own (the README's Sweep section), and the
-// relay's publishes to the broker.
-// What a producer of events must order itself after is defineReactors'
-// drain rule. Extending the service means defining a node in its layer's
+// reclaimers, the libraries' own (docs/sweep.md), and the
+// relay's publishes to the broker. The relay's last pass publishes what
+// was committed while the producers drained, so every producer drains
+// before it: a request-driven producer, as every domain service is, needs
+// no edge, since the server drains first, and a node that commits events
+// outside a request, such as a consumer's reactor, Uses the relay's node.
+//
+// The middleware stack runs tracing outermost, so every later middleware
+// and the handler see the request inside its span; its Use of the
+// telemetry node is what brings telemetry into the Build. RequestID comes
+// next, sourcing the span's trace id, so RequestLogger's record, the
+// X-Request-Id header, and a problem's request_id carry one value.
+// Recoverer follows RequestLogger, so a panic is answered and logged as a
+// 500 carrying that id. RateLimit sits innermost, so a rejected request is
+// logged with its id and 429, and skips the probes. Middleware reads
+// infrastructure nodes only; one that needs a domain service is domain
+// logic, and belongs in a route or a reactor.
+//
+// Extending the service means defining a node in its layer's
 // define function, and placing a reactor's node in the reactors group with
 // graph.In at its Define; the signatures, cmd/server, and [App.Run] stay
 // untouched.

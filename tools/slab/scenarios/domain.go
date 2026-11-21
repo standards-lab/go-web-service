@@ -15,16 +15,11 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
-// The row the create step adds under acme and the delete step removes. The
-// reset step guarantees it is absent when the run starts, so the code is a
-// plain business unit rather than a run-stamped placeholder.
 const (
 	createdCode = "sales"
 	createdName = "Sales"
 )
 
-// The seeded rows the edit and transfer steps change: finance is renamed,
-// logistics moves from operations to engineering.
 const (
 	editedCode    = "finance"
 	editedName    = "Finance and Accounting"
@@ -32,14 +27,6 @@ const (
 	newParentCode = "engineering"
 )
 
-// domain is what the domain scenario's steps hand forward: the client the
-// first step binds, the seeded rows by code from the first raw list, and
-// the identity the create step's response returns. Each command targets a
-// different row, and no row is written twice, so every If-Match reads the
-// version from where the row was last seen: the seeded rows at the version
-// the list showed, the created row at the version create returned. The
-// first two steps replace the client and the rows, so nothing a run reads
-// is left from a run before it.
 type domain struct {
 	n       Nodes
 	client  *httpx.Client
@@ -245,8 +232,6 @@ func (s *domain) delete(ctx context.Context, inv *cli.Invocation, r *scenario.Re
 	return res.Expect(http.StatusNoContent)
 }
 
-// list is the raw list: GET organization.Organizations with no query,
-// narrated, checked to be 200, and decoded.
 func list(ctx context.Context, r *scenario.Reporter, st style.Style, c *httpx.Client) (organization.Page, error) {
 	res, err := call(ctx, r, st, c, http.MethodGet, organization.Organizations, nil, nil)
 	if err != nil {
@@ -262,8 +247,6 @@ func list(ctx context.Context, r *scenario.Reporter, st style.Style, c *httpx.Cl
 	return p, nil
 }
 
-// identityOf reads the Identity envelope off a command's response and
-// checks it names the row the command targeted.
 func identityOf(res *httpx.Response, wantID string) (organization.Identity, error) {
 	var id organization.Identity
 	if err := res.JSON(&id); err != nil {
@@ -275,8 +258,6 @@ func identityOf(res *httpx.Response, wantID string) (organization.Identity, erro
 	return id, nil
 }
 
-// expectVersion checks a command left its row at version want: one past
-// the version its If-Match carried.
 func expectVersion(id organization.Identity, want int64) error {
 	if id.Version != want {
 		return fmt.Errorf("the row is at version %d, want %d", id.Version, want)

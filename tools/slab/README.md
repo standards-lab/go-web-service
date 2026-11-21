@@ -14,6 +14,7 @@ reads the service's stream through, and the `golang.org/x/term` and `golang.org/
 `style` package detects a terminal with. Anyone with `go-web-service` cloned already has it.
 
 [`usage.md`](usage.md) walks through every command by hand against the real running stack.
+[`tests.md`](tests.md) holds the reasoning behind slab's tests.
 
 ## Running it
 

@@ -18,10 +18,6 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/internal/apptest"
 )
 
-// runStorage starts a fake service that answers every request with status
-// and reply, runs a fresh App over "admin storage" and args against it,
-// and returns the requests it received, what the run wrote, its exit code,
-// and the nodes it built.
 func runStorage(t *testing.T, status int, reply string, args ...string) (got []string, stdout, stderr string, code int, log []string) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -43,8 +39,6 @@ func runStorage(t *testing.T, status int, reply string, args ...string) (got []s
 	return got, out.String(), errOut.String(), code, apptest.Names(rec.Log())
 }
 
-// Each subcommand sends its endpoint's request with no body, prints the
-// reply, and builds only the nodes it declares.
 func TestStorage_SendOneBodilessRequestPerEndpoint(t *testing.T) {
 	for args, want := range map[string]string{
 		"diagnostics": "GET /admin/storage/diagnostics",
@@ -68,8 +62,6 @@ func TestStorage_SendOneBodilessRequestPerEndpoint(t *testing.T) {
 	}
 }
 
-// A parent run with no subcommand prints its help, listing both leaves,
-// and builds nothing.
 func TestStorage_MountOneSubcommandPerEndpoint(t *testing.T) {
 	got, stdout, _, code, log := runStorage(t, http.StatusOK, `{}`)
 	if code != process.ExitUsage {
@@ -85,7 +77,6 @@ func TestStorage_MountOneSubcommandPerEndpoint(t *testing.T) {
 	}
 }
 
-// An argument is a usage error: nothing is built and nothing is sent.
 func TestStorage_RefuseArguments(t *testing.T) {
 	for _, leaf := range []string{"diagnostics", "container"} {
 		t.Run(leaf, func(t *testing.T) {
@@ -103,7 +94,6 @@ func TestStorage_RefuseArguments(t *testing.T) {
 	}
 }
 
-// A problem response is reported once on stderr, with nothing on stdout.
 func TestStorage_ReportTheProblemAnErrorStatusCarries(t *testing.T) {
 	_, stdout, stderr, code, _ := runStorage(t, http.StatusServiceUnavailable, `{"status":503,"title":"Service Unavailable","detail":"the store is unreachable"}`, "diagnostics")
 	if code != process.ExitFailure {

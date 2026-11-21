@@ -70,9 +70,6 @@ func (h *handler) container(w http.ResponseWriter, r *http.Request) error {
 	return h.diagnostics(w, r)
 }
 
-// status is the domain's error vocabulary as one web.ProblemMatcher: a
-// store that is unavailable or not ready is a temporary outage (503). Any
-// other provider error stays unmatched, a server fault.
 func status(err error) (web.Problem, bool) {
 	switch {
 	case errors.Is(err, storage.ErrUnavailable), errors.Is(err, storage.ErrNotReady):

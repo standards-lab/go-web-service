@@ -9,8 +9,6 @@ import (
 	libconfig "github.com/standards-lab/go-core/config"
 )
 
-// The sweep's defaults, applied by Finalize when the configuration leaves
-// a field unset.
 const (
 	defaultSweepInterval  = 30 * time.Second
 	defaultSweepBatch     = 100
@@ -116,8 +114,6 @@ func (c *SweepConfig) Finalize(envPrefix string) error {
 	return nil
 }
 
-// overrideDuration applies one duration environment override onto dst,
-// named by the prefix and key under the config package's naming scheme.
 func overrideDuration(envPrefix, key string, dst *libconfig.Duration) error {
 	name := libconfig.EnvName(envPrefix, key)
 	if err := dst.Set(os.Getenv(name)); err != nil {

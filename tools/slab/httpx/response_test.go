@@ -11,27 +11,31 @@ import (
 )
 
 func TestResponseTraceID(t *testing.T) {
-	for id, want := range map[string]bool{
-		"4bf92f3577b34da6a3ce929d0e0e4736":  true,
-		"":                                  false,
-		"4bf92f3577b34da6a3ce929d0e0e473":   false, // 31
-		"4bf92f3577b34da6a3ce929d0e0e47366": false, // 33
-		"4BF92F3577B34DA6A3CE929D0E0E4736":  false, // uppercase
-		"4bf92f3577b34da6a3ce929d0e0e473g":  false, // not hex
-		"req-4bf92f3577b34da6a3ce929d0e0e":  false, // a generated request id
+	for name, tc := range map[string]struct {
+		id string
+		ok bool
+	}{
+		"32 lowercase hex digits": {"4bf92f3577b34da6a3ce929d0e0e4736", true},
+		"no header":               {"", false},
+		"31 digits":               {"4bf92f3577b34da6a3ce929d0e0e473", false},
+		"33 digits":               {"4bf92f3577b34da6a3ce929d0e0e47366", false},
+		"uppercase":               {"4BF92F3577B34DA6A3CE929D0E0E4736", false},
+		"not hex":                 {"4bf92f3577b34da6a3ce929d0e0e473g", false},
+		"a generated request id":  {"req-4bf92f3577b34da6a3ce929d0e0e", false},
 	} {
-		res := &httpx.Response{Status: http.StatusOK, Header: http.Header{}}
-		if id != "" {
-			res.Header.Set("X-Request-Id", id)
-		}
-		got, err := res.TraceID()
-		if (err == nil) != want {
-			t.Errorf("TraceID with X-Request-Id %q = %q, %v; want ok=%v", id, got, err, want)
-			continue
-		}
-		if want && got != id {
-			t.Errorf("TraceID = %q, want %q", got, id)
-		}
+		t.Run(name, func(t *testing.T) {
+			res := &httpx.Response{Status: http.StatusOK, Header: http.Header{}}
+			if tc.id != "" {
+				res.Header.Set("X-Request-Id", tc.id)
+			}
+			got, err := res.TraceID()
+			if (err == nil) != tc.ok {
+				t.Fatalf("TraceID with X-Request-Id %q = %q, %v; want ok=%v", tc.id, got, err, tc.ok)
+			}
+			if tc.ok && got != tc.id {
+				t.Errorf("TraceID = %q, want %q", got, tc.id)
+			}
+		})
 	}
 }
 

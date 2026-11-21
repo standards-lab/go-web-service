@@ -15,8 +15,6 @@ import (
 // field-level reason, it reaches the wire as a 400's detail.
 var ErrValidation = errors.New("invalid command")
 
-// errRootMove refuses a move of the document root, which binds the
-// organization's hierarchy where it stands.
 var errRootMove = fmt.Errorf("%w: the document root cannot be moved", ErrValidation)
 
 // RootAlias is the directory id segment, or body value, that names the
@@ -199,20 +197,12 @@ type FileDeletedData struct {
 	Version        int64  `json:"version"`
 }
 
-// seedTree is one organization's hierarchy in a named state: the
-// organization, by path, the id its document root takes when the seed
-// creates it, and the entries beneath the root.
 type seedTree struct {
 	Organization string      `json:"organization"`
 	Root         string      `json:"root"`
 	Entries      []seedEntry `json:"entries"`
 }
 
-// seedEntry is one directory or file of a seeded hierarchy, with the id
-// the seed creates it under, fixed so a reset writes it again under the
-// same id and, for a file, the same key. A directory carries its entries,
-// an empty list for an empty one; a file carries its content inline, in
-// its content type.
 type seedEntry struct {
 	ID          string      `json:"id"`
 	Name        string      `json:"name"`
@@ -221,8 +211,6 @@ type seedEntry struct {
 	Content     string      `json:"content"`
 }
 
-// directory reports whether the entry is a directory, refusing one that
-// is both a directory and a file, or neither, as a defect in the file.
 func (e seedEntry) directory() (bool, error) {
 	file := e.ContentType != "" || e.Content != ""
 	switch {
@@ -234,9 +222,6 @@ func (e seedEntry) directory() (bool, error) {
 	return e.Entries != nil, nil
 }
 
-// The field rules the commands and the upload share.
-
-// validDirectory accepts the root alias or a UUID in the named field.
 func validDirectory(field, id string) error {
 	if id == "" {
 		return fmt.Errorf("%w: %s is required: root or a directory id", ErrValidation, field)
@@ -250,8 +235,6 @@ func validDirectory(field, id string) error {
 	return nil
 }
 
-// validName mirrors blobfs's own name rule over the normalized name, so a
-// name it would refuse is a 400 before any I/O.
 func validName(name string) error {
 	if err := blobfs.ValidateName(blobfs.NormalizeName(name)); err != nil {
 		return fmt.Errorf("%w: name: %w", ErrValidation, err)

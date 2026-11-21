@@ -16,8 +16,6 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
-// uploaded is an event as the service publishes it: a file upload, its
-// subject the file's id and its data the file's metadata.
 var uploaded = event.Event{
 	ID:              "0199e7a0-0000-7000-8000-000000000001",
 	Source:          "web-service",
@@ -28,9 +26,6 @@ var uploaded = event.Event{
 	Data:            []byte(`{"file_id":"0199e7a0-0000-7000-8000-0000000000f1","name":"q3.pdf","size":42}`),
 }
 
-// message encodes e as go-messaging's NATS broker publishes it: binary
-// content mode, the headers as the message's, with the deduplication key
-// the broker adds beside them.
 func message(t *testing.T, e event.Event) (natsgo.Header, []byte) {
 	t.Helper()
 	h, body, err := event.Encode(e)
@@ -42,7 +37,6 @@ func message(t *testing.T, e event.Event) (natsgo.Header, []byte) {
 	return header, body
 }
 
-// show decodes the message for e and renders the event under st.
 func show(t *testing.T, st style.Style, e event.Event) string {
 	t.Helper()
 	got, err := events.Decode(message(t, e))
@@ -56,9 +50,6 @@ func show(t *testing.T, st style.Style, e event.Event) string {
 	return b.String()
 }
 
-// An encoded event decodes back to itself, the broker's own header
-// ignored, and renders as its type, a table of its id, subject, and time,
-// its data as indented JSON, and a blank line.
 func TestRender_PrintsAnEncodedEventsTypeIDSubjectTimeAndData(t *testing.T) {
 	h, body := message(t, uploaded)
 	got, err := events.Decode(h, body)
@@ -84,8 +75,6 @@ func TestRender_PrintsAnEncodedEventsTypeIDSubjectTimeAndData(t *testing.T) {
 	}
 }
 
-// With color on, the type is styled as a status line and the table's
-// names as keys, as a direct command's response is.
 func TestRender_ColorsTheTypeAndTheNamesWhenOn(t *testing.T) {
 	st := style.New(true)
 	out := show(t, st, uploaded)
@@ -96,8 +85,6 @@ func TestRender_ColorsTheTypeAndTheNamesWhenOn(t *testing.T) {
 	}
 }
 
-// Absent attributes and data print nothing; text data prints as it came;
-// binary data prints as its size and media type.
 func TestRender_PrintsWhatTheEventCarries(t *testing.T) {
 	bare := event.Event{ID: "e1", Source: "web-service", Type: "web-service.thing.happened"}
 	text := bare
@@ -120,7 +107,6 @@ func TestRender_PrintsWhatTheEventCarries(t *testing.T) {
 	}
 }
 
-// A message that is not an event in binary content mode does not decode.
 func TestDecode_RefusesAMessageThatIsNotAnEvent(t *testing.T) {
 	h, body := message(t, uploaded)
 	h.Del("ce-specversion")
@@ -129,16 +115,12 @@ func TestDecode_RefusesAMessageThatIsNotAnEvent(t *testing.T) {
 	}
 }
 
-// NewBroker refuses what go-messaging's NATS configuration refuses, doing
-// no I/O.
 func TestNewBroker_RefusesAnInvalidConfiguration(t *testing.T) {
 	if _, err := events.NewBroker("nats://127.0.0.1:4222", "WEB_SERVICE", "web-service.>"); err == nil || !strings.Contains(err.Error(), "prefix") {
 		t.Errorf("NewBroker = %v, want the prefix's error", err)
 	}
 }
 
-// A broker binds the stream, and its filter is every subject under the
-// prefix, the stream's own subjects.
 func TestNewBroker_FiltersOnThePrefix(t *testing.T) {
 	b, err := events.NewBroker("nats://127.0.0.1:4222", "WEB_SERVICE", "web-service")
 	if err != nil {
@@ -149,8 +131,6 @@ func TestNewBroker_FiltersOnThePrefix(t *testing.T) {
 	}
 }
 
-// Start with nothing answering names the mise task that brings the stack
-// up, and wraps the client's own error.
 func TestStart_NamesTheTaskThatBringsTheStackUp(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -171,8 +151,6 @@ func TestStart_NamesTheTaskThatBringsTheStackUp(t *testing.T) {
 	}
 }
 
-// Start in a run that has already ended returns the context's error alone,
-// with no hint, since no task would fix it.
 func TestStart_ReturnsTheContextsErrorOnceTheRunHasEnded(t *testing.T) {
 	b, err := events.NewBroker("nats://127.0.0.1:1", "WEB_SERVICE", "web-service")
 	if err != nil {

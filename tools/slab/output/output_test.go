@@ -16,7 +16,6 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
-// plain returns an Output writing to the returned buffer, with color off.
 func plain() (*output.Output, *bytes.Buffer) {
 	var out bytes.Buffer
 	return output.New(&out, nil), &out
@@ -65,7 +64,6 @@ func TestStatus_WritesTheStatusLineThenEachLine(t *testing.T) {
 	}
 }
 
-// Block writes the Render to stdout and returns its error.
 func TestBlock_WritesTheRenderToStdout(t *testing.T) {
 	o, out := plain()
 	if err := o.Block(output.Table(style.New(false), [][2]string{{"id", "e1"}})); err != nil {
@@ -80,9 +78,6 @@ func TestBlock_WritesTheRenderToStdout(t *testing.T) {
 	}
 }
 
-// Object shows the headers it knows in its own order, whatever order the
-// response carried them in, and skips the ones the response lacks and any
-// it does not know.
 func TestObject_WritesTheStatusTheKnownHeadersAndTheSavedFile(t *testing.T) {
 	o, out := plain()
 	header := http.Header{}
@@ -125,9 +120,6 @@ func TestResponse_ColorsTheBodyAndStatusLineWhenOn(t *testing.T) {
 	}
 }
 
-// Whether to color is decided by a flag parsed after the tree, and so after
-// the Output, is built. So the decision New is given must be read at each
-// render: one turned on after New colors the next render.
 func TestNew_DecidesColorAtEachRenderNotAtConstruction(t *testing.T) {
 	color := false
 	var out bytes.Buffer

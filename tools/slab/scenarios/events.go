@@ -22,25 +22,15 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/repo"
 )
 
-// watchCommand is the command the events scenario tells the reader to run
-// in another terminal first: slab's own watcher, which prints each event
-// the steps make the service publish.
 const watchCommand = "mise run slab -- events watch"
 
-// eventsParentPath is the seeded organization the scenario creates its
-// organization under, before the transfer moves it to the root.
 const eventsParentPath = "/acme"
 
-// The seeded fixtures the logo steps upload, under fixturesDir: a first
-// logo, then a second that replaces it. Any seeded PNG passes the upload's
-// sniffed-type rule.
 const (
 	firstLogoFixture  = "operations.png"
 	secondLogoFixture = "product.png"
 )
 
-// The directories the document steps create under the organization's root.
-// The organization is new each run, so the names need no run stamp.
 const (
 	reportsDir = "reports"
 	scratchDir = "scratch"
@@ -48,8 +38,6 @@ const (
 	archiveDir = "archive"
 )
 
-// The files the upload step writes, their names after the move, and their
-// bytes, inline: only the events' data is shown, never a file's content.
 const (
 	reportsFile    = "summary.txt"
 	movedFile      = "summary-final.txt"
@@ -59,19 +47,11 @@ const (
 	textPlain      = "text/plain; charset=utf-8"
 )
 
-// eventsTotal is the number of events the scenario makes the service
-// publish, and organizationEvents the organization domain's share of them,
-// which its closing note states.
 const (
 	eventsTotal        = 19
 	organizationEvents = 7
 )
 
-// events is what the events scenario's steps hand forward: the client, the
-// run's stamp, the organization it creates with its version as last
-// written, and the directories and the moved file as last written. Each is
-// replaced by the step that writes it, the client by the first step, so
-// nothing a run reads is left from a run before it.
 type events struct {
 	n       Nodes
 	client  *httpx.Client
@@ -152,9 +132,6 @@ func (s *events) transferOrganization(ctx context.Context, inv *cli.Invocation, 
 	return s.writeOrganization(ctx, inv, r, http.MethodPost, organization.Organizations+"/"+s.org.ID+"/transfer", body)
 }
 
-// writeOrganization sends a narrated guarded command to route at the
-// organization's version as last written, expects 200, and keeps the
-// version the response names, one past the one sent.
 func (s *events) writeOrganization(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter, method, route string, body any) error {
 	headers := []httpx.Header{httpx.IfMatch(s.org.Version)}
 	res, err := call(ctx, r, styleOf(s.n, inv), s.client, method, route, headers, body)
@@ -185,8 +162,6 @@ func (s *events) replaceLogo(ctx context.Context, inv *cli.Invocation, r *scenar
 	return s.putLogo(ctx, inv, r, secondLogoFixture)
 }
 
-// putLogo uploads the seeded fixture name as the organization's logo,
-// narrated with its request's body summarized, and expects 201.
 func (s *events) putLogo(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter, name string) error {
 	fsys, err := repo.FS(inv.Get(s.n.Repo))
 	if err != nil {
@@ -238,8 +213,6 @@ func (s *events) moreDirectories(ctx context.Context, inv *cli.Invocation, r *sc
 	return err
 }
 
-// createDirectory creates the directory name under parent in the
-// organization's documents, narrated.
 func (s *events) createDirectory(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter, parent, name string) (document.Identity, error) {
 	route := documentsRoute(s.org.ID) + "/directories"
 	return createDirectory(ctx, r, styleOf(s.n, inv), s.client, route, document.CreateDirectory{ParentID: parent, Name: name})
@@ -255,8 +228,6 @@ func (s *events) uploadFiles(ctx context.Context, inv *cli.Invocation, r *scenar
 	return err
 }
 
-// upload sends a narrated upload of content as name into the directory dir
-// and expects 201.
 func (s *events) upload(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter, dir, name, content string) (document.Identity, error) {
 	route := directoryRoute(s.org.ID, dir) + "/files?" + url.Values{"name": {name}}.Encode()
 	headers := []httpx.Header{{Name: "Content-Type", Value: textPlain}}
@@ -292,9 +263,6 @@ func (s *events) moveFile(ctx context.Context, inv *cli.Invocation, r *scenario.
 	return err
 }
 
-// move sends a narrated move of target to route with body, guarded at
-// target's version, expects 200, and returns the identity the response
-// names.
 func (s *events) move(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter, route string, target document.Identity, body any) (document.Identity, error) {
 	headers := []httpx.Header{httpx.IfMatch(target.Version)}
 	res, err := call(ctx, r, styleOf(s.n, inv), s.client, http.MethodPost, route, headers, body)
@@ -344,10 +312,6 @@ func (s *events) deleteDocumentRoot(ctx context.Context, inv *cli.Invocation, r 
 	return s.deleteRecursively(ctx, inv, r, document.RootAlias)
 }
 
-// deleteRecursively deletes the directory id, or the root alias, with
-// recursive=true, narrated, expects 202, and waits for the sweep to remove
-// it through document.AwaitSweep. The directory's version is read first
-// without narration: it is bookkeeping, and a read emits no event.
 func (s *events) deleteRecursively(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter, id string) error {
 	res, err := s.client.Get(ctx, directoryRoute(s.org.ID, id))
 	if err != nil {
@@ -398,9 +362,6 @@ func (s *events) deleteOrganization(ctx context.Context, inv *cli.Invocation, r 
 	return nil
 }
 
-// find reads the organization the run created, without narration, for the
-// version its delete guards on: the steps since its transfer may have
-// changed it, and a read emits no event.
 func (s *events) find(ctx context.Context) (organization.Organization, error) {
 	res, err := s.client.Get(ctx, organization.Organizations+"/"+s.org.ID)
 	if err != nil {

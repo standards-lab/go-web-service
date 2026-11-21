@@ -47,11 +47,6 @@ func Commands(client *graph.Node[*httpx.Client], out output.Source) []*cli.Comma
 	return []*cli.Command{org}
 }
 
-// listCommand is GET Organizations under the read grammar: page or
-// cursor, size, and sort as their own flags, and each --filter a
-// name=value pair passed through as written, so the operator syntax
-// (code[like]=%o%) is the caller's to spell. --cursor is the next token a
-// previous page printed, sent with the same sort and filters.
 func listCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		read  input.ReadFlags
@@ -74,7 +69,6 @@ func listCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Comm
 	return cmd
 }
 
-// getCommand is GET Organizations/{id}.
 func getCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	return &cli.Command{
 		Name:     "get",
@@ -88,7 +82,6 @@ func getCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Comma
 	}
 }
 
-// getByPathCommand is GET Organizations/lookup?path={path}.
 func getByPathCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	return &cli.Command{
 		Name:     "get-by-path",
@@ -102,9 +95,6 @@ func getByPathCommand(client *graph.Node[*httpx.Client], out output.Source) *cli
 	}
 }
 
-// createCommand is POST Organizations. The body is --body verbatim, or
-// CreateOrganization built from --code, --name, and --parent-id (absent or
-// empty for a root).
 func createCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		raw, code, name, parentID string
@@ -139,9 +129,6 @@ func createCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Co
 	return cmd
 }
 
-// editCommand is PUT Organizations/{id} under If-Match. The body is --body
-// verbatim, or EditOrganization built from --code and --name; the version
-// is resolved by input.GuardedBody.
 func editCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		raw, code, name  string
@@ -177,11 +164,6 @@ func editCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Comm
 	return cmd
 }
 
-// transferCommand is POST Organizations/{id}/transfer under If-Match. The
-// body is --body verbatim, or TransferOrganization built from --parent-id,
-// which must be given: the service requires the parent_id key and reads
-// null as a move to the root, so an unset flag is refused here and an empty
-// one sends null.
 func transferCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var (
 		raw, parentID    string
@@ -215,8 +197,6 @@ func transferCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.
 	return cmd
 }
 
-// deleteCommand is DELETE Organizations/{id} under If-Match. There is no
-// body, so --version is simply required.
 func deleteCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var version int64
 	cmd := &cli.Command{
@@ -234,8 +214,6 @@ func deleteCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Co
 	return cmd
 }
 
-// logoCommands builds the logo subcommand over the organization's logo
-// sub-resource: put, get, and delete.
 func logoCommands(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	logo := &cli.Command{
 		Name:    "logo",
@@ -244,12 +222,6 @@ func logoCommands(client *graph.Node[*httpx.Client], out output.Source) *cli.Com
 	return logo.Add(logoPutCommand(client, out), logoGetCommand(client, out), logoDeleteCommand(client, out))
 }
 
-// logoPutCommand is PUT Organizations/{id}/logo with the file's bytes as
-// the raw body, its Content-Type taken from the file's extension unless
-// --content-type names one. The service decides which types it accepts.
-// The media type is resolved in Validate, from the name alone; the file is
-// read in Run, so a file that cannot be read is a failure, not a usage
-// error.
 func logoPutCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var contentType, resolved string
 	cmd := &cli.Command{
@@ -278,10 +250,6 @@ func logoPutCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.C
 	return cmd
 }
 
-// logoGetCommand is GET Organizations/{id}/logo. It prints the status and
-// the object headers, and writes the bytes to --out rather than to the
-// terminal. --if-none-match sends a revalidation, answered 304 when the
-// logo is unchanged.
 func logoGetCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	var dest, etag string
 	cmd := &cli.Command{
@@ -315,7 +283,6 @@ func logoGetCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.C
 	return cmd
 }
 
-// logoDeleteCommand is DELETE Organizations/{id}/logo.
 func logoDeleteCommand(client *graph.Node[*httpx.Client], out output.Source) *cli.Command {
 	return &cli.Command{
 		Name:     "delete",
@@ -329,8 +296,6 @@ func logoDeleteCommand(client *graph.Node[*httpx.Client], out output.Source) *cl
 	}
 }
 
-// optionalParent is the parent_id a flag value stands for: null when the
-// flag is empty, the value otherwise.
 func optionalParent(id string) *string {
 	if id == "" {
 		return nil

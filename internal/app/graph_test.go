@@ -25,42 +25,15 @@ import (
 	"github.com/standards-lab/go-web-service/internal/config/configtest"
 )
 
-// This file pins the graph's structural properties the composition root
-// owns: each node named by its Nodes field, the root set App.Roots
-// publishes building what a real Run builds, the server alone in the top
-// layer, the reactors group's members, the readiness checks the lifecycle
-// infers from the node values and their order, telemetry beneath every
-// other participant, the connections in one layer and the schema between
-// them and the reactors, the root set dropping no order, the relay held
-// off by the gate, and each participant held by one node. It builds the
-// graph without starting it, so it needs no live engine. Unlike
-// app_test.go, these tests name nodes: they reach the graph through
-// App.Graph and App.Nodes, as does the Build-failure case, which
-// substitutes a failing constructor. They read placement by handle: the
-// System's layer of each node handle, whether it holds a handle, and the
-// handle on each built node.
-//
-// Each placement guard a fixture can break is a function returning an
-// error that carries the System's layer table, called both by the test of
-// the App's own roots and by a test of a fixture that breaks it, so the
-// fixture shows the real assertion can fail.
-
-// Each node's name is its Nodes field's name lowercased, ignoring the
-// name's spaces, so a field names the node it holds without a comment
-// repeating the name, and every field holds a handle once New returns.
 func TestGraph_NodesNamedByTheirFields(t *testing.T) {
 	a := app.New(configtest.Config(t), io.Discard)
 	graphtest.CheckNames(t, a.Nodes())
 }
 
-// runSet returns the set Run builds, App.Roots plus the lifecycle config
-// node, plus extra. TestGraph_RootsBuildAsRun holds this set to Run's by
-// observing a real Run.
 func runSet(a *app.App, extra ...graph.Ref) []graph.Ref {
 	return append(append(a.Roots(), a.Nodes().LifecycleConfig), extra...)
 }
 
-// buildAsRun builds a's graph from runSet(a, extra...).
 func buildAsRun(t *testing.T, a *app.App, extra ...graph.Ref) *graph.System {
 	t.Helper()
 	sys, err := a.Graph().Build(runSet(a, extra...)...)
@@ -70,9 +43,6 @@ func buildAsRun(t *testing.T, a *app.App, extra ...graph.Ref) *graph.System {
 	return sys
 }
 
-// observeRun runs a with a context already ended, so the Run builds and
-// starts nothing, and returns the handle of every node its Build
-// constructed.
 func observeRun(t *testing.T, a *app.App) []graph.Ref {
 	t.Helper()
 	var ran []graph.Ref
@@ -85,11 +55,6 @@ func observeRun(t *testing.T, a *app.App) []graph.Ref {
 	return ran
 }
 
-// App.Roots is the server and the reactors group, and a Build of it plus
-// the lifecycle config node constructs exactly the nodes a real Run
-// constructs, compared by handle: every node Run built is in the System,
-// and the System holds no node Run did not build. It holds the tests
-// below, which inspect that set, to what Run reaches.
 func TestGraph_RootsBuildAsRun(t *testing.T) {
 	a := app.New(configtest.Config(t), io.Discard)
 	n := a.Nodes()
@@ -114,14 +79,10 @@ func TestGraph_RootsBuildAsRun(t *testing.T) {
 	}
 }
 
-// layerError returns an error of the formatted message followed by sys's
-// layer table.
 func layerError(sys *graph.System, format string, args ...any) error {
 	return fmt.Errorf(format+"\nlayers:\n%s", append(args, sys)...)
 }
 
-// wantGuardFails fails t unless err, a guard's verdict on sys, is an error
-// that names mention and carries sys's layer table.
 func wantGuardFails(t *testing.T, err error, sys *graph.System, mention string) {
 	t.Helper()
 	switch {
@@ -134,9 +95,6 @@ func wantGuardFails(t *testing.T, err error, sys *graph.System, mention string) 
 	}
 }
 
-// serverAlone reports, as an error carrying the layer table, any node of
-// sys at or above the server's layer: the server must be alone in the top
-// layer, so it starts after every other node and drains first.
 func serverAlone(sys *graph.System, server graph.Ref) error {
 	if !sys.Has(server) {
 		return layerError(sys, "%s is not in the System", server.Name())
@@ -155,10 +113,6 @@ func serverAlone(sys *graph.System, server graph.Ref) error {
 	return nil
 }
 
-// The server is the only node in the top layer of the graph Run builds, so
-// it starts after every other node and drains first. A node defined above
-// it, or beside it at the top, fails the guard; the second case shows the
-// guard catches one.
 func TestGraph_ServerAloneInTopLayer(t *testing.T) {
 	t.Run("as defined", func(t *testing.T) {
 		a := app.New(configtest.Config(t), io.Discard)
@@ -178,14 +132,6 @@ func TestGraph_ServerAloneInTopLayer(t *testing.T) {
 	})
 }
 
-// The reactors group's members are the sweeper and the relay, each joined
-// by its graph.In alone, and each sits below the server. go-core lists no
-// group's members, so they are read from Builds: a Build of the group
-// holds both, and holds no node a Build of the two does not, so a third
-// member would show unless the two already reach it. A Build of the
-// server and the lifecycle config node, Run's roots without the group,
-// holds neither, so no Use reaches them and the group alone puts them in
-// Run's Build.
 func TestGraph_ReactorsGroupMembers(t *testing.T) {
 	a := app.New(configtest.Config(t), io.Discard)
 	n := a.Nodes()
@@ -233,13 +179,6 @@ func TestGraph_ReactorsGroupMembers(t *testing.T) {
 	}
 }
 
-// The readiness checks the lifecycle infers from the node values, each one
-// that both starts and reports Ready, are the database, the object store,
-// the broker, the schema, the sweeper, and the relay, in that order;
-// /readyz reports them after "lifecycle". No other value is both: not the
-// nudge the document layer reaches the sweeper through, not the
-// messaging runtime, which starts nothing, and not the readiness node
-// itself.
 func TestGraph_ReadinessChecks(t *testing.T) {
 	cfg := configtest.Config(t)
 	a := app.New(cfg, io.Discard)
@@ -255,8 +194,6 @@ func TestGraph_ReadinessChecks(t *testing.T) {
 	}
 }
 
-// participant reports whether v takes part in the lifecycle's startup or
-// shutdown.
 func participant(v any) bool {
 	switch v.(type) {
 	case lifecycle.Starter, lifecycle.Stopper:
@@ -265,11 +202,6 @@ func participant(v any) bool {
 	return false
 }
 
-// telemetryBeneath reports, as an error carrying the layer table, a
-// System without telemetry, or any lifecycle participant other than
-// telemetry whose layer is not above telemetry's. Telemetry's presence is
-// checked first, so a System missing it cannot pass with no participant
-// compared.
 func telemetryBeneath(sys *graph.System, telemetry graph.Ref) error {
 	if !sys.Has(telemetry) {
 		return layerError(sys, "%s is not in the System", telemetry.Name())
@@ -287,15 +219,10 @@ func telemetryBeneath(sys *graph.System, telemetry graph.Ref) error {
 	return nil
 }
 
-// lateStarter is a participant that orders itself after nothing.
 type lateStarter struct{}
 
 func (lateStarter) Start(context.Context) error { return nil }
 
-// Telemetry sits beneath every other lifecycle participant, so its
-// providers are installed before any starts and flushed after all have
-// stopped. A participant that misses the edge to telemetry fails the
-// guard; the second case shows the guard catches one.
 func TestGraph_TelemetryBeneathParticipants(t *testing.T) {
 	t.Run("as defined", func(t *testing.T) {
 		a := app.New(configtest.Config(t), io.Discard)
@@ -314,14 +241,6 @@ func TestGraph_TelemetryBeneathParticipants(t *testing.T) {
 	})
 }
 
-// The database, the object store, and the broker share a layer, so they
-// start together, concurrently, and close together. The schema sits above
-// them, so it starts once they are connected and stops before they close,
-// and below the sweeper and the relay, so they start once every table they
-// touch is verified and stop before the schema does. The relay also sits
-// above the broker, so it drains, its last pass included, before the
-// broker stops. The document node does not Use the relay, so the schema,
-// which Uses the document node for its seed, can sit beneath it.
 func TestGraph_SchemaBetweenConnectionsAndReactors(t *testing.T) {
 	a := app.New(configtest.Config(t), io.Discard)
 	sys := buildAsRun(t, a)
@@ -354,11 +273,6 @@ func TestGraph_SchemaBetweenConnectionsAndReactors(t *testing.T) {
 	}
 }
 
-// rootDrops builds roots from a's graph and reports, as an error carrying
-// the layer table, a failed Build or any After the Build dropped. The
-// reactors group has members, so the server's After of it orders; any
-// drop means a root is missing from the set, or a node orders itself
-// after one no root reaches, so an order is silently lost.
 func rootDrops(a *app.App, roots []graph.Ref) error {
 	sys, err := a.Graph().Build(roots...)
 	if err != nil {
@@ -374,8 +288,6 @@ func rootDrops(a *app.App, roots []graph.Ref) error {
 	return nil
 }
 
-// A Build of the root set drops no After. The second case shows the guard
-// catches an After whose target the roots do not build.
 func TestGraph_RootsDropNothing(t *testing.T) {
 	t.Run("as defined", func(t *testing.T) {
 		a := app.New(configtest.Config(t), io.Discard)
@@ -397,11 +309,8 @@ func TestGraph_RootsDropNothing(t *testing.T) {
 	})
 }
 
-// The relay holds the gate shared for each row, so while a schema verb
-// holds it exclusively the relay opens no transaction: against a database
-// that refuses every connection, it reports no failure until the gate is
-// released, and then reports the refused connection. No live engine is
-// needed: the failure the release lets through is the refusal itself.
+const manyRelayPolls = 100 * time.Millisecond
+
 func TestGraph_RelayHeldOffByTheGate(t *testing.T) {
 	cfg := configtest.Config(t)
 	cfg.Messaging.RelayPoll = libconfig.Duration(5 * time.Millisecond)
@@ -422,9 +331,7 @@ func TestGraph_RelayHeldOffByTheGate(t *testing.T) {
 	if err := relay.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	// Many polls' worth: a relay that ignored the gate would have dialled
-	// the closed port and reported the refusal by now.
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(manyRelayPolls)
 	if failed() {
 		t.Fatalf("the relay reported a failure while the gate was held exclusively:\n%s", log.String())
 	}
@@ -445,14 +352,6 @@ func TestGraph_RelayHeldOffByTheGate(t *testing.T) {
 	}
 }
 
-// The sweeper cancels a cycle still running half the shutdown timeout into
-// its drain, go-core's CancelWithin rule, and its drain reports the period:
-// under the 10s default, "handlers cancelled after 5s". A shorter timeout
-// keeps the test fast. The cycle in flight is the files reclaimer's, its
-// claim waiting on a connection to a database that accepts and never
-// answers, which only the cancellation ends, so no live engine is needed.
-// The drain alone does not end it: a claim, unlike a wait on the gate,
-// runs until its context does.
 func TestGraph_SweeperCancelsWithinTheShutdownTimeout(t *testing.T) {
 	cfg := configtest.Config(t)
 	cfg.ShutdownTimeout = libconfig.Duration(200 * time.Millisecond)
@@ -468,9 +367,6 @@ func TestGraph_SweeperCancelsWithinTheShutdownTimeout(t *testing.T) {
 	if err := sweeper.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	// Every reclaimer is due at start, so the files cycle begins at once
-	// and its claim dials the silent database: once the dial is accepted,
-	// the cycle is in flight, waiting on an answer that never comes.
 	select {
 	case <-dialled:
 	case <-time.After(failsafe):
@@ -485,10 +381,6 @@ func TestGraph_SweeperCancelsWithinTheShutdownTimeout(t *testing.T) {
 	}
 }
 
-// silentPort listens on a loopback port that accepts each connection and
-// never answers it, so a client's handshake waits until its context ends.
-// The channel is closed once the first connection is accepted. The
-// listener and its connections close at cleanup.
 func silentPort(t *testing.T) (int, <-chan struct{}) {
 	t.Helper()
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
@@ -522,9 +414,6 @@ func silentPort(t *testing.T) (int, <-chan struct{}) {
 	return lis.Addr().(*net.TCPAddr).Port, accepted
 }
 
-// closingPort listens on a loopback port that closes each connection as it
-// accepts it, so a client's handshake fails at once. The listener closes at
-// cleanup.
 func closingPort(t *testing.T) int {
 	t.Helper()
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
@@ -544,23 +433,11 @@ func closingPort(t *testing.T) int {
 	return lis.Addr().(*net.TCPAddr).Port
 }
 
-// claimFailures counts the sweeper's records, in log, of a failed claim of
-// the lock of the reclaimer named.
 func claimFailures(log, reclaimer string) int {
 	re := regexp.MustCompile(`sweep claim failed.*reclaimer\W+` + regexp.QuoteMeta(reclaimer) + `\b`)
 	return len(re.FindAllStringIndex(log, -1))
 }
 
-// The nudge the document layer gives after each branch it marks reaches
-// the sweeper's files reclaimer and no other. The database closes every
-// connection, so each cycle's claim fails and is logged under its
-// reclaimer's name; with an interval of an hour, a cycle after the start's
-// runs only on a nudge. The nudge node the document layer is built with
-// then earns the files reclaimer, alone, a second cycle: a nudge left
-// unbound, or bound to another reclaimer, never logs one. The records also
-// show the service's sweeper claims each reclaimer's lock: one built with
-// sweep.Options.Unlocked would log no claim. Unbound, as in a graph built
-// without the sweeper, a nudge does nothing and never panics.
 func TestGraph_TheDocumentNudgeReachesTheFilesReclaimer(t *testing.T) {
 	cfg := configtest.Config(t)
 	cfg.Sweep.Interval = libconfig.Duration(time.Hour)
@@ -591,8 +468,7 @@ func TestGraph_TheDocumentNudgeReachesTheFilesReclaimer(t *testing.T) {
 			t.Errorf("Shutdown = %v", err)
 		}
 	})
-	// The start's cycles run in the list's order, inbox last.
-	processtest.WaitFor(t, "the start's cycles", func() bool {
+	processtest.WaitFor(t, "the start's cycles, inbox last", func() bool {
 		return claimFailures(log.String(), "inbox") == 1
 	})
 
@@ -605,11 +481,6 @@ func TestGraph_TheDocumentNudgeReachesTheFilesReclaimer(t *testing.T) {
 	}
 }
 
-// The sweeper registers the three reclaimers the service runs, files,
-// outbox, and inbox: go-database's Sweeper panics on a nudge of a name it
-// was not built with, so a reclaimer missing from the registration, or
-// registered under another name, fails here. A name it was not built with
-// is refused, which shows a nudge of a missing name does fail.
 func TestGraph_SweeperRegistersTheReclaimers(t *testing.T) {
 	a := app.New(configtest.Config(t), io.Discard)
 	sweeper := buildAsRun(t, a).Get(a.Nodes().Sweeper)
@@ -629,10 +500,6 @@ func TestGraph_SweeperRegistersTheReclaimers(t *testing.T) {
 	}
 }
 
-// Each lifecycle participant is the value of one node only: the same value
-// in two nodes would start twice, stop twice, and, as a ReadyStarter, be
-// reported twice. The admin storage routes read the storage node's
-// store rather than holding it as a node of their own.
 func TestGraph_EachParticipantInOneNode(t *testing.T) {
 	a := app.New(configtest.Config(t), io.Discard)
 	sys := buildAsRun(t, a)
@@ -651,10 +518,6 @@ func TestGraph_EachParticipantInOneNode(t *testing.T) {
 	}
 }
 
-// Telemetry's Shutdown is safe when its Start never ran, as the
-// lifecycle's shutdown of a participant whose Start failed calls it: it
-// returns nil and logs nothing, go-observability releasing the exporters
-// Start never handed to a provider.
 func TestTelemetry_ShutdownWithoutStart(t *testing.T) {
 	var log syncBuffer
 	a := app.New(configtest.Config(t), &log)
@@ -670,10 +533,6 @@ func TestTelemetry_ShutdownWithoutStart(t *testing.T) {
 	}
 }
 
-// A constructor's error fails Run's Build: Run returns 1 and writes the
-// failure to stderr, labelled with the failing node's name. It logs
-// nothing, since the node that failed may be the logger itself, and
-// nothing reports ready.
 func TestRun_BuildFailureExitsOne(t *testing.T) {
 	var log, stderr syncBuffer
 	a := app.New(configtest.Config(t), &log)
@@ -681,11 +540,9 @@ func TestRun_BuildFailureExitsOne(t *testing.T) {
 		return nil, errors.New("unavailable")
 	})
 
-	// Cancelled up front, so a Build that wrongly succeeds drains at once
-	// and fails the exit-code check instead of hanging.
-	ctx, cancel := context.WithCancel(context.Background())
+	endedBeforeStart, cancel := context.WithCancel(context.Background())
 	cancel()
-	if code := a.Run(ctx, &stderr); code != 1 {
+	if code := a.Run(endedBeforeStart, &stderr); code != 1 {
 		t.Errorf("Run = %d, want 1", code)
 	}
 	failure := regexp.MustCompile(`^service failed: .*\blogger\b.*unavailable`)

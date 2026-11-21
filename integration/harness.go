@@ -18,26 +18,18 @@ import (
 	pgdialect "github.com/standards-lab/sqlate/postgres"
 )
 
-// The compose stack's defaults, the values config.json and
-// secrets.example.json pair with. The harness reads the same APP_DATABASE_*,
-// APP_STORAGE_*, APP_NATS_URL, and APP_OBSERVABILITY_ENDPOINT variables the
-// service does, so a stack moved off the defaults follows one setting. The
-// storage account and key are Azurite's published development credential.
 const (
 	defaultDatabaseHost          = "127.0.0.1"
 	defaultDatabasePort          = "5432"
 	defaultDatabasePassword      = "app"
 	defaultStorageEndpoint       = "http://127.0.0.1:10000/devstoreaccount1"
-	defaultStorageAccount        = "devstoreaccount1"
-	defaultStorageKey            = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
+	azuriteDevelopmentAccount    = "devstoreaccount1"
+	azuriteDevelopmentKey        = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
 	defaultObservabilityEndpoint = "127.0.0.1:4317"
 	defaultNATSURL               = "nats://127.0.0.1:4222"
-	// storageContainer is config.json's container, which the harness
-	// leaves the service on.
-	storageContainer = "go-web-service"
+	configuredContainer          = "go-web-service"
 )
 
-// getenv is the parent's value of name, or def when it sets none.
 func getenv(name, def string) string {
 	if v := os.Getenv(name); v != "" {
 		return v
@@ -53,12 +45,7 @@ func getenv(name, def string) string {
 // which TestJSONTimesUTC refuses up front.
 const ServiceZone = "Asia/Kolkata"
 
-// defaultRateLimitRequests overrides the service's own default (300 per
-// minute) generously upward, so no scenario's own request volume against
-// one process trips the limit; a scenario that means to exercise the limit
-// itself sets Options.Env to a tighter value, which wins as the later
-// entry.
-const defaultRateLimitRequests = "1000"
+const generousRateLimitRequests = "1000"
 
 // Main is the suite's TestMain: it builds cmd/server once, with the race
 // detector so the service runs under it too, runs the tests, and removes
@@ -89,7 +76,10 @@ type Options struct {
 	// a test routes the service through a processtest.Forwarder. Empty uses
 	// the compose NATS.
 	NATS string
-	// Env appends further KEY=VALUE overrides, applied last.
+	// Env appends further KEY=VALUE overrides, applied last. The harness
+	// raises APP_RATE_LIMIT_REQUESTS well above the service's default, so
+	// no test's own volume trips the limit; a test of the limit itself
+	// sets a tighter value here.
 	Env []string
 }
 
@@ -113,7 +103,10 @@ func Start(t testing.TB, opts Options) *Service {
 // waits for one. A test that fails logs the process's output at its
 // cleanup, before the process is stopped, so a failure a client sees, a
 // 500 from any call, the harness's Reset included, comes with the
-// service's own record of it.
+// service's own record of it. The process's configuration is the base file
+// and the harness's variables alone, with no APP_ENV overlay, in
+// ServiceZone, and its object store retries once, as the local overlay
+// sets, so a severed store's refusal answers in about a second.
 func Launch(t testing.TB, opts Options) *Service {
 	t.Helper()
 	host, port, err := net.SplitHostPort(opts.Database)
@@ -141,12 +134,6 @@ func (s *Service) Ready(t testing.TB) *Service {
 	return s
 }
 
-// environment composes the service's own variables for the run. APP_ENV is
-// cleared so no overlay applies: the base file and these variables are the
-// whole configuration. TZ is ServiceZone, so no process runs in UTC. The
-// database address is the override when given, else the parent's
-// APP_DATABASE_* variables, else the compose defaults; the object store's
-// and the broker's follow the same rule.
 func environment(opts Options, addr, dbHost, dbPort string) []string {
 	host, port := databaseHostPort()
 	if opts.Database != "" {
@@ -181,15 +168,13 @@ func environment(opts Options, addr, dbHost, dbPort string) []string {
 		"APP_DATABASE_PORT=" + port,
 		"APP_DATABASE_PASSWORD=" + password,
 		"APP_STORAGE_ENDPOINT=" + storageEndpoint.String(),
-		"APP_STORAGE_ACCOUNT=" + getenv("APP_STORAGE_ACCOUNT", defaultStorageAccount),
-		"APP_STORAGE_KEY=" + getenv("APP_STORAGE_KEY", defaultStorageKey),
-		// One retry, as the local overlay sets, so a severed store's refusal
-		// answers in about a second rather than the SDK's backoff.
+		"APP_STORAGE_ACCOUNT=" + getenv("APP_STORAGE_ACCOUNT", azuriteDevelopmentAccount),
+		"APP_STORAGE_KEY=" + getenv("APP_STORAGE_KEY", azuriteDevelopmentKey),
 		"APP_STORAGE_OPTIONS_MAX_RETRIES=1",
 		"APP_NATS_URL=" + natsURL.String(),
 		"APP_OBSERVABILITY_ENDPOINT=" + endpoint,
 		"APP_ADMIN_SEED=" + opts.Seed,
-		"APP_RATE_LIMIT_REQUESTS=" + defaultRateLimitRequests,
+		"APP_RATE_LIMIT_REQUESTS=" + generousRateLimitRequests,
 	}
 	return append(env, opts.Env...)
 }
@@ -204,8 +189,6 @@ func (s *Service) URL() string { return "http://" + s.addr }
 // connection is reused across calls.
 func (s *Service) Client() *webtest.Client { return s.client }
 
-// databaseHostPort is the compose database's host and port, the parent's
-// APP_DATABASE_HOST and APP_DATABASE_PORT or the defaults.
 func databaseHostPort() (host, port string) {
 	return getenv("APP_DATABASE_HOST", defaultDatabaseHost), getenv("APP_DATABASE_PORT", defaultDatabasePort)
 }
@@ -214,9 +197,6 @@ func databaseHostPort() (host, port string) {
 // test forwards the service's database through.
 func DatabaseAddr() string { return net.JoinHostPort(databaseHostPort()) }
 
-// storageURL is the compose store's endpoint, the parent's
-// APP_STORAGE_ENDPOINT or the default. A value that does not parse is the
-// default, as an unset one is.
 func storageURL() *url.URL {
 	u, err := url.Parse(getenv("APP_STORAGE_ENDPOINT", defaultStorageEndpoint))
 	if err != nil || u.Host == "" {
@@ -229,8 +209,6 @@ func storageURL() *url.URL {
 // test forwards the service's object store through.
 func StorageAddr() string { return storageURL().Host }
 
-// brokerURL is the compose NATS's URL, the parent's APP_NATS_URL or the
-// default. A value that does not parse is the default, as an unset one is.
 func brokerURL() *url.URL {
 	u, err := url.Parse(getenv("APP_NATS_URL", defaultNATSURL))
 	if err != nil || u.Host == "" {
@@ -252,9 +230,9 @@ func Objects(t testing.TB) *storage.Store {
 	t.Helper()
 	cfg := storage.Config{
 		Endpoint:  storageURL().String(),
-		Container: storageContainer,
-		Account:   getenv("APP_STORAGE_ACCOUNT", defaultStorageAccount),
-		Key:       getenv("APP_STORAGE_KEY", defaultStorageKey),
+		Container: configuredContainer,
+		Account:   getenv("APP_STORAGE_ACCOUNT", azuriteDevelopmentAccount),
+		Key:       getenv("APP_STORAGE_KEY", azuriteDevelopmentKey),
 	}
 	if err := cfg.Finalize(""); err != nil {
 		t.Fatalf("object store config: %v", err)

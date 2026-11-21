@@ -42,7 +42,6 @@ func TestRecorder_LogIsACopy(t *testing.T) {
 	}
 }
 
-// Run under -race, concurrent Records prove the Recorder's lock.
 func TestRecorder_ConcurrentRecords(t *testing.T) {
 	var r apptest.Recorder[string]
 	var wg sync.WaitGroup
@@ -57,7 +56,6 @@ func TestRecorder_ConcurrentRecords(t *testing.T) {
 	}
 }
 
-// Names reads each handle's name, in order.
 func TestNames_ReadsEachHandle(t *testing.T) {
 	g := graph.New()
 	refs := []graph.Ref{g.Value("no color", false), g.Value("lifecycle config", 0)}

@@ -17,7 +17,6 @@ import (
 	"github.com/standards-lab/go-web-service/internal/outboxtest"
 )
 
-// noEvent fails the test if the recorder wrote any event.
 func noEvent(t *testing.T, rec *sqltest.Recorder) {
 	t.Helper()
 	if w := outboxtest.Writes(rec); len(w) != 0 {
@@ -25,11 +24,6 @@ func noEvent(t *testing.T, rec *sqltest.Recorder) {
 	}
 }
 
-// An upload that completes writes exactly one FileUploaded, in the
-// transaction that makes the file available: the outbox insert runs after
-// the completion and before its commit. The event is about the file, its
-// data the file's metadata as the completion left it, under the API's
-// field names, and never its content.
 func TestUploadFile_EmitsFileUploadedInTheCompletion(t *testing.T) {
 	s, rec, _ := serviceOver(t,
 		root(rootID), within(true), datatest.FileRows(file(fileID, dirID, blobfs.StatusPending, 1)),
@@ -49,17 +43,12 @@ func TestUploadFile_EmitsFileUploadedInTheCompletion(t *testing.T) {
 	})
 }
 
-// An event whose write fails fails the completion with it: the
-// transaction rolls back, so the file never reads available and no event
-// commits, and the write is abandoned as a failed completion is, the row
-// removed at its pending version and the object just put deleted.
 func TestUploadFile_AFailedEmitRollsBackTheCompletion(t *testing.T) {
+	deleteBegunAtThePendingVersion := datatest.FileRows(file(fileID, dirID, blobfs.StatusDeleting, 2))
 	s, rec, fake := serviceOver(t,
 		root(rootID), within(true), datatest.FileRows(file(fileID, dirID, blobfs.StatusPending, 1)),
 		datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 2)), sqltest.Response{Err: errors.New("the outbox refused the row")},
-		// The abandon: the delete begun at the pending version, the object
-		// deleted, the row purged.
-		datatest.FileRows(file(fileID, dirID, blobfs.StatusDeleting, 2)), exec(1),
+		deleteBegunAtThePendingVersion, purged(),
 	)
 	_, err := s.UploadFile(context.Background(), orgID, dirID, "report.txt", textUpload(t))
 	if err == nil || !strings.Contains(err.Error(), "the outbox refused the row") {
@@ -75,21 +64,8 @@ func TestUploadFile_AFailedEmitRollsBackTheCompletion(t *testing.T) {
 	}
 }
 
-// written scripts the outbox insert of one event.
 func written() sqltest.Response { return sqltest.Response{Affected: 1} }
 
-// Each directory and file command writes exactly one event, its kind's,
-// in the transaction that makes its change true: the outbox insert is the
-// last statement before that transaction's commit. Its subject is the id
-// of the directory or file, and its data the entity's stored state after
-// the command, under the API's field names, every field checked: no path,
-// no status, no timestamps, no earlier state. A create under the alias
-// that finds the root emits no root event, and a branch's delete emits for
-// the marked directory alone, at the version the mark left it at. A file's
-// move carries what its upload carries, a pending file's size and entity
-// tag null; a file's delete commits in the transaction that begins it, at
-// the version that left the file deleting, and its purge, after the
-// commit, writes no event.
 func TestCommands_EmitTheirEventInTheirTransaction(t *testing.T) {
 	ctx := context.Background()
 	cases := map[string]struct {
@@ -196,7 +172,7 @@ func TestCommands_EmitTheirEventInTheirTransaction(t *testing.T) {
 			[]sqltest.Response{
 				root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), within(true),
 				datatest.FileRows(file(fileID, dirID, blobfs.StatusDeleting, 4)), written(),
-				exec(1), // the purge, after the commit
+				purged(),
 			},
 			func(s *document.Service) error { return s.DeleteFile(ctx, orgID, fileID, 3) },
 			[]sqltest.Op{begin, q, q, q, q, x, commit, x},
@@ -206,7 +182,7 @@ func TestCommands_EmitTheirEventInTheirTransaction(t *testing.T) {
 		"delete branch": {
 			[]sqltest.Response{
 				root(rootID), within(true), datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)),
-				exec(3), exec(5), // the directory and two beneath it marked, and their files
+				directoriesMarked(3), filesMarked(5),
 				datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), written(),
 			},
 			func(s *document.Service) error {
@@ -240,15 +216,6 @@ func TestCommands_EmitTheirEventInTheirTransaction(t *testing.T) {
 	}
 }
 
-// The organization's first write under the alias creates its document
-// root, and the transaction that creates it commits the root's
-// DirectoryCreated, the root as the API shows it: no parent, named "/".
-// The write's own event follows in its own transaction. A write that
-// loses the race to a concurrent first write, its insert refused or the
-// winner's directory found and its bind refused, rolls back with no root
-// event and reads the winner's root; the write's own event is all it
-// commits. A root that stands commits its event even when the write that
-// made it is refused after.
 func TestEnsureRoot_TheTransactionThatCreatesTheRootEmitsIt(t *testing.T) {
 	ctx := context.Background()
 	rootRow := directory(rootID, blobfs.RootID, orgID, 1)
@@ -262,7 +229,7 @@ func TestEnsureRoot_TheTransactionThatCreatesTheRootEmitsIt(t *testing.T) {
 		responses []sqltest.Response
 		ops       []sqltest.Op
 		fails     bool
-		events    []map[string]any // the committed events' data, in order: the root's, then the write's
+		events    []map[string]any
 	}{
 		"created": {
 			append(created, theWrite...),
@@ -304,15 +271,11 @@ func TestEnsureRoot_TheTransactionThatCreatesTheRootEmitsIt(t *testing.T) {
 	}
 }
 
-// A mark that finds the directory deleting already, the mark's retry, is
-// accepted as it always was, and commits no event: the directory reads
-// deleting under the tree lock, before the mark, and the first mark
-// emitted the directory's.
 func TestDeleteBranch_ARetryOfTheMarkEmitsNothing(t *testing.T) {
 	marked := datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1)))
 	s, rec, _, _ := serviceOnPostgres(t,
-		root(rootID), within(true), exec(0), marked, // the tree locked; deleting already
-		exec(0), exec(0), marked, // nothing marked; the mark's read finds it deleting
+		root(rootID), within(true), treeLocked(), marked,
+		treeLocked(), directoriesMarked(0), marked,
 		exec(0),
 	)
 	if id, err := s.DeleteBranch(context.Background(), orgID, dirID, 1); err != nil || id != dirID {
@@ -322,15 +285,12 @@ func TestDeleteBranch_ARetryOfTheMarkEmitsNothing(t *testing.T) {
 	noEvent(t, rec)
 }
 
-// On the baseline variant, whose tree lock is a no-op, a first mark can
-// commit between the directory's read and this mark: the directory reads
-// active, but the mark counts nothing and finds it deleting, so the mark
-// is accepted as the retry and commits no event, the first mark having
-// emitted it. The count guard serves this case alone.
 func TestDeleteBranch_AMarkOvertakenOnTheBaselineEmitsNothing(t *testing.T) {
+	readActive := datatest.DirectoryRows(directory(dirID, rootID, "reports", 1))
+	markedMeanwhile := datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 2)))
 	s, rec, _ := serviceOver(t,
-		root(rootID), within(true), datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)), // read active
-		exec(0), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 2))), // marked meanwhile; nothing counted
+		root(rootID), within(true), readActive,
+		directoriesMarked(0), markedMeanwhile,
 		exec(0),
 	)
 	if id, err := s.DeleteBranch(context.Background(), orgID, dirID, 1); err != nil || id != dirID {
@@ -340,17 +300,11 @@ func TestDeleteBranch_AMarkOvertakenOnTheBaselineEmitsNothing(t *testing.T) {
 	noEvent(t, rec)
 }
 
-// A retry whose mark reaches a straggler, a directory a create raced into
-// the branch after the first mark, commits no event either: the mark
-// counts the straggler, but the directory read deleting before the mark,
-// so its delete began with the first mark, which emitted its event, and
-// the straggler beneath it has none of its own.
 func TestDeleteBranch_ARetryThatMarksAStragglerEmitsNothing(t *testing.T) {
 	s, rec, _, _ := serviceOnPostgres(t,
-		root(rootID), within(true), exec(0), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))), // the tree locked; deleting already
-		exec(0), // the mark's own lock, held already
-		exec(1), // the straggler beneath it marked
-		exec(2), // the straggler's files marked
+		root(rootID), within(true), treeLocked(), datatest.DirectoryRows(deleting(directory(dirID, rootID, "reports", 1))),
+		treeLocked(),
+		directoriesMarked(1), filesMarked(2),
 	)
 	if id, err := s.DeleteBranch(context.Background(), orgID, dirID, 1); err != nil || id != dirID {
 		t.Fatalf("DeleteBranch = %q, %v; want the retry accepted", id, err)
@@ -359,22 +313,12 @@ func TestDeleteBranch_ARetryThatMarksAStragglerEmitsNothing(t *testing.T) {
 	noEvent(t, rec)
 }
 
-// A delete that finds the file deleting already, the delete's retry, is
-// accepted at any version, as it always was, and commits no event: the
-// delete statement changes nothing, which tells blobfs the delete began
-// before, so the delete's first transaction runs no hook, the first delete
-// having emitted the file's event. The retry still finishes the delete,
-// the object deleted and the row purged, and the purge emits nothing. A
-// file in a marked branch is deleting by its branch's mark, which emitted
-// the directory's event alone, and its delete is the retry too: blobfs
-// tells the retry from the file's row alone, never reading its directory,
-// so one script stands for both.
 func TestDeleteFile_ARetryEmitsNothingAndPurges(t *testing.T) {
 	deletingRow := datatest.FileRows(file(fileID, dirID, blobfs.StatusDeleting, 4))
 	s, rec, fake := serviceOver(t,
 		root(rootID), deletingRow, within(true),
-		datatest.FileRows(), deletingRow, // the delete's retry leaves the row as it is
-		exec(1), // the purge
+		guardedUpdateMatchesNothing(), deletingRow,
+		purged(),
 	)
 	ctx := context.Background()
 	key := fileID + "/report.txt"
@@ -391,12 +335,6 @@ func TestDeleteFile_ARetryEmitsNothingAndPurges(t *testing.T) {
 	}
 }
 
-// A directory or file command that fails commits no event, however it
-// fails: its transaction rolls back with the change and the event
-// together, and the API's result is the failure it was. That holds for a
-// scope check, a taken name, a cycle, the root's move, the version guard,
-// a non-empty directory, a missing organization or file, a file deleting,
-// and an event whose own write fails.
 func TestCommands_AFailedCommandCommitsNoEvent(t *testing.T) {
 	ctx := context.Background()
 	stale := datatest.DirectoryRows(directory(dirID, rootID, "reports", 2))
@@ -477,7 +415,7 @@ func TestCommands_AFailedCommandCommitsNoEvent(t *testing.T) {
 		"move file, a stale version": {
 			[]sqltest.Response{
 				root(rootID), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), within(true), within(true),
-				datatest.FileRows(), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)), // the guarded move matches nothing
+				guardedUpdateMatchesNothing(), datatest.FileRows(file(fileID, dirID, blobfs.StatusAvailable, 3)),
 				datatest.DirectoryRows(directory(dirID, rootID, "reports", 1)), datatest.DirectoryRows(directory(subID, dirID, "drafts", 1)),
 			}, moveFile(subID),
 			[]sqltest.Op{begin, q, q, q, q, q, q, q, q, rollback}, query.ErrVersionMismatch,

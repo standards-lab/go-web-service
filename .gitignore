@@ -1,24 +1,17 @@
-# Marathon session plan files.
 .claude/plans/
 
-# marathon's task and session briefs.
 .claude/briefs/
 
-# Per-machine mise overrides.
 mise.local.toml
 
-# Secrets are layered configuration and never committed; the example file is
-# the one committed exception.
 secrets*.json
 !secrets.example.json
 
-# Build and coverage artifacts.
 bin/
 *.test
 coverage.out
 coverage.html
 
-# Local workspace files.
 go.work
 go.work.sum
 tmp/

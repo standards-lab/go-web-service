@@ -65,7 +65,6 @@ func Decode(t testing.TB, c sqltest.Call) event.Event {
 	return e
 }
 
-// bytesOf is a bound argument's bytes, as the driver was handed them.
 func bytesOf(t testing.TB, arg any) []byte {
 	t.Helper()
 	switch v := arg.(type) {

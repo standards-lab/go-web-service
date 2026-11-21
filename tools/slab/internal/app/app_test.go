@@ -16,22 +16,17 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/internal/apptest"
 )
 
-// shutdownTimeout and noColor are variables a Build reads.
 var (
 	shutdownTimeout = lifecycle.NewEnv("SLAB").ShutdownTimeout
 	noColor         = "SLAB_NO_COLOR"
 )
 
-// unreadable makes every configuration a Build reads fail, so a run that
-// does not fail on it proves it read none.
 func unreadable(t *testing.T) {
 	t.Helper()
 	t.Setenv(shutdownTimeout, "not-a-duration")
 	t.Setenv(noColor, "not-a-bool")
 }
 
-// newApp returns the App over fresh buffers, and the recorder of the nodes
-// its runs build.
 func newApp(t *testing.T) (a *app.App, stdout, stderr *bytes.Buffer, built *apptest.Recorder[graph.Ref]) {
 	t.Helper()
 	stdout, stderr = new(bytes.Buffer), new(bytes.Buffer)
@@ -39,17 +34,11 @@ func newApp(t *testing.T) (a *app.App, stdout, stderr *bytes.Buffer, built *appt
 	return a, stdout, stderr, apptest.Builds(a)
 }
 
-// settings are the values of the run setting nodes, as a probe reads them.
 type settings struct {
 	base, grafana, repo string
 	noColor             bool
 }
 
-// probe adds a group command at a's root holding three leaves that each
-// declare every run setting node: probe, which keeps the settings it read
-// and returns where, nil until it runs; needs, which requires --a; and
-// either, whose --a and --b are exclusive. The leaves sit below a parent so
-// a root flag can be given at every depth.
 func probe(a *app.App) **settings {
 	got := new(*settings)
 	n := a.Nodes()
@@ -111,7 +100,6 @@ func TestRun_RootHelp(t *testing.T) {
 	}
 }
 
-// A parent run with no subcommand prints its help, as the root does.
 func TestRun_ParentWithNoSubcommand(t *testing.T) {
 	unreadable(t)
 	a, stdout, stderr, built := newApp(t)
@@ -130,8 +118,6 @@ func TestRun_ParentWithNoSubcommand(t *testing.T) {
 	}
 }
 
-// Every usage error exits ExitUsage with go-cli-sdk's report on stderr,
-// before anything is built.
 func TestRun_UsageErrors(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args []string
@@ -172,6 +158,8 @@ func TestRun_UsageErrors(t *testing.T) {
 	}
 }
 
+const testBinaryVersion = "(devel)\n"
+
 func TestRun_Version(t *testing.T) {
 	unreadable(t)
 	a, stdout, stderr, built := newApp(t)
@@ -181,9 +169,8 @@ func TestRun_Version(t *testing.T) {
 	if code != process.ExitOK {
 		t.Errorf("code = %d, want %d; stderr = %q", code, process.ExitOK, stderr)
 	}
-	// A test binary carries no main module version.
-	if stdout.String() != "(devel)\n" {
-		t.Errorf("stdout = %q, want %q", stdout, "(devel)\n")
+	if stdout.String() != testBinaryVersion {
+		t.Errorf("stdout = %q, want %q, as a test binary carries no main module version", stdout, testBinaryVersion)
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("stderr = %q, want empty", stderr)
@@ -193,8 +180,6 @@ func TestRun_Version(t *testing.T) {
 	}
 }
 
-// New builds nothing: the graph freezes on its first Build and panics on a
-// Replace after it, so Halt's Replace succeeding proves New never built.
 func TestNew_IsCold(t *testing.T) {
 	unreadable(t)
 
@@ -205,19 +190,14 @@ func TestNew_IsCold(t *testing.T) {
 	}
 	defer func() {
 		if r := recover(); r != nil {
-			t.Errorf("Replace after New() panicked: %v; want the graph unbuilt", r)
+			t.Errorf("Replace after New() panicked: %v; want the graph unbuilt, as a built graph is frozen", r)
 		}
 	}()
 	apptest.Halt(a)
 }
 
-// probeBuilt is what the probe builds: the run setting nodes it declares,
-// in the order it declares them, and the lifecycle config the dispatcher
-// adds.
 var probeBuilt = []string{"base", "grafana", "repo", "no color", "lifecycle config"}
 
-// A command builds the nodes it declares, and the lifecycle config the
-// dispatcher adds, and nothing else.
 func TestRun_CommandBuildsWhatItDeclares(t *testing.T) {
 	a, _, stderr, built := newApp(t)
 	got := probe(a)
@@ -235,9 +215,6 @@ func TestRun_CommandBuildsWhatItDeclares(t *testing.T) {
 	}
 }
 
-// A command that declares one setting builds that setting alone, with the
-// lifecycle config, and reads no other: the other settings' variables are
-// unreadable or unused, and the run succeeds.
 func TestRun_ASettingIsReadOnlyByACommandThatDeclaresIt(t *testing.T) {
 	t.Setenv(noColor, "not-a-bool")
 	t.Setenv("SLAB_GRAFANA", "http://env-grafana")
@@ -265,8 +242,6 @@ func TestRun_ASettingIsReadOnlyByACommandThatDeclaresIt(t *testing.T) {
 	}
 }
 
-// Each setting node reads its defaults, then the SLAB_* variables, then the
-// root flags given anywhere on the command line, each later one winning.
 func TestSettings_LayerDefaultsEnvAndFlags(t *testing.T) {
 	defaults := settings{
 		base:    "http://127.0.0.1:8080",
@@ -314,9 +289,6 @@ func TestSettings_LayerDefaultsEnvAndFlags(t *testing.T) {
 	}
 }
 
-// A run that dispatches twice starts the second from the flags' defaults,
-// so a flag the first run gave does not override the environment in the
-// second.
 func TestSettings_FlagsDoNotOutliveTheirRun(t *testing.T) {
 	t.Setenv("SLAB_BASE", "http://env-base")
 	a, _, stderr, _ := newApp(t)
@@ -369,9 +341,6 @@ func TestRun_InvalidShutdownTimeoutFailsTheCommand(t *testing.T) {
 	}
 }
 
-// A halted run of a command that declares nodes fails with ErrHalted
-// before the command runs. An unreadable shutdown timeout proves the
-// substitute replaced the production constructor.
 func TestRun_HaltStopsTheCommand(t *testing.T) {
 	t.Setenv(shutdownTimeout, "not-a-duration")
 	a, stdout, stderr, built := newApp(t)
@@ -397,7 +366,6 @@ func TestRun_HaltStopsTheCommand(t *testing.T) {
 	}
 }
 
-// Halt touches only a Build, so a run that builds nothing is unaffected.
 func TestRun_HaltLeavesVersion(t *testing.T) {
 	a, stdout, stderr, built := newApp(t)
 	apptest.Halt(a)
@@ -407,8 +375,8 @@ func TestRun_HaltLeavesVersion(t *testing.T) {
 	if code != process.ExitOK {
 		t.Errorf("code = %d, want %d; stderr = %q", code, process.ExitOK, stderr)
 	}
-	if stdout.String() != "(devel)\n" {
-		t.Errorf("stdout = %q, want %q", stdout, "(devel)\n")
+	if stdout.String() != testBinaryVersion {
+		t.Errorf("stdout = %q, want %q, as a test binary carries no main module version", stdout, testBinaryVersion)
 	}
 	if log := apptest.Names(built.Log()); len(log) != 0 {
 		t.Errorf("nodes built = %q, want none", log)

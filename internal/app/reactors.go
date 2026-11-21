@@ -12,25 +12,6 @@ import (
 	msgpg "github.com/standards-lab/go-messaging/postgres"
 )
 
-// defineReactors defines the reactors on g into n: the entry points that
-// run for the process lifetime, driven by an occurrence rather than a
-// caller. The sweeper is one: go-database's general sweeper, running each
-// reclaimer the service registers (files, outbox, and inbox), and the nudge
-// the document layer reaches its files reclaimer through. The messaging is
-// the other: the runtime, and the relay it builds, which publishes the
-// outbox's committed events. No node Uses a reactor, so each joins the
-// reactors group, n.Reactors, with graph.In on its Define line; Run builds
-// the group as a root and the server orders itself after it. Each
-// reactor's Define line also orders it after the schema. The nudge is a
-// fresh node, so each Build's is unbound until that Build's sweeper binds
-// it. It constructs nothing.
-//
-// The relay's last pass publishes what was committed while the producers
-// drained, so every producer must drain before it. A node that commits
-// events outside a request, such as a consumer's reactor, Uses the relay's
-// node, which orders it above the relay. A request-driven producer, as
-// every domain service is, needs no edge: its commands run in the server's
-// requests, and the server, ordered after every reactor, drains first.
 func defineReactors(g *graph.Graph, n *Nodes) {
 	n.Reactors = g.Group("reactors")
 	n.Nudge = g.Fresh[Nudge]("nudge")
@@ -39,22 +20,12 @@ func defineReactors(g *graph.Graph, n *Nodes) {
 	n.Relay = g.Define("relay", n.newRelay, graph.In(n.Reactors), graph.After(n.Schema))
 }
 
-// The names the sweeper registers its reclaimers under: the name a nudge
-// takes, and the lock "sweep.<name>" its cycle claims. reclaimFiles is
-// blobfs's sweep, reclaimOutbox and reclaimInbox go-messaging's retention
-// of the outbox and the inbox.
 const (
 	reclaimFiles  = "files"
 	reclaimOutbox = "outbox"
 	reclaimInbox  = "inbox"
 )
 
-// reclaimers names every reclaimer the sweeper registers, in its
-// registration order, and is the one source of those names: newSweeper
-// registers exactly the reclaimers named here, by iterating it, and the
-// sweep metrics node reports each one's backlog from the start, before its
-// first pass. A name here with no reclaimer constructed for it fails
-// startup, as does a reclaimer constructed under a name not here.
 var reclaimers = []string{reclaimFiles, reclaimOutbox, reclaimInbox}
 
 // Nudge is the nudge node's value, the document layer's document.Sweeper:
@@ -78,36 +49,6 @@ func (n *Nudge) Nudge() {
 	}
 }
 
-// newSweeper constructs go-database's sweeper over the sql node's session,
-// registering three reclaimers, each every interval of the config node's
-// sweep block and in passes of its batch: files, the files node's blobfs
-// sweep, reclaiming the file rows older than the block's stale age; outbox,
-// go-messaging's outbox retention, deleting the published outbox rows older
-// than its outbox age; and inbox, the inbox retention, deleting the handled
-// inbox rows older than its inbox age. A retention that refuses its age is a
-// construction error, so it fails startup, though the config's validation
-// refuses a non-positive age first. Only files is nudged, by the document
-// layer; the retentions run at start and on the interval. The interval is the
-// backstop for a nudge that never came and the schedule of the stale rows'
-// reclaim; every reclaimer is due at start, so a branch marked by a process
-// that stopped before its sweep ran is swept at this process's start rather
-// than an interval later. Each pass holds the gate shared, so a schema verb
-// never meets one. The dialect is Postgres, a sqlate.TryLocker, so each
-// cycle claims "sweep.<name>" (data.LockSweepPrefix) and two replicas never
-// run one reclaimer's cycle at once. Each pass is reported to the sweep
-// metrics node's hook (telemetry.go), which counts it and records its
-// reclaimer's backlog on the meter provider node's provider, and logs a
-// failed pass at warn as go-database's default report did. It binds the
-// nudge node to the sweeper.
-//
-// Its value is a lifecycle Subsystem, ReadinessChecker, and Monitored, so
-// the Coordinator starts it, drains it, reports it, and ends the run on its
-// failure with no registration here. Its Define line orders it after the
-// schema, so it starts once every table it touches is verified, and stops
-// before the schema's layer beneath it. Given the shutdown timeout, it
-// cancels a pass still running at half of it (go-core's
-// reactor.CancelWithin), so the sweeper reports the cancellation before the
-// coordinator's deadline drops it.
 func (n *Nodes) newSweeper(s *graph.Scope) (*sweep.Sweeper, error) {
 	cfg := s.Use(n.Config)
 	db := s.Use(n.SQL).DB
@@ -122,9 +63,6 @@ func (n *Nodes) newSweeper(s *graph.Scope) (*sweep.Sweeper, error) {
 		return nil, err
 	}
 
-	// The registrations are built from reclaimers, so the backlog
-	// gauge's names and the sweeper's are one list: a reclaimer is
-	// registered only under a name listed there.
 	built := map[string]sweep.Reclaimer{
 		reclaimFiles:  s.Use(n.Files).FilesReclaimer(db, cfg.Sweep.StaleAge.Duration(), logger),
 		reclaimOutbox: outbox,
@@ -143,10 +81,6 @@ func (n *Nodes) newSweeper(s *graph.Scope) (*sweep.Sweeper, error) {
 	return sw, nil
 }
 
-// registrations registers the reclaimers built, by name, in the order of
-// reclaimers, each under policy. A name in reclaimers with no reclaimer
-// built, or a reclaimer built under a name not in reclaimers, is a wiring
-// defect, returned as an error so it fails startup.
 func registrations(built map[string]sweep.Reclaimer, policy sweep.Policy) ([]sweep.Registration, error) {
 	regs := make([]sweep.Registration, 0, len(reclaimers))
 	for _, name := range reclaimers {
@@ -162,14 +96,6 @@ func registrations(built map[string]sweep.Reclaimer, policy sweep.Policy) ([]swe
 	return regs, nil
 }
 
-// newRuntime constructs the service's messaging from the config node's
-// messaging block, over the broker node and go-messaging's Postgres engine
-// statements, logging failures through the logger node. Its reactors drain
-// within the shutdown timeout and hold the gate shared, so a schema verb,
-// which holds it exclusively, runs with them paused: the relay opens no
-// transaction and claims no row until the verb releases it. The runtime
-// holds no resource and registers nothing, so it is no lifecycle
-// participant; the broker beneath it and the reactors it builds are.
 func (n *Nodes) newRuntime(s *graph.Scope) (*messaging.Runtime, error) {
 	cfg := s.Use(n.Config)
 	return messaging.Setup{
@@ -178,14 +104,6 @@ func (n *Nodes) newRuntime(s *graph.Scope) (*messaging.Runtime, error) {
 	}.Build()
 }
 
-// newRelay constructs the relay over the sql node's session. Its value is a
-// lifecycle Subsystem, ReadinessChecker, and Monitored, as the sweeper
-// is. Its Define orders it after the schema, so its first pass finds the
-// messaging set migrated and verified. The runtime gives it go-messaging's
-// drain: a last pass bounded at a quarter of the shutdown timeout, and the
-// reactor's cancellation of a publish still running at half of it. It drains
-// before the broker beneath it, which it Uses through the runtime, so the
-// last pass publishes before the connection closes.
 func (n *Nodes) newRelay(s *graph.Scope) (*reactor.Reactor[event.Event], error) {
 	return s.Use(n.Runtime).Relay(s.Use(n.SQL).DB), nil
 }

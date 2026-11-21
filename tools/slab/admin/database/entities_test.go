@@ -26,7 +26,6 @@ func TestSteps_MarshalsUnderTheServiceFieldName(t *testing.T) {
 	}
 }
 
-// Down omits unset steps, so the service applies its default of one.
 func TestDown_OmitsUnsetSteps(t *testing.T) {
 	for _, tc := range []struct {
 		body database.Down
@@ -45,8 +44,6 @@ func TestDown_OmitsUnsetSteps(t *testing.T) {
 	}
 }
 
-// Zero is a meaningful version (an empty history), so it must not be
-// omitted.
 func TestForce_MarshalsUnderTheServiceFieldName(t *testing.T) {
 	raw, err := json.Marshal(database.Force{Set: "app"})
 	if err != nil {
@@ -64,7 +61,6 @@ func TestForce_MarshalsUnderTheServiceFieldName(t *testing.T) {
 	}
 }
 
-// Confirm is sent as given, false included, for the service to refuse.
 func TestReset_SendsTheConfirmationAsGiven(t *testing.T) {
 	for _, tc := range []struct {
 		body database.Reset

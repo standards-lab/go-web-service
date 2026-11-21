@@ -17,22 +17,17 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/domain/document"
 )
 
-// The organization and the ids the commands address.
 const (
 	org  = "00000000-0000-7000-8000-000000000001"
 	dir  = "00000000-0000-7000-8000-000000000002"
 	file = "00000000-0000-7000-8000-000000000003"
 )
 
-// runDocs runs a fresh App over "docs" and args, with --base naming
-// srv, and returns what it did.
 func runDocs(t *testing.T, srv *httptest.Server, args ...string) result {
 	t.Helper()
 	return runFamily(t, nil, []string{"docs"}, srv, args...)
 }
 
-// Run without a leaf, docs and each group print their help, listing the
-// subcommands, as a usage error that builds nothing.
 func TestDocs_MountsOneSubcommandPerEndpoint(t *testing.T) {
 	_, srv := newService(t, http.StatusOK, `{}`)
 	for args, wants := range map[string][]string{
@@ -49,15 +44,12 @@ func TestDocs_MountsOneSubcommandPerEndpoint(t *testing.T) {
 				t.Errorf("docs %s help lacks %q:\n%s", args, want, r.stdout)
 			}
 		}
-		if len(r.built) != 0 {
-			t.Errorf("docs %s: nodes built = %q, want none", args, r.built)
+		if len(r.builtNodes) != 0 {
+			t.Errorf("docs %s: nodes built = %q, want none", args, r.builtNodes)
 		}
 	}
 }
 
-// Every command sends its one request: the method, the URI with each
-// segment escaped, and the body and headers the flags build. An upload's
-// raw body is covered by the put tests below.
 func TestDocs_SendTheRequestTheirRouteNames(t *testing.T) {
 	base := "/api/documents/" + org
 	for name, tc := range map[string]struct {
@@ -148,7 +140,7 @@ func TestDocs_SendTheRequestTheirRouteNames(t *testing.T) {
 				s.location = base + "/directories/" + dir
 			}
 			runDocs(t, srv, tc.args...).ok(t)
-			got := s.only(t)
+			got := s.onlyRequest(t)
 			if got.method != tc.method || got.uri != tc.uri {
 				t.Errorf("request = %s %s, want %s %s", got.method, got.uri, tc.method, tc.uri)
 			}
@@ -163,7 +155,7 @@ func TestDocs_RenderTheReply(t *testing.T) {
 	s, srv := newService(t, http.StatusCreated, `{"id":"n1","version":1}`)
 	r := runDocs(t, srv, "dirs", "create", org, "--parent-id", "root", "--name", "reports")
 	r.ok(t)
-	s.only(t)
+	s.onlyRequest(t)
 	if want := "{\n  \"id\": \"n1\",\n  \"version\": 1\n}\n"; r.stdout != want {
 		t.Errorf("stdout = %q, want %q", r.stdout, want)
 	}
@@ -194,7 +186,7 @@ func TestDocs_ExpectTheirOneStatus(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, srv := newService(t, http.StatusAccepted, `{}`)
 			r := runDocs(t, srv, tc.args...)
-			r.failed(t, strings.Join(tc.args[:2], " "), tc.want)
+			r.failsAt(t, strings.Join(tc.args[:2], " "), tc.want)
 			if r.stdout != "" {
 				t.Errorf("stdout = %q, want empty", r.stdout)
 			}
@@ -202,15 +194,11 @@ func TestDocs_ExpectTheirOneStatus(t *testing.T) {
 	}
 }
 
-// A problem response is reported once, every member of the document on
-// its own line after the command's path, with nothing on stdout.
 func TestDocs_ReportTheProblemAnErrorStatusCarries(t *testing.T) {
 	_, srv := newService(t, http.StatusNotFound, `{"type":"about:blank","title":"Not Found","status":404,"detail":"no such directory"}`)
-	runDocs(t, srv, "dirs", "get", org, dir).failure(t, "slab docs dirs get: 404 Not Found\ndetail: no such directory\n")
+	runDocs(t, srv, "dirs", "get", org, dir).failsWith(t, "slab docs dirs get: 404 Not Found\ndetail: no such directory\n")
 }
 
-// Every input refusal is a usage error, before anything is built or the
-// request fires.
 func TestDocs_RefuseMissingInputBeforeAnyRequest(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args []string
@@ -243,11 +231,9 @@ func TestDocs_RefuseMissingInputBeforeAnyRequest(t *testing.T) {
 	}
 }
 
-// A file that cannot be read is a failure, not a usage error, and no
-// request fires.
 func TestFilesPut_FailsOnAnUnreadableFile(t *testing.T) {
 	s, srv := newService(t, http.StatusCreated, `{}`)
-	runDocs(t, srv, "files", "put", org, "root", filepath.Join(t.TempDir(), "missing")).failed(t, "files put", "no such file")
+	runDocs(t, srv, "files", "put", org, "root", filepath.Join(t.TempDir(), "missing")).failsAt(t, "files put", "no such file")
 	if len(s.received) != 0 {
 		t.Error("the request fired anyway")
 	}
@@ -302,9 +288,6 @@ func TestPositionalArguments_AreRequiredForEveryPathSegment(t *testing.T) {
 	}
 }
 
-// Every docs command builds the nodes it declares, no color and
-// client, the base node the client is bound to, and the lifecycle
-// configuration, and nothing else.
 func TestDocs_BuildOnlyTheColorTheClientAndItsBase(t *testing.T) {
 	upload := filepath.Join(t.TempDir(), "a.txt")
 	if err := os.WriteFile(upload, []byte("x"), 0o644); err != nil {
@@ -329,17 +312,13 @@ func TestDocs_BuildOnlyTheColorTheClientAndItsBase(t *testing.T) {
 			if r.code != process.ExitFailure {
 				t.Errorf("code = %d, want the problem's %d; stderr = %q", r.code, process.ExitFailure, r.stderr)
 			}
-			if !slices.Equal(r.built, familyBuilt) {
-				t.Errorf("nodes built = %q, want %q", r.built, familyBuilt)
+			if !slices.Equal(r.builtNodes, familyBuilt) {
+				t.Errorf("nodes built = %q, want %q", r.builtNodes, familyBuilt)
 			}
 		})
 	}
 }
 
-// files put sends the file's bytes under the stored name, the file's base
-// name unless --name gives one and escaped as a path segment, and under the
-// media type the extension names, application/octet-stream when it names
-// none, or the one --content-type gives.
 func TestFilesPut_SendsTheFileUnderItsNameAndMediaType(t *testing.T) {
 	tmp := t.TempDir()
 	write := func(name string) string {
@@ -364,7 +343,7 @@ func TestFilesPut_SendsTheFileUnderItsNameAndMediaType(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			s, srv := newService(t, http.StatusCreated, `{"id":"f","version":1}`)
 			runDocs(t, srv, append([]string{"files", "put", org, "root"}, tc.args...)...).ok(t)
-			got := s.only(t)
+			got := s.onlyRequest(t)
 			if got.method != http.MethodPost || got.uri != tc.uri || got.contentType != tc.contentType || got.body != "bytes" {
 				t.Errorf("sent %s %s as %q: %q; want POST %s as %q", got.method, got.uri, got.contentType, got.body, tc.uri, tc.contentType)
 			}
@@ -372,9 +351,6 @@ func TestFilesPut_SendsTheFileUnderItsNameAndMediaType(t *testing.T) {
 	}
 }
 
-// files get never prints the bytes: it prints the headers, the
-// attachment's name among them, and writes the bytes to --out; a
-// revalidation is a 304, not an error, and writes nothing.
 func TestFilesGet_WritesTheBytesToOut(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("ETag", `"e1"`)
@@ -413,9 +389,6 @@ func TestFilesGet_WritesTheBytesToOut(t *testing.T) {
 	}
 }
 
-// A recursive delete is accepted, not done: the command expects 202 and says
-// so, with the Location to read and what the sweep will do. A 204 in its
-// place is a mismatch, as is a 202 with nothing to follow.
 func TestDirsDelete_RecursiveReportsTheAcceptedBranch(t *testing.T) {
 	loc := "/api/documents/" + org + "/directories/" + dir
 	s, srv := newService(t, http.StatusAccepted, "")
@@ -430,14 +403,11 @@ func TestDirsDelete_RecursiveReportsTheAcceptedBranch(t *testing.T) {
 	}
 
 	_, srv = newService(t, http.StatusNoContent, "")
-	runDocs(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive").failed(t, "dirs delete", "want 202")
+	runDocs(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive").failsAt(t, "dirs delete", "want 202")
 	_, srv = newService(t, http.StatusAccepted, "")
-	runDocs(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive").failed(t, "dirs delete", "no Location")
+	runDocs(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive").failsAt(t, "dirs delete", "no Location")
 }
 
-// sweeping is a fake service whose recursive delete answers 202, and whose
-// directory read answers the directory deleting for the first reads reads,
-// and 404 after. It returns the requests it received, as method and URI.
 func sweeping(t *testing.T, reads int) (*httptest.Server, *[]string) {
 	t.Helper()
 	loc := "/api/documents/" + org + "/directories/" + dir
@@ -462,8 +432,6 @@ func sweeping(t *testing.T, reads int) (*httptest.Server, *[]string) {
 	return srv, &seen
 }
 
-// --wait reads the Location until it answers 404 and reports the sweep
-// done; a Location still answering 200 when the wait runs out is an error.
 func TestDirsDelete_WaitPollsTheLocationUntilTheSweepIsDone(t *testing.T) {
 	loc := "/api/documents/" + org + "/directories/" + dir
 	srv, seen := sweeping(t, 1)
@@ -479,11 +447,9 @@ func TestDirsDelete_WaitPollsTheLocationUntilTheSweepIsDone(t *testing.T) {
 	}
 
 	srv, _ = sweeping(t, 1000)
-	runDocs(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive", "--wait", "100ms").failed(t, "dirs delete", "still answers 200 after 100ms")
+	runDocs(t, srv, "dirs", "delete", org, dir, "--version", "4", "--recursive", "--wait", "100ms").failsAt(t, "dirs delete", "still answers 200 after 100ms")
 }
 
-// dirs get prints the read as the service wrote it, its status among the
-// members, and the entity restates the member.
 func TestDirsGet_ShowsTheStatus(t *testing.T) {
 	_, srv := newService(t, http.StatusOK, `{"id":"`+dir+`","parent_id":null,"name":"reports","path":"/reports","status":"deleting","version":5}`)
 	r := runDocs(t, srv, "dirs", "get", org, dir)
@@ -497,8 +463,6 @@ func TestDirsGet_ShowsTheStatus(t *testing.T) {
 	}
 }
 
-// The guarded deletes' refusals are reported as the service wrote them,
-// after the command's path: the status and title, then the detail.
 func TestDeletes_ReportThePreconditionAndConflictProblems(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args   []string
@@ -524,7 +488,7 @@ func TestDeletes_ReportThePreconditionAndConflictProblems(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, srv := newService(t, tc.status, tc.reply)
-			runDocs(t, srv, tc.args...).failure(t, tc.want)
+			runDocs(t, srv, tc.args...).failsWith(t, tc.want)
 		})
 	}
 }

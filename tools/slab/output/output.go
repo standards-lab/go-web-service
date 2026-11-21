@@ -81,13 +81,11 @@ func (o *Output) Block(r Render) error {
 	return r(o.stdout)
 }
 
-// objectHeaders are the headers an object response carries that Object
-// shows, in the order it shows them. Content-Disposition is the name a
-// document download is served under.
 var objectHeaders = []string{"Content-Type", "Content-Length", "Content-Disposition", "ETag", "Last-Modified", "Cache-Control", "X-Content-Type-Options"}
 
 // Object writes a proxied object's response to stdout: the status line, the
-// object headers it carries, and what became of the bytes, since a binary
+// object headers it carries, Content-Disposition among them as the name a
+// document download is served under, and what became of the bytes, since a binary
 // body is never written to a terminal. saved is the file the bytes went to,
 // or empty when they were only counted.
 func (o *Output) Object(status int, header http.Header, n int, saved string) {

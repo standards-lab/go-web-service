@@ -12,8 +12,6 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/input"
 )
 
-// readQuery binds the read flags on a fresh command, dispatches it over
-// args, and returns the query pairs they produce.
 func readQuery(t *testing.T, args ...string) (query [][2]string, err error) {
 	t.Helper()
 	var read input.ReadFlags
@@ -29,7 +27,6 @@ func readQuery(t *testing.T, args ...string) (query [][2]string, err error) {
 	return query, err
 }
 
-// Only the flags given are sent, in flag order, each filter as written.
 func TestReadFlags_SendsOnlyTheFlagsGiven(t *testing.T) {
 	got, err := readQuery(t)
 	if err != nil || len(got) != 0 {
@@ -42,7 +39,6 @@ func TestReadFlags_SendsOnlyTheFlagsGiven(t *testing.T) {
 	}
 }
 
-// A repeated --filter sends each filter, in the order given.
 func TestReadFlags_KeepsRepeatedFiltersInOrder(t *testing.T) {
 	got, err := readQuery(t, "--filter", "name=b", "--size", "5", "--filter", "code[like]=%a%")
 	want := [][2]string{{"size", "5"}, {"name", "b"}, {"code[like]", "%a%"}}
@@ -57,8 +53,6 @@ func TestReadFlags_RefusesAFilterWithoutAName(t *testing.T) {
 	}
 }
 
-// --page and --cursor are an exclusive group, refused before the command
-// runs.
 func TestReadFlags_RefusesPageWithCursor(t *testing.T) {
 	var read input.ReadFlags
 	cmd := &cli.Command{Name: "list", Run: func(context.Context, *cli.Invocation) error {

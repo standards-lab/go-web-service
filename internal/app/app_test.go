@@ -16,19 +16,8 @@ import (
 	"github.com/standards-lab/go-web-service/internal/config/configtest"
 )
 
-// The suite is hermetic: no live database or object store exists, so it
-// proves the cold start and the startup contract: the Build performs no
-// I/O, and a failed start of the connections fails startup before the
-// schema starts, instead of serving unready. The serve-probes-drain path
-// and every behavior that needs a real engine are the integration tier's,
-// the root integration package.
-
-// failsafe bounds every wait for an event that should occur, so a broken
-// composition fails the test instead of hanging it.
 const failsafe = 2 * time.Second
 
-// syncBuffer serializes writes so the app's logging goroutines and the
-// test's reads stay race-free.
 type syncBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -46,12 +35,6 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// New and Run's Build perform no I/O — they succeed with nothing
-// listening — and Run then fails startup at the connections' layer,
-// draining to exit 1 with the failure logged as the service failing and
-// naming the node, never flipping readiness or writing to stderr. The
-// database, the object store, and the broker start together, and the first
-// to fail cancels the others, so the log names whichever failed first.
 func TestRun_FailsStartupWithoutInfrastructure(t *testing.T) {
 	buf, stderr := &syncBuffer{}, &syncBuffer{}
 	a := app.New(configtest.Config(t), buf)
@@ -81,9 +64,6 @@ func TestRun_FailsStartupWithoutInfrastructure(t *testing.T) {
 	}
 }
 
-// An App runs once. Run reports a Build or lifecycle failure as an exit
-// code, but a second Run is a programming error and panics before it
-// builds anything: the graph observes no node in it.
 func TestRun_TwicePanics(t *testing.T) {
 	a := app.New(configtest.Config(t), &syncBuffer{})
 

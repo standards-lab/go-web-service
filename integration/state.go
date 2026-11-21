@@ -8,7 +8,6 @@ import (
 	"github.com/standards-lab/go-web-sdk/webtest"
 )
 
-// The admin mount's paths the harness drives state through.
 const (
 	pathSchema     = "/admin/database/schema"
 	pathSchemaDown = "/admin/database/schema/down"

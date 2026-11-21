@@ -24,9 +24,6 @@ import (
 	"github.com/standards-lab/go-web-service/internal/outboxtest"
 )
 
-// recorder is the recorder the composition root injects, go-messaging's
-// over its Postgres outbox, with the id and the time it stamps fixed: its
-// event's write is one statement, which the scripted driver records.
 func recorder(t *testing.T) *database.Recorder {
 	t.Helper()
 	ob, err := outbox.New(msgpg.Outbox())
@@ -36,9 +33,6 @@ func recorder(t *testing.T) *database.Recorder {
 	return outboxtest.Stamped(ob.Sink())
 }
 
-// The hook commits StateReset in a transaction of its own that holds the
-// outbox write alone: its subject is the state's name, and its data the
-// state's name itself, a JSON string.
 func TestOnReset_CommitsStateResetInItsOwnTransaction(t *testing.T) {
 	pool, rec := sqltest.Open(t, sqltest.Response{Affected: 1})
 	hook := database.OnReset(sqlate.Wrap(pool, dialect{}), recorder(t))
@@ -56,7 +50,6 @@ func TestOnReset_CommitsStateResetInItsOwnTransaction(t *testing.T) {
 	}
 }
 
-// A refused outbox write fails the hook and rolls its transaction back.
 func TestOnReset_AFailedWriteFailsTheHook(t *testing.T) {
 	boom := errors.New("scripted: the outbox write failed")
 	pool, rec := sqltest.Open(t, sqltest.Response{Err: boom})
@@ -70,19 +63,12 @@ func TestOnReset_AFailedWriteFailsTheHook(t *testing.T) {
 	}
 }
 
-// oneTable is a one-migration set, so a scripted reset's revert and apply
-// stay a few statements; the hook is indifferent to what the sets hold.
 var oneTable = []migrate.Set{{Name: "app", Migrations: []migrate.Migration{
 	{Version: 1, Name: "a", Up: "CREATE TABLE a (x int)", Down: "DROP TABLE a", Transactional: true},
 }}}
 
 var historyCols = []string{"version", "name", "dirty"}
 
-// resetScript is the scripted driver's side of a reset over oneTable,
-// unlocked: the revert (the history table, the applied history, the
-// migration's down and its history delete, the history table's drop), the
-// apply (the history table, the empty history, the up and its history
-// insert), then the hook's outbox write, answering write.
 func resetScript(write sqltest.Response) []sqltest.Response {
 	return []sqltest.Response{
 		{}, {Columns: historyCols, Rows: [][]driver.Value{{int64(1), "a", false}}}, {}, {}, {},
@@ -91,8 +77,6 @@ func resetScript(write sqltest.Response) []sqltest.Response {
 	}
 }
 
-// seedWatch is a seeder that records, at each seed, how many outbox writes
-// the reset had made.
 type seedWatch struct {
 	rec    *sqltest.Recorder
 	seeded []int
@@ -105,8 +89,6 @@ func (s *seedWatch) Seed(context.Context, string) (admin.Seeded, error) {
 	return admin.Seeded{}, nil
 }
 
-// resetModule composes the admin domain with the reset hook wired as the
-// composition root wires it, over oneTable and seed.
 func resetModule(t *testing.T, responses ...sqltest.Response) (http.Handler, *sqltest.Recorder, *seedWatch) {
 	t.Helper()
 	pool, rec := sqltest.Open(t, responses...)
@@ -132,9 +114,6 @@ func resetModule(t *testing.T, responses ...sqltest.Response) (http.Handler, *sq
 	return r, rec, seed
 }
 
-// A state reset commits StateReset once, about the state it applied,
-// after the revert and the apply and before the seed, which finds it
-// written. Nothing else the reset runs writes the outbox.
 func TestState_CommitsStateResetBeforeTheSeed(t *testing.T) {
 	status := []sqltest.Response{count(1), {Columns: historyCols, Rows: [][]driver.Value{{int64(1), "a", false}}}}
 	h, rec, seed := resetModule(t, slices.Concat(resetScript(sqltest.Response{Affected: 1}), status)...)
@@ -157,8 +136,6 @@ func TestState_CommitsStateResetBeforeTheSeed(t *testing.T) {
 	}
 }
 
-// A refused event write fails the reset before it seeds: the answer is
-// the failure's 500, and the seeder never runs.
 func TestState_AFailedEventWriteStopsTheResetBeforeTheSeed(t *testing.T) {
 	h, rec, seed := resetModule(t, resetScript(sqltest.Response{Err: errors.New("scripted: the outbox write failed")})...)
 

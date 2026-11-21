@@ -16,8 +16,6 @@ import (
 	storageadmin "github.com/standards-lab/go-web-service/admin/storage"
 )
 
-// module mounts the group over a store on the fake, started as the
-// composition root starts the real one.
 func module(t *testing.T, fake *storagetest.Fake) http.Handler {
 	t.Helper()
 	cfg := storage.Config{Container: "go-web-service"}
@@ -54,8 +52,6 @@ func TestDiagnostics_ReadsTheStore(t *testing.T) {
 	}
 }
 
-// A container removed out from under the running service reads not ready,
-// and the container operation restores it.
 func TestContainer_RestoresARemovedContainer(t *testing.T) {
 	fake := storagetest.NewFake(storagetest.Options{})
 	h := module(t, fake)

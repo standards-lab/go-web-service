@@ -101,7 +101,10 @@ func (s *Service) Delete(ctx context.Context, id string, version int64) error {
 // I/O; a nonexistent organization is sql.ErrNoRows, and a concurrent
 // replacement that activated first is a unique violation. Once the
 // replacement commits, a failure to purge the replaced file is logged,
-// not returned.
+// not returned. The retirement of a file whose activation failed, and the
+// purge, run on a context the request's cancellation does not reach: a
+// client that hangs up would otherwise leave an available file no image
+// references, which the stale reclaim never removes.
 func (s *Service) PutLogo(ctx context.Context, id string, u web.Upload) (LogoIdentity, error) {
 	ext, err := logoExtension(u.MediaType)
 	if err != nil {

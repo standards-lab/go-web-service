@@ -1,10 +1,5 @@
-# sqlint: the module's SQL conventions, one file per module at its root.
-# The engine and the sources mirror the runtime catalog the composition
-# root builds (internal/app/infrastructure.go), so the linter compiles
-# every statement exactly as the service does: the library's patterns
-# under sql, blobfs's under blobfs, the application's under app, against
-# PostgreSQL's native forms. Each role names its directories and the
-# checks that apply.
+# sqlint: the module's SQL conventions, run by `mise run check`.
+# See docs/stack.md
 
 engine = "github.com/standards-lab/sqlate/postgres"
 

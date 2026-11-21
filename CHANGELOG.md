@@ -199,6 +199,8 @@ accumulate under [Unreleased] until the first cut.
 
 ### Changed
 
+- Pins: go-web-sdk v0.18.0, from v0.17.0, sqlate/postgres v0.8.0, from v0.7.0, and
+  go-messaging/postgres v0.4.0, from v0.3.0. Their own changes are in their CHANGELOGs.
 - Pins: go-core v0.12.0, from v0.11.0, go-web-sdk v0.17.0, from v0.16.0, sqlate v0.7.0 with
   sqlate/postgres v0.7.0, from v0.6.1 and postgres/v0.6.0, blobfs v0.8.0, from v0.7.0, and
   go-messaging/nats v0.3.0, from v0.2.0, in both modules. In the base module, go-web-sdk's

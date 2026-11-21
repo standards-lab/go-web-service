@@ -14,9 +14,6 @@ import (
 	"github.com/standards-lab/go-messaging/nats"
 )
 
-// The stream config.json's nats block names and the prefix of the
-// service's event types, which the harness's subscriber binds as it finds
-// them.
 const (
 	eventStream = "WEB_SERVICE"
 	eventPrefix = "web-service"
@@ -60,8 +57,6 @@ func Subscribe(t testing.TB, types ...string) *Stream {
 
 	s := &Stream{}
 	rctx, stop := context.WithCancel(context.Background())
-	// done closes once Receive returns, its error in rerr, so the wait
-	// below and the cleanup can each observe the end.
 	var rerr error
 	done := make(chan struct{})
 	go func() {
@@ -94,8 +89,6 @@ func Subscribe(t testing.TB, types ...string) *Stream {
 	return s
 }
 
-// durableName is a consumer name unique to the test and the moment, made a
-// token as a subscription's Name must be.
 func durableName(t testing.TB) string {
 	name := strings.Map(func(r rune) rune {
 		switch {

@@ -16,33 +16,17 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
-// absentID is a well-formed id no row carries: valid UUID syntax, and never
-// minted. integration/organization_test.go states the same id for the same
-// purpose.
 const absentID = "00000000-0000-7000-8000-000000000000"
 
-// maxCommandBody is the byte limit domain/organization/handler.go's
-// maxCommandBody puts on a command's request body; a body past it is
-// answered with 413. It is a fixture value for the problems scenario, not
-// a restated contract, so it lives here rather than in a domain package.
 const maxCommandBody = 1 << 16
 
-// The inputs the conditions send. invalidCode breaks the code rule twice
-// over, with a capital and a space; malformedBody is a create body cut off
-// before its closing brace, so it is not a JSON value at all.
 const (
 	invalidCode   = "Sales Team"
 	malformedBody = `{"parent_id": null, "code": "sales", "name": "Sales"`
 )
 
-// The guarded commands' target: every If-Match condition sends the same
-// rename of the seeded acme row, and none of them succeeds.
 const renamedName = "Acme Corporation, Inc."
 
-// problems is what the problems scenario's steps hand forward: the client
-// and the seeded rows by code, both replaced by Initialization on every
-// run. No condition writes a row, so every id and version a later step
-// sends is the one the list showed.
 type problems struct {
 	n      Nodes
 	client *httpx.Client
@@ -91,9 +75,6 @@ func (s *problems) initialization(ctx context.Context, inv *cli.Invocation, r *s
 	return nil
 }
 
-// list fetches the seeded tree without narrating it: the ids and versions
-// are bookkeeping for the conditions that follow, not something this
-// scenario demonstrates.
 func (s *problems) list(ctx context.Context) (organization.Page, error) {
 	res, err := s.client.Get(ctx, organization.Organizations)
 	if err != nil {
@@ -224,9 +205,6 @@ func (s *problems) transferCycle(ctx context.Context, inv *cli.Invocation, r *sc
 	return s.observe(ctx, inv, r, http.MethodPost, organization.Organizations+"/"+acme.ID+"/transfer", headers, body, http.StatusConflict)
 }
 
-// observe is every condition's call but the oversized body's, whose
-// request shows a stand-in for what it sends: it sends the request,
-// narrated, and checks the answer with [problems.answered].
 func (s *problems) observe(ctx context.Context, inv *cli.Invocation, r *scenario.Reporter, method, path string, headers []httpx.Header, body any, status int) error {
 	st := styleOf(s.n, inv)
 	res, err := call(ctx, r, st, s.client, method, path, headers, body)
@@ -236,10 +214,6 @@ func (s *problems) observe(ctx context.Context, inv *cli.Invocation, r *scenario
 	return s.answered(r, st, inv, res, status)
 }
 
-// answered is every condition's ending, after its response is shown: it
-// checks the response is a problem document answering with status, and
-// points at the request's trace in Grafana, read from the response's
-// X-Request-Id header.
 func (s *problems) answered(r *scenario.Reporter, st style.Style, inv *cli.Invocation, res *httpx.Response, status int) error {
 	if _, err := res.Problem(status); err != nil {
 		return err
@@ -247,11 +221,6 @@ func (s *problems) answered(r *scenario.Reporter, st style.Style, inv *cli.Invoc
 	return showTrace(r, st, inv.Get(s.n.GrafanaUp), res)
 }
 
-// oversizedBody returns a command body over maxCommandBody, and the short
-// stand-in a narration shows in its place: the payload is a create body
-// whose code is maxCommandBody+1 bytes of filler, well-formed JSON that the
-// service's bounded reader rejects before the decoder sees its end, and the
-// printable form names the filler's length instead of carrying it.
 func oversizedBody() (payload []byte, printable string) {
 	n := maxCommandBody + 1
 	payload = []byte(`{"code":"` + strings.Repeat("a", n) + `"}`)

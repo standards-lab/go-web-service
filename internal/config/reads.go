@@ -8,8 +8,6 @@ import (
 	"github.com/standards-lab/go-web-sdk"
 )
 
-// The service's paging policy defaults, applied by Finalize when the
-// configuration leaves a field unset.
 const (
 	defaultReadsDefaultSize = 20
 	defaultReadsMaxSize     = 100

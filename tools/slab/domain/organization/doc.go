@@ -24,5 +24,13 @@
 // subcommands, and the logo group's three over a Client, each resolving its
 // input from field flags or a verbatim --body in its Validate, before
 // anything is built, and rendering what came back through output, or
-// returning the output.Report of a problem response.
+// returning the output.Report of a problem response. A leaf refuses an
+// input the service would refuse, such as a transfer with no --parent-id:
+// the service requires the parent_id key and reads null as a move to the
+// root, so an unset flag is refused and an empty one sends null. list
+// passes each --filter through as written, so the operator syntax
+// (code[like]=%o%) is the caller's to spell. logo put resolves the media
+// type in Validate, from the file's name alone, and leaves which types are
+// accepted to the service; it reads the file in Run, so a file that cannot
+// be read is a failure, not a usage error.
 package organization

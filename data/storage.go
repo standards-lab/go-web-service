@@ -137,16 +137,11 @@ func (o *Objects) DeleteObject(ctx context.Context, key string) error {
 	return o.store.Delete(ctx, key)
 }
 
-// timedOut reports whether err is a deadline passing rather than a
-// failure of its own: os.ErrDeadlineExceeded and context.DeadlineExceeded
-// both report Timeout, as a net.Error.
 func timedOut(err error) bool {
 	var ne net.Error
 	return errors.As(err, &ne) && ne.Timeout()
 }
 
-// bodyReader records the first error its reader returns other than
-// io.EOF, so a failed put can tell the body's failure from the store's.
 type bodyReader struct {
 	r   io.Reader
 	err error

@@ -32,5 +32,11 @@
 // over a Client, each leaf resolving its input from field flags or a
 // verbatim --body in its Validate, before anything is built, and rendering
 // what came back through output, or returning the output.Report of a
-// problem response.
+// problem response. A leaf refuses an input the service would refuse, such
+// as a move without both its fields, which the service defaults neither of,
+// so the request is not sent. files put keeps the verb a user reaches for,
+// though the upload is a POST that creates. A file to upload is named in
+// Validate, which resolves its stored name and media type from the name
+// alone, and read in Run, so a file that cannot be read is a failure, not
+// a usage error.
 package document

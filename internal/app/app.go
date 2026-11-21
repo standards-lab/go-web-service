@@ -138,8 +138,6 @@ func (a *App) Roots() []graph.Ref {
 // failed: " and the error, since the logger node may be what failed. An
 // App runs once: a second Run panics before it builds anything.
 func (a *App) Run(ctx context.Context, stderr io.Writer) int {
-	// web.Service holds no state between Runs, so the once-only guard is
-	// the App's.
 	if a.ran {
 		panic("app: Run called twice; an App runs once")
 	}

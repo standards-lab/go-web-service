@@ -10,7 +10,20 @@
 // cascades with its directory, so the sweep that removes a marked branch
 // needs no hook from this layer. The statuses on the wire are the layer's
 // own vocabulary, mapped from blobfs's, so a library rename never changes
-// the wire.
+// the wire; a status blobfs adds that the layer has not named answers 500
+// rather than put the library's text on the wire.
+//
+// A directory in a branch being deleted lists as not found rather than a
+// conflict, since a mark is never undone. An organization without a root
+// yet lists an empty hierarchy under the alias: the alias resolves to an
+// id minted for the read, so the listing refuses and pages as a real
+// root's would. A branch mark emits its event only when the directory read
+// active under blobfs's tree lock, which the mark takes again; on
+// Postgres that lock is re-entrant and held to the end of the
+// transaction, so no other mark commits between the read and the mark,
+// and a retry that counts a straggler raced in after the first mark emits
+// nothing. The mark's count guard serves the baseline engine alone, whose
+// lock is a no-op.
 //
 // The package's API:
 //

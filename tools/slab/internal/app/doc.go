@@ -44,6 +44,23 @@
 // configuration gathers the settings: a command declares only the ones it
 // reads. Every command dispatches through go-cli-sdk.
 //
+// The domain families mount directly on the root: slab has no container
+// command for the domains the way the service has an /api group. The admin
+// endpoints share the service's base URL with the domain ones, so both
+// trees send through the same client node; the admin command and the
+// scenario parent declare no node themselves, so writing the scenario
+// listing builds nothing.
+//
+// grafana up is ordered after service by graph.After. go-core's lifecycle
+// starts a System's nodes in layers by longest dependency path and stops at
+// the first layer with a failure, and grafana up, reading only the grafana
+// setting, would otherwise sit in a lower layer than service, which reads
+// base and client: with both down, Grafana's failure would be reported and
+// service's never probed. The After edge puts grafana up a layer above
+// service whenever both are in the System, so with nothing running the
+// failure names service and mise run serve. After builds nothing, so a
+// scenario that declares only grafana up does not gain service.
+//
 // The App publishes its composition: [App.Graph], [App.Nodes], and
 // [App.Root] return the graph, a handle on each of its nodes, and the
 // command tree. The program itself never calls them; they are for a caller

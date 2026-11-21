@@ -41,8 +41,6 @@ func Config(t *testing.T) *config.Config {
 	cfg.Storage.Account = "devstoreaccount1"
 	cfg.Storage.Key = "a2V5"
 	cfg.Storage.Endpoint = fmt.Sprintf("http://127.0.0.1:%d/devstoreaccount1", ClosedPort(t))
-	// One try: the provider's default retries would hold startup open
-	// against the closed port its dial is refused on.
 	cfg.Storage.Options = map[string]string{"max_retries": "0"}
 	cfg.Observability.Endpoint = fmt.Sprintf("127.0.0.1:%d", ClosedPort(t))
 	cfg.NATS.URL = fmt.Sprintf("nats://127.0.0.1:%d", ClosedPort(t))

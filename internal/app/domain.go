@@ -8,40 +8,19 @@ import (
 	"github.com/standards-lab/go-web-service/domain/organization"
 )
 
-// defineDomain defines the domain services on g into n, one node per domain
-// layer. Domain services are defined in the module's base-layer domain
-// packages, one package per layer under domain/, and each node's
-// constructor builds its service from the infrastructure nodes it Uses,
-// never from Nodes itself. A domain service holds no resource and runs
-// nothing, so none is a lifecycle participant; the seeder its seed
-// contributions join checks its statements (admin.go). It constructs
-// nothing.
 func defineDomain(g *graph.Graph, n *Nodes) {
 	n.Organization = g.Define("organization", n.newOrganization)
 	n.Document = g.Define("document", n.newDocument)
 }
 
-// newOrganization constructs the organization layer's service. The
-// runtime's recorder is the one each layer's commands emit through. Their
-// commands run in the server's requests, so neither layer needs an edge to
-// the relay: the server drains before it (reactors.go).
 func (n *Nodes) newOrganization(s *graph.Scope) (*organization.Service, error) {
 	return organization.New(s.Use(n.SQL), s.Use(n.Files), s.Use(n.Logger), s.Use(n.Runtime).Recorder), nil
 }
 
-// newDocument constructs the document layer's service. The nudge node is
-// the layer's Sweeper, which it nudges after each branch it marks; the
-// recorder is the organization layer's.
 func (n *Nodes) newDocument(s *graph.Scope) (*document.Service, error) {
 	return document.New(s.Use(n.SQL), s.Use(n.Files), s.Use(n.Nudge), s.Use(n.Runtime).Recorder), nil
 }
 
-// mountAPI builds the API mount, /api, with each domain layer's route group
-// mounted into it, each handed the paging policy and the server's transfer
-// sizing from the config node and the logger node for its error writer.
-// Every collection read may continue by cursor. Each read issues a cursor on
-// every sort its keyset can continue and pages by number otherwise, as the
-// organization list does on its one nullable field, parent_id.
 func mountAPI(s *graph.Scope, n *Nodes) *web.Group {
 	cfg, logger := s.Use(n.Config), s.Use(n.Logger)
 	api := web.NewGroup("/api")

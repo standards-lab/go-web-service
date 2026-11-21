@@ -18,7 +18,7 @@ data lives in named volumes, which each group's `down` task keeps and its `reset
 ## Postgres
 
 `compose/postgres.yml` runs Postgres 19 (`compose/postgres/`), the service's declared SQL
-engine (see [Stack](../README.md#stack)), as user, password, and database `app`. It carries no
+engine (see [Stack](../docs/stack.md)), as user, password, and database `app`. It carries no
 profile, so every compose invocation starts it.
 `mise run db:up` brings it up and waits for health; `mise run db:down` stops it;
 `mise run db:reset` also drops its volume.
@@ -26,7 +26,7 @@ profile, so every compose invocation starts it.
 ## Azurite
 
 `compose/azurite.yml` runs Azurite (`compose/azurite/`), Azure's blob storage emulator, as the
-service's local object store (see [Stack](../README.md#stack)). Like Postgres it carries no
+service's local object store (see [Stack](../docs/stack.md)). Like Postgres it carries no
 profile, so `mise run db:up` starts both and `db:down` and `db:reset` stop them. Its blob
 endpoint listens on `127.0.0.1:10000` (`AZURITE_BLOB_PORT` to change it) under Azurite's
 well-known development account, `devstoreaccount1`. `secrets.example.json` carries that
@@ -38,7 +38,7 @@ Data persists in the `go-web-service-azurite` volume.
 ## NATS
 
 `compose/nats.yml` runs NATS 2 with JetStream (`compose/nats/`), the broker the service's
-messaging runtime publishes through (see [Stack](../README.md#stack)). Like Postgres it carries
+messaging runtime publishes through (see [Stack](../docs/stack.md)). Like Postgres it carries
 no profile, so `mise run db:up` starts it with the others and `db:down` and `db:reset` stop it.
 It listens on `127.0.0.1:4222` (`NATS_PORT` to change it), the URL `config.json`'s `nats` block
 names; the monitoring endpoint stays inside the container, where the health check waits for

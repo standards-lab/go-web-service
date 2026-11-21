@@ -1,9 +1,9 @@
 # Domain architecture
 
-This note holds the design of the domain layers, the organization and document packages.
-`STANDARDS.md` holds the judgement calls the standards-reviewer applies to them: the layer as a
-compositional grouping, the capability-named translation file, and cross-domain coupling. A rule
-leaves this note once `STANDARDS.md` or the architecture repository holds it.
+The design of the domain layers, the organization and document packages. Each package's
+`doc.go` states its API, and [`STANDARDS.md`](../STANDARDS.md) holds the judgement calls the
+standards-reviewer applies to the layers: the layer as a compositional grouping, the
+capability-named translation file, and cross-domain coupling.
 
 ## Role-aggregated files
 
@@ -26,7 +26,7 @@ aggregating its role for the layer:
   projection for the read model, rows for a scan, a guard for a version-checked command), and
   exposes each operation as a store method that reads as what it does. Both domains also
   hold `storage.go`, the blobfs translation file, and `messaging.go`, which defines the
-  events the layer emits (the README's "Adding an event"); `ai.go` is planned.
+  events the layer emits ([`messaging.md`, "Adding an event"](messaging.md#adding-an-event)); `ai.go` is planned.
 - `service.go`: the single domain service, a concrete type constructed from the `data` package.
   Its methods map endpoints to operations one to one, and each operation delegates whole to the
   store after the command's own validation. A domain service is no lifecycle participant and
@@ -119,8 +119,7 @@ construction sites.
 
 ## The sdk staging package
 
-Library promotion candidates stage in the base `sdk` package: flat, a package meant to empty out
-accumulates no sub-packages, with each file named for the library its contents are bound for.
+Library promotion candidates stage in the base `sdk` package, whose `doc.go` states its shape.
 Staging is cheap and deliberate; the `v1.data.evaluation` task rules on every tenant. `Command`,
 bound for go-web-sdk, is the guarded-command read composing the SDK's `PathUUID` (promoted from
 here in go-web-sdk v0.13.0), `IfMatch`, and `DecodeJSON`.
@@ -137,9 +136,3 @@ any Go around a statement: would it change the SQL I would have written by hand?
 
 A library change is worth pausing a session for only when the consumer cannot correctly express
 the operation through exported API; an inelegant-but-expressible shape stages in `sdk`.
-
-## Deferred by design
-
-Multi-entity role refinements belong to the first multi-entity layer. Soft delete as the
-standard's convention (`data-layer.md`) waits for the first domain that needs it. The
-holistic operation pass over the whole architecture is `v1.data.evaluation`.

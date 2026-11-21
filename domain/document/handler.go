@@ -33,7 +33,7 @@ type handler struct {
 
 // Routes builds the layer's route group, /documents/{org}, with the
 // directory routes under /directories/{id} ({id} may be RootAlias) and the
-// file routes under /files/{id}; the README's API section lists them. The
+// file routes under /files/{id}; docs/api.md lists them. The
 // moves and deletes take their version from If-Match. limits is the paging
 // policy of the listings; transfer sizes the deadlines of a file's upload
 // and download from the layer's limit, maxFileBody; and logger records the

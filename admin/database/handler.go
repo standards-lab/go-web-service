@@ -45,7 +45,7 @@ type handler struct {
 // Routes builds the admin domain's route group, /database: the reads
 // (diagnostics, the schema status, the pattern catalog, the statements
 // registry, the named states) and the verbs (verify, up, down, steps,
-// force, seed, and the state reset), which the README's admin section
+// force, seed, and the state reset), which docs/admin.md
 // lists. The schema verbs answer with the resulting status. up, down,
 // steps, and state change the schema, so each holds gate exclusively; the
 // others take no lock the sweep contends for. A set name that is empty or

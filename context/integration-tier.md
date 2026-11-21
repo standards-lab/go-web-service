@@ -1,7 +1,7 @@
 # Integration tier
 
-What the integration tier, the root `integration` package, adds next. The code and the README
-describe the tier as it is.
+What the integration tier, the root `integration` package, adds next. The code and
+[`docs/tests.md`](../docs/tests.md) describe the tier as it is.
 
 ## Per-domain protocol helpers (planned for the people domain)
 

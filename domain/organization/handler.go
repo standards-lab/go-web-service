@@ -33,7 +33,7 @@ type handler struct {
 // Routes builds the layer's route group, /organizations: the list, the
 // read by id, the lookup by path (/lookup?path=/acme/engineering, a query
 // so no wildcard overlaps a sub-resource of /{id}), the four commands, and
-// the logo at /{id}/logo; the README's API section lists them. limits is
+// the logo at /{id}/logo; docs/api.md lists them. limits is
 // the list's paging policy; transfer sizes the deadlines of a logo's upload
 // and download from the layer's limit, maxLogoBody; and logger records the
 // cause of every 5xx the group's error writer sends.

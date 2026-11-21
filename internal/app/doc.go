@@ -66,7 +66,7 @@
 // Routes and reactors are the two ways work enters the running process: a
 // caller drives a route, and an occurrence drives a reactor. A reactor
 // commonly dispatches to a domain service; the sweeper's dispatches to its
-// reclaimers, the libraries' own (the README's Sweep section), and the
+// reclaimers, the libraries' own (docs/sweep.md), and the
 // relay's publishes to the broker.
 // What a producer of events must order itself after is defineReactors'
 // drain rule. Extending the service means defining a node in its layer's

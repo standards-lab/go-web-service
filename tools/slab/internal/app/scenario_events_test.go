@@ -21,9 +21,9 @@ import (
 // organizations, each with a logo and a document tree of its own, the root
 // created by the organization's first document write. It answers the way
 // the service does, a problem document for every refusal, and logs the
-// event type each successful command would publish under the README's
-// Messaging rules, so a test can check that the scenario's sequence makes
-// the events its narration names. A recursive delete of the root alias
+// event type each successful command would publish under the rules of
+// the root docs/messaging.md, so a test can check that the scenario's
+// sequence makes the events its narration names. A recursive delete of the root alias
 // marks the root, and its sweep removes it, so the organization holds no
 // documents until its next write; an organization with a root or an
 // active logo refuses its delete with 409. fault names one request line
@@ -423,8 +423,8 @@ func runEventsOK(t *testing.T, fake *eventsFake) string {
 }
 
 // commandEventTypes is the event catalog's types a command publishes, as
-// the root README lists them: every type but web-service.database.reset,
-// which only a state reset commits.
+// the root docs/messaging.md lists them: every type but
+// web-service.database.reset, which only a state reset commits.
 var commandEventTypes = []string{
 	"web-service.organization.created",
 	"web-service.organization.edited",
@@ -451,7 +451,8 @@ var eventsSteps = []string{
 }
 
 // eventsByStep is the event types each step's commands publish under the
-// README's rules, in order: the nineteen the scenario makes in all.
+// root docs/messaging.md's rules, in order: the nineteen the scenario
+// makes in all.
 var eventsByStep = [][]string{
 	{"organization.created"},
 	{"organization.edited"},

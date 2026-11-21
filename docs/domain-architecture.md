@@ -1,7 +1,7 @@
 # Domain architecture
 
-The design of the domain layers, the organization and document packages. Each package's
-`doc.go` states its API, and [`STANDARDS.md`](../STANDARDS.md) holds the judgement calls the
+This page describes the design of the domain layers: the organization and document packages.
+Each package's `doc.go` states its API, and [`STANDARDS.md`](../STANDARDS.md) holds the judgement calls the
 standards-reviewer applies to the layers: the layer as a compositional grouping, the
 capability-named translation file, and cross-domain coupling.
 
@@ -26,7 +26,8 @@ aggregating its role for the layer:
   projection for the read model, rows for a scan, a guard for a version-checked command), and
   exposes each operation as a store method that reads as what it does. Both domains also
   hold `storage.go`, the blobfs translation file, and `messaging.go`, which defines the
-  events the layer emits ([`messaging.md`, "Adding an event"](messaging.md#adding-an-event)); `ai.go` is planned.
+  events the layer emits ([`messaging.md`, "Adding an event"](messaging.md#adding-an-event));
+  `ai.go` is planned.
 - `service.go`: the single domain service, a concrete type constructed from the `data` package.
   Its methods map endpoints to operations one to one, and each operation delegates whole to the
   store after the command's own validation. A domain service is no lifecycle participant and

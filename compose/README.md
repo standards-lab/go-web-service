@@ -45,8 +45,9 @@ runtime publishes through (see [Stack](../docs/stack.md)). Like Postgres it carr
 `mise run db:up` starts it with the others and `db:down` and `db:reset` stop it. It listens on
 `127.0.0.1:4222` (`NATS_PORT` to change it), the URL `config.json`'s `nats` block names; the
 monitoring endpoint stays inside the container, where the health check waits for JetStream itself
-(`/healthz?js-enabled-only=true`), not merely the listener. A broker that started earlier would fail
-to provision its stream; the probe uses the image's busybox `wget`. The service owns its stream,
+(`/healthz?js-enabled-only=true`), not merely the listener, because the service's broker, started
+any earlier, would fail to provision its stream. The probe uses the image's busybox `wget`. The
+service owns its stream,
 `WEB_SERVICE`, and creates it on start. Data persists in the `go-web-service-nats` volume.
 
 ## The observability profile
@@ -131,8 +132,7 @@ own metrics (otelhttp's request-duration histogram, exported through a periodic 
 `prometheus/self` scrape of the collector's own internal telemetry every 15 seconds — added so
 the pipeline, and the dashboard below, have a real signal independent of the service. The
 collector serves that telemetry on `localhost:8888`, loopback only, since it never needs to leave
-the container. The
-`prometheus_remote_write` exporter pushes to Mimir (`http://mimir:9009/api/v1/push`), which
+the container. The `prometheus_remote_write` exporter pushes to Mimir (`http://mimir:9009/api/v1/push`), which
 ingests through its single-binary target (`-target=all`) and stores blocks on local filesystem
 storage.
 

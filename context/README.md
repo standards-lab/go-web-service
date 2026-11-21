@@ -1,9 +1,9 @@
 # go-web-service context
 
 The reference web service of the Standards Lab reference architecture: a single cohesive service
-that composes go-core, go-web-sdk, go-database, sqlate, go-storage, blobfs, go-observability, and go-messaging,
-and demonstrates each capability in place. It grows in documented layers on the go-web-sdk-template baseline it was generated from,
-consuming the SDKs at pinned releases. This is the service level: patterns are proven here, in a
+that composes go-core, go-web-sdk, go-database, sqlate, go-storage, blobfs, go-observability, and
+go-messaging, and demonstrates each capability in place. It grows in documented layers on the
+go-web-sdk-template baseline it was generated from, consuming the SDKs at pinned releases. This is the service level: patterns are proven here, in a
 running composition, before they promote outward into the SDKs, the template, and the standard.
 
 The service runs on one declared stack (Postgres for SQL, Azure Blob Storage for objects) and

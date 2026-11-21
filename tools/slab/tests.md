@@ -10,7 +10,7 @@ subtest's name states what it proves; this page holds the reasoning the names ca
 the broker, service, and grafana up nodes only bind clients, which the lifecycle's Start
 connects or probes. It checks that each `Nodes` field names its node (the name lowercased,
 spaces ignored, so `GrafanaUp` holds "grafana up"), and that every leaf of the App's own tree,
-not a copied list, builds from the nodes its path declares a System that drops no `After` and
+not a copied list, builds, from the nodes its path declares, a System that drops no `After` and
 puts grafana up above service. A dropped `After` means a leaf forgot to declare a node something
 it builds is ordered against, so that order is lost for its run. grafana up sits above service
 because the lifecycle stops at the first layer with a failure: with both down, a run would
@@ -70,7 +70,7 @@ Mimir holds one export when the run starts; the first query after the sweep publ
 sampled a second after now, because the wire carries milliseconds and the scenario waits for a
 sample strictly after its sweep, which a sample at now could truncate to before.
 
-A scenario's `uses` line names its need nodes, then the settings its steps read. storage and
+A scenario's `uses` line names the graph nodes it needs, then the settings its steps read. storage and
 events point at no trace, so they use no grafana up; sweeper reads Mimir through Grafana, so it
 does.
 

@@ -30,7 +30,8 @@ name states the rule it proves, and its subtests name the cases.
 
 The suite lives in the `integration` package under the `integration` build tag. Each file is
 named for the surface it asserts (`organization_test.go`, `document_test.go`, `logo_test.go`,
-`sweep_test.go`, `outage_test.go`, and the rest), and each test's and subtest's name states what it proves.
+`sweep_test.go`, `outage_test.go`, and the rest), and each test's and subtest's name states what
+it proves.
 Its harness is the toolkit the SDKs ship beside what it exercises: go-core's
 `process/processtest` builds `cmd/server` once, runs it as a subprocess configured by `APP_*`
 variables on a reserved port, and relays the database, the object store, or the broker through
@@ -54,8 +55,8 @@ arriving alone. A test severs a dependency's forwarder to hold an event pending 
 pass refused. It shortens the relay's timeout (`APP_MESSAGING_RELAY_TIMEOUT=1s`) and poll
 (`APP_MESSAGING_RELAY_POLL=5ms`) so that a relay not held off by the quiesce gate would claim
 rows while a reset runs, and lengthens the sweep interval (`APP_SWEEP_INTERVAL=1h`) so that
-every pass after the startup cycle is a delete's nudge. The sweep metrics test asserts no
-backlog of 1: no reclaimer stays backlogged between collections, so catching one would race an
+every pass after the startup cycle is a delete's nudge. The sweep metrics test does not
+assert a backlog of 1: no reclaimer stays backlogged between collections, so catching one would race an
 export against a pass. In the replica claim test a refused claim reports nothing, so the second
 sweeper also runs a probe reclaimer listed after `files`, and each probe pass shows a files cycle
 was attempted.

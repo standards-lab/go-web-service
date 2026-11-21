@@ -1,5 +1,9 @@
 # Tests
 
+Tests are black-box: each lives in its package's `<pkg>_test` package and drives the exported
+API. golangci-lint's `testpackage` enforces it; the one white-box file allowed is
+`export_test.go`, which only exports a clock or probe hook the API cannot reach.
+
 Two tiers. The unit tier, `mise run test`, runs on every pull request inside `mise run check`
 and touches no service, network, or disk: a package that runs SQL proves it over sqlate's
 scripted driver, and one that stores objects over go-storage's fake. The integration tier,

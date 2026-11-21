@@ -15,18 +15,12 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/internal/apptest"
 )
 
-// scenarioRun is what one "slab scenario <name>" run left: its exit code,
-// its narration and its report, and the nodes it built.
 type scenarioRun struct {
 	code           int
 	stdout, stderr string
 	built          []string
 }
 
-// runScenario runs "slab scenario <name>" over a fresh App with the
-// service at base and Grafana at grafana, set through SLAB_BASE and
-// SLAB_GRAFANA, from the working directory under the repository, so a
-// step that reads the repository reads the real seed file and fixtures.
 func runScenario(t *testing.T, name, base, grafana string) scenarioRun {
 	t.Helper()
 	t.Setenv("SLAB_BASE", base)
@@ -36,10 +30,6 @@ func runScenario(t *testing.T, name, base, grafana string) scenarioRun {
 	return scenarioRun{code: code, stdout: stdout.String(), stderr: stderr.String(), built: apptest.Names(built.Log())}
 }
 
-// runOrgScenario runs the scenario name against fake, serving as both the
-// service and Grafana, and closes the fake's listener before returning, so
-// the fake's state is read without its lock from then on. A request no
-// route of the fake answers fails the test.
 func runOrgScenario(t *testing.T, name string, fake http.Handler, failed func() error) scenarioRun {
 	t.Helper()
 	srv := httptest.NewServer(fake)
@@ -52,8 +42,6 @@ func runOrgScenario(t *testing.T, name string, fake http.Handler, failed func() 
 	return r
 }
 
-// runDomain runs the domain scenario against a fresh orgFake, expecting it
-// to succeed.
 func runDomain(t *testing.T) (*orgFake, string) {
 	t.Helper()
 	fake := newOrgFake()
@@ -67,8 +55,6 @@ func runDomain(t *testing.T) (*orgFake, string) {
 	return fake, r.stdout
 }
 
-// step returns the narration of one step of out: from its heading to the
-// next heading.
 func step(t *testing.T, out, heading string) string {
 	t.Helper()
 	start := strings.Index(out, heading)
@@ -82,8 +68,6 @@ func step(t *testing.T, out, heading string) string {
 	return rest
 }
 
-// inOrder fails t unless every heading appears in out, in order, and none
-// past them, at [n+1/.
 func inOrder(t *testing.T, out string, headings []string) {
 	t.Helper()
 	last := -1
@@ -102,9 +86,6 @@ func inOrder(t *testing.T, out string, headings []string) {
 	}
 }
 
-// The domain scenario builds the need nodes it declares, service and
-// grafana up, with the settings they read, then the settings its steps
-// read, and runs its ten steps in order.
 func TestScenario_DomainRunsTenStepsInOrder(t *testing.T) {
 	fake := newOrgFake()
 	r := runOrgScenario(t, "domain", fake, func() error { return fake.err })
@@ -146,23 +127,16 @@ func TestScenario_DomainNarratesEachStepBeforeItsRequest(t *testing.T) {
 			t.Errorf("step %s: the note %q follows the request %q:\n%s", c.heading, c.note, c.request, text)
 		}
 	}
-	// The create step's trace pointer follows its response, under a plain
-	// caption, its lines a block past the prose.
 	create := step(t, out, "[6/10]")
 	response := strings.Index(create, "    HTTP 201 Created\n")
 	trace := tracePointer.FindStringIndex(create)
 	if response < 0 || trace == nil || trace[0] < response {
-		t.Errorf("the trace block does not follow the create response:\n%s", create)
+		t.Errorf("the trace block, under its plain Observability caption, does not follow the create response:\n%s", create)
 	}
 }
 
-// tracePointer is a trace pointer block as a step shows it: the plain
-// Observability caption, then the Explore page under the fake's URL, the
-// service name, and the fake's trace id, a block past the prose.
 var tracePointer = regexp.MustCompile(`\n  Observability\n    Grafana     : http://127\.0\.0\.1:\d+/explore\n    Service Name: go-web-service\n    Trace ID    : ` + fakeTrace + `\n`)
 
-// A request and its response each show as a block, set off from the prose
-// and from each other by one blank line, every line of it past the prose.
 func TestScenario_DomainShowsTheRequestAndResponseAsBlocks(t *testing.T) {
 	_, out := runDomain(t)
 	find := step(t, out, "[4/10] Find")
@@ -183,9 +157,8 @@ func TestScenario_DomainShowsTheSeedFileBeforeTheReset(t *testing.T) {
 			t.Errorf("the seed block lacks %s:\n%s", want, out[caption:reset])
 		}
 	}
-	// The seed file's last line is its closing brace, the only one at the
-	// block's indent.
-	setOff(t, out, []block{{"data/seeds/default.json", "\n    }"}})
+	seedFileClosingBrace := "\n    }"
+	setOff(t, out, []block{{"data/seeds/default.json", seedFileClosingBrace}})
 }
 
 func TestScenario_DomainSendsTheQueryWithLiteralBrackets(t *testing.T) {

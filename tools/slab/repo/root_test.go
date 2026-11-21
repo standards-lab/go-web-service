@@ -11,8 +11,6 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/repo"
 )
 
-// tree builds a fake checkout: the root's go.mod declaring the module, and a
-// nested tools/slab module declaring its own path, as the real one does.
 func tree(t *testing.T) (root, nested string) {
 	t.Helper()
 	root = t.TempDir()

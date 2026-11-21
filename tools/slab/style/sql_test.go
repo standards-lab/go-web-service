@@ -6,8 +6,6 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
-// The escapes SQL emits, spelled out so each case asserts the exact bytes
-// a terminal receives rather than restating SQL through Style's methods.
 const (
 	bold  = "\x1b[1m"
 	dim   = "\x1b[2m"
@@ -15,8 +13,6 @@ const (
 	reset = "\x1b[0m"
 )
 
-// Color off leaves every case below untouched: comments, markers, and
-// keywords alike.
 func TestSQL_OffLeavesTextUntouched(t *testing.T) {
 	off := style.New(false)
 	sql := "--| tier: native\nINSERT INTO t (a) -- note\nVALUES ({{code}})\n{{> app.identity}}"
@@ -25,9 +21,6 @@ func TestSQL_OffLeavesTextUntouched(t *testing.T) {
 	}
 }
 
-// settings holds SET and order holds ORDER, so a keyword matched inside a
-// longer word would show here; lower-case select is no keyword, since the
-// match is exact.
 func TestSQL_BoldsWholeWordKeywordsOnly(t *testing.T) {
 	got := style.New(true).SQL("SELECT settings, order_no FROM t ORDER BY id, select")
 	want := bold + "SELECT" + reset + " settings, order_no " +
@@ -40,8 +33,6 @@ func TestSQL_BoldsWholeWordKeywordsOnly(t *testing.T) {
 
 func TestSQL_DimsCommentsAndColorsMarkers(t *testing.T) {
 	for name, tc := range map[string]struct{ in, want string }{
-		// The keywords RETURNING and INTO in the annotation stay unbolded:
-		// the line is dimmed whole, indentation included.
 		"an annotation line is dimmed whole": {
 			"  --| native: postgres — RETURNING INTO (Oracle)",
 			dim + "  --| native: postgres — RETURNING INTO (Oracle)" + reset,

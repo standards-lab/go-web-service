@@ -16,19 +16,14 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/repo"
 )
 
-// natsSettings are the values of the nats setting nodes, as a probe reads
-// them.
 type natsSettings struct {
 	URL    string `json:"url"`
 	Stream string `json:"stream"`
 	Prefix string `json:"prefix"`
 }
 
-// natsVariables are the variables the nats settings read.
 var natsVariables = []string{"SLAB_NATS", "SLAB_NATS_STREAM", "SLAB_NATS_PREFIX"}
 
-// closedNATS returns the URL of a TCP listener that has been closed, where
-// no NATS server answers.
 func closedNATS(t *testing.T) string {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -42,8 +37,6 @@ func closedNATS(t *testing.T) string {
 	return "nats://" + addr
 }
 
-// serviceNATS returns the nats block of the service's base configuration,
-// the repository root's config.json.
 func serviceNATS(t *testing.T) natsSettings {
 	t.Helper()
 	root, err := repo.Find(".")
@@ -63,9 +56,6 @@ func serviceNATS(t *testing.T) natsSettings {
 	return cfg.NATS
 }
 
-// The nats settings default to the service's base configuration, so a
-// watch with no flags reads the stream the service publishes to; each
-// reads its SLAB_* variable over the default and its root flag over that.
 func TestEvents_NATSSettingsDefaultToTheServiceConfiguration(t *testing.T) {
 	service := serviceNATS(t)
 	fromEnv := natsSettings{URL: "nats://env:4222", Stream: "ENV", Prefix: "env"}
@@ -109,9 +99,6 @@ func TestEvents_NATSSettingsDefaultToTheServiceConfiguration(t *testing.T) {
 	}
 }
 
-// With no NATS server answering, the watch fails at its start, before it
-// watches anything: one report naming the broker node and the mise task
-// that brings the stack up, exit code 1, and nothing on stdout.
 func TestEvents_WatchReportsNoServerNamingTheTaskThatBringsItUp(t *testing.T) {
 	for _, args := range [][]string{{"events", "watch"}, {"events", "watch", "--from-start"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
@@ -136,8 +123,6 @@ func TestEvents_WatchReportsNoServerNamingTheTaskThatBringsItUp(t *testing.T) {
 	}
 }
 
-// A setting go-messaging's NATS configuration refuses fails the broker's
-// Build, before anything connects.
 func TestEvents_WatchRefusesAnInvalidStream(t *testing.T) {
 	a, stdout, stderr, _ := newApp(t)
 
@@ -154,9 +139,6 @@ func TestEvents_WatchRefusesAnInvalidStream(t *testing.T) {
 	}
 }
 
-// The watch's usage errors and its help build nothing, so nothing
-// connects: an argument, an unknown flag, a value given to --from-start,
-// and the events parent run alone, whose help lists watch.
 func TestEvents_UsageAndHelpBuildNothing(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args   []string

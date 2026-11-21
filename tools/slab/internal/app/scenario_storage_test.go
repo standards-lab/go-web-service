@@ -14,16 +14,11 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/domain/organization"
 )
 
-// runStorageScenario runs the storage scenario against fake and returns
-// the run; the fake's own error, a request no route answers, fails the
-// test. Grafana's URL is the fake's too, and the scenario never probes it.
 func runStorageScenario(t *testing.T, fake *storageFake) scenarioRun {
 	t.Helper()
 	return runOrgScenario(t, "storage", fake, func() error { return fake.err })
 }
 
-// runStorageOK is runStorageScenario expecting the run to succeed, and
-// returns its narration.
 func runStorageOK(t *testing.T, fake *storageFake) string {
 	t.Helper()
 	r := runStorageScenario(t, fake)
@@ -33,8 +28,6 @@ func runStorageOK(t *testing.T, fake *storageFake) string {
 	return r.stdout
 }
 
-// runStorageFailing is runStorageScenario expecting the run to fail at a
-// step, and returns the narration and the one report on stderr.
 func runStorageFailing(t *testing.T, fake *storageFake) (out, report string) {
 	t.Helper()
 	r := runStorageScenario(t, fake)
@@ -47,7 +40,6 @@ func runStorageFailing(t *testing.T, fake *storageFake) (out, report string) {
 	return r.stdout, r.stderr
 }
 
-// storageSteps is the scenario's headings in order.
 var storageSteps = []string{
 	"[1/16] Migration Sets", "[2/16] Additive Seed", "[3/16] Logo Read",
 	"[4/16] Logo Revalidation", "[5/16] Logo Replacement", "[6/16] Logo Delete",
@@ -56,9 +48,6 @@ var storageSteps = []string{
 	"[13/16] Branch Creation", "[14/16] Recursive Delete", "[15/16] Sweep", "[16/16] Reset",
 }
 
-// The storage scenario builds the service node, with the base setting it
-// reads, then the settings its steps read; it points at no trace, so it
-// neither builds nor probes grafana up.
 func TestScenario_StorageRunsSixteenStepsInOrder(t *testing.T) {
 	fake := newStorageFake(t)
 	r := runStorageScenario(t, fake)
@@ -70,7 +59,7 @@ func TestScenario_StorageRunsSixteenStepsInOrder(t *testing.T) {
 		t.Errorf("nodes built = %q, want %q", r.built, want)
 	}
 	if slices.Contains(fake.requests, "GET /api/health") {
-		t.Errorf("the run probed Grafana; sent:\n%s", strings.Join(fake.requests, "\n"))
+		t.Errorf("the run probed Grafana, though the storage scenario points at no trace; sent:\n%s", strings.Join(fake.requests, "\n"))
 	}
 }
 
@@ -81,12 +70,9 @@ func TestScenario_StorageSendsTheScenarioSequence(t *testing.T) {
 	logo := organization.Organizations + "/" + fakeAcmeID + "/logo"
 	docs := document.Documents + "/" + fakeAcmeID
 	readme := docs + "/files/" + paths[guardedFilePath]
-	// Each entry is one request the fake recorded, in the order the steps
-	// send them, matched whole or, where prefix is set, by its start;
-	// requests between them are not checked.
-	want := []struct {
-		line   string
-		prefix bool
+	wantInOrder := []struct {
+		line     string
+		byPrefix bool
 	}{
 		{"GET " + schemaRoute, false},
 		{"POST " + seedRoute, false},
@@ -115,15 +101,15 @@ func TestScenario_StorageSendsTheScenarioSequence(t *testing.T) {
 	}
 	i := 0
 	for _, got := range fake.requests {
-		if i == len(want) {
+		if i == len(wantInOrder) {
 			break
 		}
-		if w := want[i]; got == w.line || (w.prefix && strings.HasPrefix(got, w.line)) {
+		if w := wantInOrder[i]; got == w.line || (w.byPrefix && strings.HasPrefix(got, w.line)) {
 			i++
 		}
 	}
-	if i < len(want) {
-		t.Errorf("the requests lack %q in order; sent:\n%s", want[i].line, strings.Join(fake.requests, "\n"))
+	if i < len(wantInOrder) {
+		t.Errorf("the requests lack %q in order; sent:\n%s", wantInOrder[i].line, strings.Join(fake.requests, "\n"))
 	}
 	if !strings.Contains(strings.Join(fake.requests, "\n"), `?recursive=true If-Match: "1"`) {
 		t.Errorf("the recursive delete did not guard on the branch's version; sent:\n%s", strings.Join(fake.requests, "\n"))
@@ -149,9 +135,9 @@ func TestScenario_StorageRunsTwiceAgainstTheSameFake(t *testing.T) {
 	}
 }
 
-func TestScenario_StorageRestoresADeletedLogoThroughTheAdditiveSeed(t *testing.T) {
+func TestScenario_StorageRestoresALogoAnEarlierRunDeletedThroughTheAdditiveSeed(t *testing.T) {
 	fake := newStorageFake(t)
-	fake.logo = nil // an earlier run stopped after its logo delete
+	fake.logo = nil
 	out := runStorageOK(t, fake)
 	if !strings.Contains(step(t, out, "[2/16]"), `"logos": 1`) {
 		t.Errorf("the additive seed does not report the logo it wrote again:\n%s", out)
@@ -254,9 +240,6 @@ func TestScenario_StoragePrintsTheTreeTheDeletingStatusAndTheSeededCounts(t *tes
 			t.Errorf("the tree table lacks %s at %s", p, id)
 		}
 	}
-	// The tree's last row is the seed's deepest file under its last
-	// directory, as the walk lists a directory's files, then its
-	// subdirectories, each by name.
 	setOff(t, out, []block{
 		{"Migration sets", "    app "},
 		{"acme's document tree", "    /operations/logistics/carriers.csv "},
@@ -290,9 +273,6 @@ func TestScenario_StorageFailsWhenTheResetSeedsOtherThanTheSeedFile(t *testing.T
 	}
 }
 
-// A directory beyond the seeded ones, such as a branch an interrupted run
-// left behind, falls wherever its name sorts, and the walk still finds the
-// seeded ones in order among the rest.
 func TestScenario_StorageCursorWalkToleratesAnUnseededDirectory(t *testing.T) {
 	fake := newStorageFake(t)
 	root := fake.acmeTree.Root
@@ -312,8 +292,6 @@ func TestScenario_StorageFailsWhenTheCursorWalkIsOutOfOrder(t *testing.T) {
 	}
 }
 
-// A body that is no JSON, a download's bytes, is summarized; a problem
-// document is JSON and prints as it came.
 func TestScenario_StoragePrintsAFailedLogoReadsProblemAsIs(t *testing.T) {
 	fake := newStorageFake(t)
 	fake.fault = http.MethodGet + " " + organization.Organizations + "/" + fakeAcmeID + "/logo"

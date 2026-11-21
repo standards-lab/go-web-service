@@ -11,7 +11,6 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
-// render runs r over a fresh buffer and returns what it wrote.
 func render(t *testing.T, r output.Render) string {
 	t.Helper()
 	var buf bytes.Buffer

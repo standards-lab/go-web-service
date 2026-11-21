@@ -20,15 +20,11 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
-// runOrg runs a fresh App over "org" and args, with --base naming
-// srv, and returns what it did.
 func runOrg(t *testing.T, srv *httptest.Server, args ...string) result {
 	t.Helper()
 	return runFamily(t, nil, []string{"org"}, srv, args...)
 }
 
-// runOrgTo is runOrg with stdout supplied by the caller, for a test that
-// needs it to be a terminal; result.stdout is then empty.
 func runOrgTo(t *testing.T, stdout io.Writer, srv *httptest.Server, args ...string) result {
 	t.Helper()
 	return runFamily(t, stdout, []string{"org"}, srv, args...)
@@ -49,8 +45,8 @@ func TestOrg_MountsOneSubcommandPerEndpoint(t *testing.T) {
 				t.Errorf("org %s help lacks %q:\n%s", args, want, r.stdout)
 			}
 		}
-		if len(r.built) != 0 {
-			t.Errorf("org %s: nodes built = %q, want none", args, r.built)
+		if len(r.builtNodes) != 0 {
+			t.Errorf("org %s: nodes built = %q, want none", args, r.builtNodes)
 		}
 	}
 }
@@ -73,7 +69,7 @@ func TestList_BuildsTheQueryFromTheReadFlags(t *testing.T) {
 			s, srv := newService(t, http.StatusOK, `{"items":[],"page":1,"size":20,"total":0}`)
 			r := runOrg(t, srv, append([]string{"list"}, tc.args...)...)
 			r.ok(t)
-			got := s.only(t)
+			got := s.onlyRequest(t)
 			if got.method != http.MethodGet || got.uri != tc.uri {
 				t.Errorf("request = %s %s, want GET %s", got.method, got.uri, tc.uri)
 			}
@@ -109,7 +105,7 @@ func TestGet_ReadsById(t *testing.T) {
 	s, srv := newService(t, http.StatusOK, `{"id":"a1","code":"acme"}`)
 	r := runOrg(t, srv, "get", "a1")
 	r.ok(t)
-	if got := s.only(t); got.method != http.MethodGet || got.uri != "/api/organizations/a1" {
+	if got := s.onlyRequest(t); got.method != http.MethodGet || got.uri != "/api/organizations/a1" {
 		t.Errorf("request = %s %s", got.method, got.uri)
 	}
 	if want := "{\n  \"id\": \"a1\",\n  \"code\": \"acme\"\n}\n"; r.stdout != want {
@@ -123,13 +119,11 @@ func TestGet_ReadsById(t *testing.T) {
 func TestGet_EscapesTheId(t *testing.T) {
 	s, srv := newService(t, http.StatusOK, `{}`)
 	runOrg(t, srv, "get", "a/b").ok(t)
-	if got := s.only(t); got.uri != "/api/organizations/a%2Fb" {
+	if got := s.onlyRequest(t); got.uri != "/api/organizations/a%2Fb" {
 		t.Errorf("uri = %s, want the slash escaped", got.uri)
 	}
 }
 
-// A problem response is reported once, every member of the document on
-// its own line after the command's path, with nothing on stdout.
 func TestGet_ReportsTheProblemAnErrorStatusCarries(t *testing.T) {
 	for name, tc := range map[string]struct {
 		status int
@@ -155,13 +149,11 @@ func TestGet_ReportsTheProblemAnErrorStatusCarries(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, srv := newService(t, tc.status, tc.reply)
-			runOrg(t, srv, "get", "a1").failure(t, tc.want)
+			runOrg(t, srv, "get", "a1").failsWith(t, tc.want)
 		})
 	}
 }
 
-// A response that carries the wrong status and no problem document says
-// which status it wanted.
 func TestCreate_ExpectsCreated(t *testing.T) {
 	_, srv := newService(t, http.StatusOK, `{"id":"n1","version":1}`)
 	r := runOrg(t, srv, "create", "--code", "sales", "--name", "Sales")
@@ -177,7 +169,7 @@ func TestGetByPath_ReadsByHierarchyPath(t *testing.T) {
 	for _, path := range []string{"acme/engineering", "/acme/engineering"} {
 		s, srv := newService(t, http.StatusOK, `{"path":"/acme/engineering"}`)
 		runOrg(t, srv, "get-by-path", path).ok(t)
-		if got := s.only(t); got.method != http.MethodGet || got.uri != "/api/organizations/lookup?path=%2Facme%2Fengineering" {
+		if got := s.onlyRequest(t); got.method != http.MethodGet || got.uri != "/api/organizations/lookup?path=%2Facme%2Fengineering" {
 			t.Errorf("get-by-path %q sent %s %s", path, got.method, got.uri)
 		}
 	}
@@ -197,7 +189,7 @@ func TestCreate_SendsTheBodyTheFlagsBuild(t *testing.T) {
 			s, srv := newService(t, http.StatusCreated, `{"id":"n1","version":1}`)
 			r := runOrg(t, srv, append([]string{"create"}, tc.args...)...)
 			r.ok(t)
-			got := s.only(t)
+			got := s.onlyRequest(t)
 			if got.method != http.MethodPost || got.uri != "/api/organizations" {
 				t.Errorf("request = %s %s, want POST /api/organizations", got.method, got.uri)
 			}
@@ -269,7 +261,7 @@ func TestEdit_ResolvesTheVersionFromTheFlagOrTheBody(t *testing.T) {
 			s, srv := newService(t, http.StatusOK, `{"id":"e1","version":5}`)
 			r := runOrg(t, srv, append([]string{"edit", "e1"}, tc.args...)...)
 			r.ok(t)
-			got := s.only(t)
+			got := s.onlyRequest(t)
 			if got.method != http.MethodPut || got.uri != "/api/organizations/e1" {
 				t.Errorf("request = %s %s, want PUT /api/organizations/e1", got.method, got.uri)
 			}
@@ -334,7 +326,7 @@ func TestTransfer_DistinguishesAnEmptyParentFromAnUnsetOne(t *testing.T) {
 			s, srv := newService(t, http.StatusOK, `{"id":"t1","version":2}`)
 			r := runOrg(t, srv, append([]string{"transfer", "t1"}, tc.args...)...)
 			r.ok(t)
-			got := s.only(t)
+			got := s.onlyRequest(t)
 			if got.method != http.MethodPost || got.uri != "/api/organizations/t1/transfer" {
 				t.Errorf("request = %s %s, want POST /api/organizations/t1/transfer", got.method, got.uri)
 			}
@@ -376,7 +368,7 @@ func TestDelete_SendsIfMatchAndPrintsTheStatusLine(t *testing.T) {
 	s, srv := newService(t, http.StatusNoContent, "")
 	r := runOrg(t, srv, "delete", "d1", "--version", "2")
 	r.ok(t)
-	got := s.only(t)
+	got := s.onlyRequest(t)
 	if got.method != http.MethodDelete || got.uri != "/api/organizations/d1" {
 		t.Errorf("request = %s %s, want DELETE /api/organizations/d1", got.method, got.uri)
 	}
@@ -416,9 +408,6 @@ func TestOrg_RefuseAnUnknownFlag(t *testing.T) {
 	}
 }
 
-// Every org command builds the nodes it declares, no color and
-// client, the base node the client is bound to, and the lifecycle
-// configuration, and nothing else.
 func TestOrg_BuildOnlyTheColorTheClientAndItsBase(t *testing.T) {
 	png := filepath.Join(t.TempDir(), "acme.png")
 	if err := os.WriteFile(png, []byte("\x89PNG"), 0o644); err != nil {
@@ -442,15 +431,13 @@ func TestOrg_BuildOnlyTheColorTheClientAndItsBase(t *testing.T) {
 			if r.code != process.ExitFailure {
 				t.Errorf("code = %d, want the problem's %d; stderr = %q", r.code, process.ExitFailure, r.stderr)
 			}
-			if !slices.Equal(r.built, familyBuilt) {
-				t.Errorf("nodes built = %q, want %q", r.built, familyBuilt)
+			if !slices.Equal(r.builtNodes, familyBuilt) {
+				t.Errorf("nodes built = %q, want %q", r.builtNodes, familyBuilt)
 			}
 		})
 	}
 }
 
-// The client binds to the URL the base node resolves, from SLAB_BASE
-// when no --base is given.
 func TestOrg_BindTheClientToSLABBase(t *testing.T) {
 	s, srv := newService(t, http.StatusOK, `{}`)
 	t.Setenv("SLAB_BASE", srv.URL)
@@ -459,14 +446,11 @@ func TestOrg_BindTheClientToSLABBase(t *testing.T) {
 	if code := a.Run(context.Background(), []string{"org", "get", "a1"}); code != process.ExitOK {
 		t.Fatalf("code = %d; stderr = %q", code, stderr.String())
 	}
-	if got := s.only(t); got.uri != "/api/organizations/a1" {
+	if got := s.onlyRequest(t); got.uri != "/api/organizations/a1" {
 		t.Errorf("uri = %s", got.uri)
 	}
 }
 
-// A success is colored on a terminal unless --no-color, SLAB_NO_COLOR, or
-// NO_COLOR says otherwise. The terminal is the test's own: under go test
-// the process's stdout is never one.
 func TestOrg_ColorTheResultOnATerminal(t *testing.T) {
 	on := style.New(true)
 	colored := on.Key(`"code"`) + ": " + on.Value(`"acme"`)
@@ -500,7 +484,6 @@ func TestOrg_ColorTheResultOnATerminal(t *testing.T) {
 	}
 }
 
-// A stream that is no terminal is never colored, whatever the flags say.
 func TestOrg_NeverColorAStreamThatIsNoTerminal(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	_, srv := newService(t, http.StatusOK, `{"code":"acme"}`)
@@ -511,11 +494,8 @@ func TestOrg_NeverColorAStreamThatIsNoTerminal(t *testing.T) {
 	}
 }
 
-// logoOrg is an organization id the logo commands address.
 const logoOrg = "00000000-0000-7000-8000-000000000001"
 
-// logo put sends the file's bytes under the media type its extension
-// names, or the one --content-type gives.
 func TestLogoPut_SendsTheFileUnderItsMediaType(t *testing.T) {
 	dir := t.TempDir()
 	png := filepath.Join(dir, "acme.png")
@@ -532,7 +512,7 @@ func TestLogoPut_SendsTheFileUnderItsMediaType(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			s, srv := newService(t, http.StatusCreated, `{"id":"f","version":2}`)
 			runOrg(t, srv, tc.args...).ok(t)
-			got := s.only(t)
+			got := s.onlyRequest(t)
 			if got.method != http.MethodPut || got.uri != "/api/organizations/"+logoOrg+"/logo" || got.contentType != tc.contentType || got.body != "\x89PNG" {
 				t.Errorf("sent %s %s as %q: %q", got.method, got.uri, got.contentType, got.body)
 			}
@@ -552,7 +532,6 @@ func TestLogoPut_RefusesAnUnknownExtension(t *testing.T) {
 	}
 }
 
-// A file that cannot be read is a failure, not a usage error.
 func TestLogoPut_FailsOnAnUnreadableFile(t *testing.T) {
 	s, srv := newService(t, http.StatusCreated, `{}`)
 	r := runOrg(t, srv, "logo", "put", logoOrg, filepath.Join(t.TempDir(), "missing.png"))
@@ -564,8 +543,6 @@ func TestLogoPut_FailsOnAnUnreadableFile(t *testing.T) {
 	}
 }
 
-// logo get never prints the bytes: it prints the headers and writes the
-// bytes to --out; a revalidation is a 304, not an error.
 func TestLogoGet_WritesTheBytesToOut(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("If-None-Match") == `"e1"` {
@@ -599,7 +576,7 @@ func TestLogoDelete_ExpectsNoContent(t *testing.T) {
 	if r.stdout != "204 No Content\n" {
 		t.Errorf("stdout = %q, want the status line", r.stdout)
 	}
-	if got := s.only(t); got.method != http.MethodDelete || got.uri != "/api/organizations/"+logoOrg+"/logo" {
+	if got := s.onlyRequest(t); got.method != http.MethodDelete || got.uri != "/api/organizations/"+logoOrg+"/logo" {
 		t.Errorf("sent %s %s", got.method, got.uri)
 	}
 }

@@ -12,8 +12,6 @@ var ansi = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 func strip(s string) string { return ansi.ReplaceAllString(s, "") }
 
-// wrappers is every core wrapper by name, so a property of them all is
-// checked on each.
 var wrappers = map[string]func(style.Style, string) string{
 	"Bold":    style.Style.Bold,
 	"Dim":     style.Style.Dim,

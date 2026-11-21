@@ -27,30 +27,10 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/repo"
 )
 
-// The fakes the domain, problems, and storage scenarios run against at the
-// App seam, each on an httptest listener the run reaches through
-// SLAB_BASE and SLAB_GRAFANA. orgFake stands in for the service's
-// organization surface and Grafana on one listener; storageFake for its
-// storage surface. Each answers the service's readiness probe, /readyz,
-// and Grafana's health probe, /api/health, with 200, so the need nodes
-// start.
+// See tools/slab/tests.md
 
-// codePattern is the layer's code rule, domain/organization's codePattern,
-// repeated here so the fake refuses a code the service would.
-var codePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+var serviceCodePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
-// orgFake stands in for the service and Grafana on one
-// listener: the routes do not overlap. It holds the organization tree in
-// memory, reseeds it on the admin reset, and records each request's line
-// and precondition so the test can check what the steps sent.
-//
-// Each route makes the checks the real handler makes, in the real order,
-// and a rejection is the problem document the real service would write:
-// the SDK's own parsers reject a path id, a query, a body, and an If-Match
-// header, and the fake's own vocabulary stands in for the domain's and the
-// store's, mapped to statuses the way domain/organization's status and
-// data's Status map them. Every response carries the trace id in
-// X-Request-Id, as the service's request-id middleware does.
 type orgFake struct {
 	mu       sync.Mutex
 	rows     []*organization.Organization
@@ -62,22 +42,12 @@ type orgFake struct {
 
 const fakeTrace = "4bf92f3577b34da6a3ce929d0e0e4736"
 
-// fakeMaxPageSize is the largest size a list request may ask for:
-// internal/config/reads.go's defaultReadsMaxSize.
-const fakeMaxPageSize = 100
+const serviceMaxPageSize = 100
 
-// fakeMaxCommandBody is the byte limit the service puts on a command's
-// request body: domain/organization/handler.go's maxCommandBody.
-const fakeMaxCommandBody = 1 << 16
+const serviceMaxCommandBody = 1 << 16
 
-// stateRoute is the database admin service's reset, the route the
-// scenarios' first step posts to.
 const stateRoute = database.Database + "/state"
 
-// The fake's error vocabulary: the domain's validation and cycle errors, the
-// path parser's, and the store's stale version and constraint violation,
-// with the wording the real ones carry. An absent row is sql.ErrNoRows, as
-// the store returns it.
 var (
 	errPathID     = errors.New("must be a UUID")
 	errValidation = errors.New("invalid command")
@@ -86,8 +56,6 @@ var (
 	errConstraint = errors.New("constraint violation")
 )
 
-// fakeStatus maps the fake's vocabulary to statuses as the service's two
-// matchers do. The SDK's own errors map themselves ahead of it.
 func fakeStatus(err error) (web.Problem, bool) {
 	switch {
 	case errors.Is(err, errPathID), errors.Is(err, errValidation):
@@ -102,8 +70,6 @@ func fakeStatus(err error) (web.Problem, bool) {
 	return web.Problem{}, false
 }
 
-// seededTree is data/seeds/default.json as the fake holds it: parent code,
-// code, name, in file order.
 var seededTree = [][3]string{
 	{"", "acme", "Acme Corporation"},
 	{"acme", "engineering", "Engineering"},
@@ -159,17 +125,13 @@ func (f *orgFake) pathOf(o *organization.Organization) string {
 	return f.pathOf(f.byID(*o.ParentID)) + "/" + o.Code
 }
 
-// view is o as the read model presents it, its path composed.
 func (f *orgFake) view(o *organization.Organization) organization.Organization {
 	v := *o
 	v.Path = f.pathOf(o)
 	return v
 }
 
-// fail records a request no route answers, for the test to report, and
-// answers it with 400 and no body: a scenario's own mistake, not a problem
-// the service would write.
-func (f *orgFake) fail(w http.ResponseWriter, format string, args ...any) {
+func (f *orgFake) failUnrouted(w http.ResponseWriter, format string, args ...any) {
 	if f.err == nil {
 		f.err = fmt.Errorf(format, args...)
 	}
@@ -198,9 +160,6 @@ func (f *orgFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// route dispatches r to the handler for its method and path, the way the
-// service's router does. A handler's error is the problem the response
-// reports.
 func (f *orgFake) route(w http.ResponseWriter, r *http.Request) error {
 	switch {
 	case r.Method == http.MethodGet && (r.URL.Path == "/readyz" || r.URL.Path == "/api/health"):
@@ -229,13 +188,11 @@ func (f *orgFake) route(w http.ResponseWriter, r *http.Request) error {
 	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, organization.Organizations+"/"):
 		return f.delete(w, r)
 	default:
-		f.fail(w, "unexpected request %s %s", r.Method, r.URL.RequestURI())
+		f.failUnrouted(w, "unexpected request %s %s", r.Method, r.URL.RequestURI())
 	}
 	return nil
 }
 
-// pathID reads the {id} segment of r's path and parses it as a UUID, the
-// check web.PathUUID makes, with its wording.
 func pathID(r *http.Request) (string, error) {
 	raw := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, organization.Organizations+"/"), "/transfer")
 	if _, err := uuid.Parse(raw); err != nil {
@@ -244,9 +201,6 @@ func pathID(r *http.Request) (string, error) {
 	return raw, nil
 }
 
-// command reads a guarded command's three inputs in the order sdk.Command
-// does: the path id, the If-Match version, and the body, strictly decoded
-// and bounded at the command body limit.
 func orgCommand[T any](w http.ResponseWriter, r *http.Request) (id string, version int64, body T, err error) {
 	if id, err = pathID(r); err != nil {
 		return "", 0, body, err
@@ -254,16 +208,14 @@ func orgCommand[T any](w http.ResponseWriter, r *http.Request) (id string, versi
 	if version, err = web.IfMatch(r); err != nil {
 		return "", 0, body, err
 	}
-	if body, err = web.DecodeJSON[T](w, r, fakeMaxCommandBody); err != nil {
+	if body, err = web.DecodeJSON[T](w, r, serviceMaxCommandBody); err != nil {
 		return "", 0, body, err
 	}
 	return id, version, body, nil
 }
 
-// validate is the create and edit commands' own rules, with the wording
-// domain/organization's validCode and validName carry.
 func orgValidate(code, name string) error {
-	if !codePattern.MatchString(code) {
+	if !serviceCodePattern.MatchString(code) {
 		return fmt.Errorf("%w: code must be lowercase words joined by single hyphens", errValidation)
 	}
 	if name == "" {
@@ -272,9 +224,6 @@ func orgValidate(code, name string) error {
 	return nil
 }
 
-// guard is the store's version guard: the row at id, at version, or the
-// error the guard returns when there is no such row or it is at another
-// version.
 func (f *orgFake) guard(id string, version int64) (*organization.Organization, error) {
 	o := f.byID(id)
 	if o == nil {
@@ -286,10 +235,8 @@ func (f *orgFake) guard(id string, version int64) (*organization.Organization, e
 	return o, nil
 }
 
-// list parses the query as the handler does and pages the rows by it. The
-// filters are not applied: no test reads the queried list's items.
 func (f *orgFake) list(w http.ResponseWriter, r *http.Request) error {
-	q, err := web.ParseQuery(r.URL.Query(), web.Limits{DefaultSize: input.DefaultPageSize, MaxSize: fakeMaxPageSize})
+	q, err := web.ParseQuery(r.URL.Query(), web.Limits{DefaultSize: input.DefaultPageSize, MaxSize: serviceMaxPageSize})
 	if err != nil {
 		return err
 	}
@@ -316,12 +263,8 @@ func (f *orgFake) find(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// create decodes and validates the body, then makes the store's two checks
-// as the schema's constraints would: the parent must exist (the foreign
-// key) and no sibling may carry the code (the unique constraint, null
-// parents equal).
 func (f *orgFake) create(w http.ResponseWriter, r *http.Request) error {
-	body, err := web.DecodeJSON[organization.CreateOrganization](w, r, fakeMaxCommandBody)
+	body, err := web.DecodeJSON[organization.CreateOrganization](w, r, serviceMaxCommandBody)
 	if err != nil {
 		return err
 	}
@@ -368,8 +311,6 @@ func (f *orgFake) edit(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// transfer checks the destination against the subtree before the guard,
-// as the store does under the tree lock.
 func (f *orgFake) transfer(w http.ResponseWriter, r *http.Request) error {
 	type transferOrganization struct {
 		ParentID *string `json:"parent_id"`
@@ -434,10 +375,6 @@ func (f *orgFake) index(o *organization.Organization) int {
 	return -1
 }
 
-// The storage scenario's fixed targets as the service states them: acme,
-// whose logo and tree it walks, finance, the other organization its
-// isolation step names, the seeded file and directory its refusals target,
-// the fixture its logo replacement uploads, and the admin routes it reads.
 const (
 	acmePath           = "/acme"
 	financePath        = "/acme/finance"
@@ -448,13 +385,8 @@ const (
 	seedRoute          = database.Database + "/seed"
 )
 
-// detailNameTaken is the curated detail of a taken name's 409, the
-// service's data.DetailNameTaken.
-const detailNameTaken = "an entry with that name already exists"
+const serviceDetailNameTaken = "an entry with that name already exists"
 
-// seedFile is data/seeds/default.json as the fake reads it, decoded here
-// independently of the scenario's own reading so the counts and ids the
-// scenario checks are not the scenario's own arithmetic.
 type seedFile struct {
 	Organizations []json.RawMessage `json:"organizations"`
 	Logos         []json.RawMessage `json:"logos"`
@@ -474,14 +406,12 @@ type seedEntry struct {
 	Entries     []seedEntry `json:"entries"`
 }
 
-// seeded holds the counts the service's seeder reports.
 type seeded struct {
 	Documents     int `json:"documents"`
 	Logos         int `json:"logos"`
 	Organizations int `json:"organizations"`
 }
 
-// loadSeed reads the repository's default seed file.
 func loadSeed(t *testing.T) seedFile {
 	t.Helper()
 	fsys, err := repo.FS("")
@@ -499,8 +429,6 @@ func loadSeed(t *testing.T) seedFile {
 	return s
 }
 
-// counts is what the service reports seeding for s: every organization,
-// every logo, and every document entry below the roots.
 func (s seedFile) counts() seeded {
 	n := 0
 	var count func([]seedEntry)
@@ -516,7 +444,6 @@ func (s seedFile) counts() seeded {
 	return seeded{Documents: n, Logos: len(s.Logos), Organizations: len(s.Organizations)}
 }
 
-// acme is acme's seeded tree.
 func (s seedFile) acme(t *testing.T) seedTree {
 	t.Helper()
 	for _, tree := range s.Documents {
@@ -528,8 +455,6 @@ func (s seedFile) acme(t *testing.T) seedTree {
 	return seedTree{}
 }
 
-// paths is every entry of t by its path under the root, a directory's with
-// a trailing slash, mapped to its fixed id.
 func (t seedTree) paths() map[string]string {
 	out := make(map[string]string)
 	var walk func(prefix string, entries []seedEntry)
@@ -548,21 +473,6 @@ func (t seedTree) paths() map[string]string {
 	return out
 }
 
-// storageFake stands in for the service's storage surface on one listener:
-// the schema status, the additive seed and the reset, the organization
-// lookup, acme's logo, and acme's document tree, seeded from the real
-// data/seeds/default.json. It answers the way the service does, a problem
-// document for every refusal, and records each request's line with its
-// If-Match or If-None-Match so a test can check what the steps sent.
-//
-// A recursive delete marks the branch, and the branch's read answers
-// deleting for sweepReads reads before the fake sweeps it, so the scenario
-// sees the deleting status and the wait polls at least once. fault names
-// one request line ("METHOD path") the fake answers 500 instead,
-// takenDetail replaces a taken name's curated detail, miscount adds to the
-// documents a reset reports seeding, and descendingWalk serves a paged
-// directory listing in descending name order whatever its sort says, for
-// the unexpected-response tests.
 type storageFake struct {
 	mu             sync.Mutex
 	seed           seedFile
@@ -580,42 +490,34 @@ type storageFake struct {
 	err            error
 }
 
-// resetCounts is what a reset reports seeding: the seed file's counts, the
-// documents off by miscount.
 func (f *storageFake) resetCounts() seeded {
 	c := f.seed.counts()
 	c.Documents += f.miscount
 	return c
 }
 
-// fakeNode is one directory or file under acme's root; the root itself is a
-// node with no parent.
 type fakeNode struct {
 	id, parent, name, contentType, status string
 	dir                                   bool
 	version                               int64
 }
 
-// The organizations the fake's lookup knows, and the seeded logo's bytes:
-// any bytes do, since the scenario only reads them back.
 var (
 	fakeAcmeID    = fakeID(1)
 	fakeFinanceID = fakeID(7)
 	fakeSeedLogo  = []byte("\x89PNG\r\n\x1a\nseeded")
 )
 
-// sweepReads is how many reads of a marked branch answer deleting.
-const sweepReads = 2
+const deletingReadsBeforeSweep = 2
 
 func newStorageFake(t *testing.T) *storageFake {
 	t.Helper()
-	f := &storageFake{seed: loadSeed(t), takenDetail: detailNameTaken}
+	f := &storageFake{seed: loadSeed(t), takenDetail: serviceDetailNameTaken}
 	f.acmeTree = f.seed.acme(t)
 	f.reseed()
 	return f
 }
 
-// reseed restores the seeded logo and acme's seeded tree, as a reset does.
 func (f *storageFake) reseed() {
 	f.logo, f.logoTag = fakeSeedLogo, f.logoTag+1
 	f.nodes, f.deleting = map[string]*fakeNode{}, map[string]int{}
@@ -653,8 +555,7 @@ func (f *storageFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.route(w, r)
 }
 
-// fail records a request no route answers, for the test to report.
-func (f *storageFake) fail(w http.ResponseWriter, r *http.Request) {
+func (f *storageFake) failUnrouted(w http.ResponseWriter, r *http.Request) {
 	if f.err == nil {
 		f.err = fmt.Errorf("no route for %s %s", r.Method, r.URL.RequestURI())
 	}
@@ -667,8 +568,6 @@ func writeProblem(w http.ResponseWriter, status int, detail string) {
 	_ = json.NewEncoder(w).Encode(web.Problem{Type: "about:blank", Title: http.StatusText(status), Status: status, Detail: detail})
 }
 
-// fakeSchema is the schema status the fake answers, the service's two sets
-// at their latest.
 var fakeSchema = map[string]any{
 	"ready": true,
 	"sets": []map[string]any{
@@ -708,7 +607,7 @@ func (f *storageFake) route(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(p, document.Documents+"/"):
 		f.serveDocuments(w, r, strings.Split(strings.TrimPrefix(p, document.Documents+"/"), "/"))
 	default:
-		f.fail(w, r)
+		f.failUnrouted(w, r)
 	}
 }
 
@@ -737,7 +636,7 @@ func (f *storageFake) serveLogo(w http.ResponseWriter, r *http.Request) {
 		f.logo = nil
 		w.WriteHeader(http.StatusNoContent)
 	default:
-		f.fail(w, r)
+		f.failUnrouted(w, r)
 	}
 }
 
@@ -746,7 +645,6 @@ func (f *storageFake) newID() string {
 	return fmt.Sprintf("00000000-0000-7000-8000-%012d", f.serial)
 }
 
-// root is acme's root node.
 func (f *storageFake) root() *fakeNode {
 	for _, n := range f.nodes {
 		if n.parent == "" {
@@ -756,9 +654,6 @@ func (f *storageFake) root() *fakeNode {
 	return nil
 }
 
-// resolve finds id, or the root alias, under org's root: only acme has one,
-// so any id under another organization is not found, as the scope check
-// answers.
 func (f *storageFake) resolve(org, id string) *fakeNode {
 	if org != fakeAcmeID {
 		return nil
@@ -769,7 +664,6 @@ func (f *storageFake) resolve(org, id string) *fakeNode {
 	return f.nodes[id]
 }
 
-// inDeleting reports whether n or a directory above it is marked.
 func (f *storageFake) inDeleting(n *fakeNode) bool {
 	for ; n != nil; n = f.nodes[n.parent] {
 		if n.status == document.DirectoryDeleting {
@@ -804,8 +698,6 @@ func (f *storageFake) fileView(n *fakeNode) document.File {
 	return document.File{ID: n.id, DirectoryID: n.parent, Name: n.name, Status: n.status, Size: &size, ContentType: n.contentType, Version: n.version}
 }
 
-// ifMatch reads the request's If-Match as the version it quotes, answering
-// 428 when it is missing and 412 when it is not want.
 func storageIfMatch(w http.ResponseWriter, r *http.Request, want int64) bool {
 	v := r.Header.Get("If-Match")
 	if v == "" {
@@ -825,7 +717,7 @@ func (f *storageFake) serveDocuments(w http.ResponseWriter, r *http.Request, seg
 	case len(seg) == 2 && seg[1] == "directories" && r.Method == http.MethodPost:
 		var body document.CreateDirectory
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			f.fail(w, r)
+			f.failUnrouted(w, r)
 			return
 		}
 		parent := f.resolve(org, body.ParentID)
@@ -864,10 +756,10 @@ func (f *storageFake) serveDocuments(w http.ResponseWriter, r *http.Request, seg
 				w.WriteHeader(http.StatusNoContent)
 			}
 		default:
-			f.fail(w, r)
+			f.failUnrouted(w, r)
 		}
 	default:
-		f.fail(w, r)
+		f.failUnrouted(w, r)
 	}
 }
 
@@ -885,14 +777,14 @@ func (f *storageFake) serveDirectory(w http.ResponseWriter, r *http.Request, n *
 		writeJSON(w, http.StatusOK, f.dirView(n))
 	case len(rest) == 0 && r.Method == http.MethodDelete:
 		if r.URL.Query().Get("recursive") != "true" {
-			f.fail(w, r)
+			f.failUnrouted(w, r)
 			return
 		}
 		if !storageIfMatch(w, r, n.version) {
 			return
 		}
 		n.status, n.version = document.DirectoryDeleting, n.version+1
-		f.deleting[n.id] = sweepReads
+		f.deleting[n.id] = deletingReadsBeforeSweep
 		w.Header().Set("Location", r.URL.Path)
 		w.WriteHeader(http.StatusAccepted)
 	case len(rest) == 1 && r.Method == http.MethodGet && (rest[0] == "directories" || rest[0] == "files"):
@@ -910,11 +802,10 @@ func (f *storageFake) serveDirectory(w http.ResponseWriter, r *http.Request, n *
 		f.nodes[file.id] = file
 		writeJSON(w, http.StatusCreated, document.Identity{ID: file.id, Version: file.version})
 	default:
-		f.fail(w, r)
+		f.failUnrouted(w, r)
 	}
 }
 
-// sweep removes the branch at id, as the service's sweep does.
 func (f *storageFake) sweep(id string) {
 	for _, c := range f.nodes {
 		if c.parent == id {
@@ -925,12 +816,10 @@ func (f *storageFake) sweep(id string) {
 	delete(f.deleting, id)
 }
 
-// list answers a child listing sorted by name, size to a page, continued
-// after the name its cursor names; a continued page carries no page number.
 func (f *storageFake) list(w http.ResponseWriter, r *http.Request, n *fakeNode, dirs bool) {
 	q := r.URL.Query()
 	if s := q.Get("sort"); s != "" && s != "name" {
-		f.fail(w, r)
+		f.failUnrouted(w, r)
 		return
 	}
 	size := input.DefaultPageSize
@@ -938,11 +827,10 @@ func (f *storageFake) list(w http.ResponseWriter, r *http.Request, n *fakeNode, 
 		size, _ = strconv.Atoi(s)
 	}
 	all := f.children(n.id, dirs)
-	// past reports whether name follows after in the order served.
-	past := func(name, after string) bool { return name > after }
+	servedAfter := func(name, after string) bool { return name > after }
 	if f.descendingWalk && dirs && q.Get("size") != "" {
 		slices.Reverse(all)
-		past = func(name, after string) bool { return name < after }
+		servedAfter = func(name, after string) bool { return name < after }
 	}
 	total := len(all)
 	rows, page := all, 1
@@ -950,7 +838,7 @@ func (f *storageFake) list(w http.ResponseWriter, r *http.Request, n *fakeNode, 
 		after := strings.TrimPrefix(c, "after:")
 		rows, page = nil, 0
 		for _, n := range all {
-			if past(n.name, after) {
+			if servedAfter(n.name, after) {
 				rows = append(rows, n)
 			}
 		}

@@ -40,7 +40,6 @@ func TestReport_OmitsAbsentMembersAndTheBlankType(t *testing.T) {
 	}
 }
 
-// errors.As finds the document through a Report, however it is wrapped.
 func TestReport_UnwrapsToTheProblem(t *testing.T) {
 	err := fmt.Errorf("context: %w", output.Report{Problem: web.Problem{Status: http.StatusConflict, Detail: "duplicate"}})
 	var p web.Problem

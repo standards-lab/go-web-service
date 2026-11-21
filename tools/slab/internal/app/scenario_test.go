@@ -17,15 +17,8 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
-// sqlateBuilt is what the sqlate scenario builds: the nodes it declares, in
-// the order it declares them, and the lifecycle config the dispatcher adds.
 var sqlateBuilt = []string{"repo", "no color", "lifecycle config"}
 
-// The sqlate scenario needs nothing running, so it runs here end to end on
-// go-cli-sdk's runner, over the repository the test runs inside: it builds
-// the nodes it declares and nothing else, narrates its four steps, and
-// shows each authored source, each registration call, and the compiled
-// statement with its placeholders.
 func TestScenario_RunsSqlate(t *testing.T) {
 	a, stdout, stderr, built := newApp(t)
 
@@ -72,13 +65,10 @@ func TestScenario_RunsSqlate(t *testing.T) {
 	if strings.Contains(out, "[5/") {
 		t.Errorf("the scenario narrates more than four steps:\n%s", out)
 	}
-	// The compiled SQL block runs from its caption to the next caption; the
-	// authored statement and the note under it name the {{ }} markers and
-	// are not checked.
-	start := strings.Index(out, "create, compiled for execution by postgres")
-	end := start + strings.Index(out[start:], "Placeholders, in position order")
-	if compiled := out[start:end]; strings.Contains(compiled, "{{") {
-		t.Errorf("a {{ marker survived into the compiled text:\n%s", compiled)
+	compiledCaption := strings.Index(out, "create, compiled for execution by postgres")
+	nextCaption := compiledCaption + strings.Index(out[compiledCaption:], "Placeholders, in position order")
+	if compiledBlock := out[compiledCaption:nextCaption]; strings.Contains(compiledBlock, "{{") {
+		t.Errorf("a {{ marker survived into the compiled block:\n%s", compiledBlock)
 	}
 	if strings.Contains(out, "\x1b[") {
 		t.Errorf("narration to a stream that is no terminal carries ANSI escapes:\n%s", out)
@@ -91,13 +81,8 @@ func TestScenario_RunsSqlate(t *testing.T) {
 	}
 }
 
-// block names one captioned block of a narration: the start of its
-// caption, and text on its last line, the first match after the caption.
 type block struct{ caption, last string }
 
-// setOff fails t unless each block appears in out, in the order given,
-// set off from the narration around it: a blank line before its caption
-// and one after its last line.
 func setOff(t *testing.T, out string, blocks []block) {
 	t.Helper()
 	at := 0
@@ -126,8 +111,6 @@ func setOff(t *testing.T, out string, blocks []block) {
 	}
 }
 
-// A --repo that is no repository fails the first step, which reads it, and
-// no later step runs.
 func TestScenario_SqlateStopsAtTheFirstStepWhenTheRepoIsNotARoot(t *testing.T) {
 	a, stdout, stderr, _ := newApp(t)
 
@@ -144,9 +127,6 @@ func TestScenario_SqlateStopsAtTheFirstStepWhenTheRepoIsNotARoot(t *testing.T) {
 	}
 }
 
-// On a terminal the blocks are colored and the headings, captions, and
-// notes are not; --no-color, SLAB_NO_COLOR, and NO_COLOR each turn the
-// blocks' color off.
 func TestScenario_ColorsTheBlocksOnATerminal(t *testing.T) {
 	on := style.New(true)
 	coloredSQL := on.SQL("RETURNING id, version")
@@ -190,8 +170,6 @@ func TestScenario_ColorsTheBlocksOnATerminal(t *testing.T) {
 	}
 }
 
-// scenario alone prints its help, which ends with the listing: each
-// scenario's name and summary, and the nodes it uses. It builds nothing.
 func TestScenario_WithNoScenarioPrintsItsHelpEndingInTheListing(t *testing.T) {
 	unreadable(t)
 	a, stdout, stderr, built := newApp(t)
@@ -217,27 +195,21 @@ func TestScenario_WithNoScenarioPrintsItsHelpEndingInTheListing(t *testing.T) {
 	if want := []string{"sqlate", "domain", "problems", "storage", "events", "sweeper"}; !slices.Equal(names, want) {
 		t.Errorf("the listing names %q, want %q:\n%s", names, want, listing)
 	}
-	// Each uses line names the need nodes first, then the settings the
-	// steps read: storage and events point at no trace, so they use no
-	// grafana up, and sweeper reads Mimir through Grafana, so it does.
-	if want := []string{
+	if needsThenSettings := []string{
 		"repo, no color",
 		"service, grafana up, repo, no color",
 		"service, grafana up, repo, no color",
 		"service, repo, no color",
 		"service, repo, no color",
 		"service, grafana up, repo, no color",
-	}; !slices.Equal(uses, want) {
-		t.Errorf("the listing's uses lines are %q, want %q:\n%s", uses, want, listing)
+	}; !slices.Equal(uses, needsThenSettings) {
+		t.Errorf("the listing's uses lines are %q, want the need nodes, then the settings: %q:\n%s", uses, needsThenSettings, listing)
 	}
 	if log := apptest.Names(built.Log()); len(log) != 0 {
 		t.Errorf("nodes built = %q, want none", log)
 	}
 }
 
-// The root's help ends with the same listing the scenario parent's help
-// ends with, word for word: both are go-cli-sdk's listing of the one
-// scenario set.
 func TestScenario_RootHelpEndsWithTheScenarioListing(t *testing.T) {
 	unreadable(t)
 	help := func(args ...string) string {
@@ -259,8 +231,6 @@ func TestScenario_RootHelpEndsWithTheScenarioListing(t *testing.T) {
 	}
 }
 
-// Every usage error of scenario exits ExitUsage with go-cli-sdk's report on
-// stderr, before anything is built.
 func TestScenario_UsageErrors(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args []string
@@ -292,11 +262,8 @@ func TestScenario_UsageErrors(t *testing.T) {
 	}
 }
 
-// stackScenarios are the scenarios that declare the service node.
 var stackScenarios = []string{"domain", "problems", "storage", "events", "sweeper"}
 
-// closedURL returns the URL of a listener that has been closed, where
-// nothing answers.
 func closedURL(t *testing.T) string {
 	t.Helper()
 	srv := httptest.NewServer(http.NotFoundHandler())
@@ -304,9 +271,6 @@ func closedURL(t *testing.T) string {
 	return srv.URL
 }
 
-// answering returns the URL of a server that answers the readiness and
-// health probes with their status from probes, keyed by path, and every
-// other request with 500, recording each path it is sent.
 func answering(t *testing.T, probes map[string]int) (string, *apptest.Recorder[string]) {
 	t.Helper()
 	sent := &apptest.Recorder[string]{}
@@ -322,9 +286,6 @@ func answering(t *testing.T, probes map[string]int) (string, *apptest.Recorder[s
 	return srv.URL, sent
 }
 
-// A scenario that declares the service node fails before its first step
-// when nothing answers at the base URL: the dispatcher reports the
-// service node's start once, naming mise run serve, and exits 1.
 func TestScenario_StopsAtStartWhenTheServiceDoesNotAnswer(t *testing.T) {
 	for _, name := range stackScenarios {
 		t.Run(name, func(t *testing.T) {
@@ -350,9 +311,6 @@ func TestScenario_StopsAtStartWhenTheServiceDoesNotAnswer(t *testing.T) {
 	}
 }
 
-// A service that answers its readiness probe with 503 is up over a
-// database or storage that is not: the run fails before its first step,
-// naming mise run db:up, and sends the service nothing past the probe.
 func TestScenario_StopsAtStartWhenTheServiceIsNotReady(t *testing.T) {
 	for _, name := range stackScenarios {
 		t.Run(name, func(t *testing.T) {
@@ -380,9 +338,6 @@ func TestScenario_StopsAtStartWhenTheServiceIsNotReady(t *testing.T) {
 	}
 }
 
-// A scenario that points at traces or reads metrics declares grafana up, so
-// it fails before its first step when Grafana does not answer, naming the
-// node and mise run otel:up, though the service is ready.
 func TestScenario_StopsAtStartWhenGrafanaIsDown(t *testing.T) {
 	for _, name := range []string{"domain", "problems", "sweeper"} {
 		t.Run(name, func(t *testing.T) {
@@ -408,9 +363,6 @@ func TestScenario_StopsAtStartWhenGrafanaIsDown(t *testing.T) {
 	}
 }
 
-// With nothing running, a scenario that declares both service and grafana
-// up reports service, naming mise run serve, and not grafana up: grafana up
-// starts after service, so the first fix the run names is the service.
 func TestScenario_StopsAtStartOnTheServiceWhenNothingIsRunning(t *testing.T) {
 	for _, name := range []string{"domain", "problems", "sweeper"} {
 		t.Run(name, func(t *testing.T) {

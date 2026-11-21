@@ -35,8 +35,6 @@ func TestEditOrganization_MarshalsUnderTheServiceFieldNames(t *testing.T) {
 	}
 }
 
-// The service requires the parent_id key to be present, so a nil parent
-// must marshal as an explicit null rather than be omitted.
 func TestTransferOrganization_AlwaysCarriesTheParentKey(t *testing.T) {
 	raw, err := json.Marshal(organization.TransferOrganization{})
 	if err != nil {

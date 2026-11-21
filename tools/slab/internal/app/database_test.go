@@ -19,22 +19,16 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
-// runDatabase runs a fresh App over "admin database" and args, with
-// --base naming srv, and returns what it did.
 func runDatabase(t *testing.T, srv *httptest.Server, args ...string) result {
 	t.Helper()
 	return runFamily(t, nil, []string{"admin", "database"}, srv, args...)
 }
 
-// runDatabaseTo is runDatabase with stdout supplied by the caller, for a
-// test that needs it to be a terminal; result.stdout is then empty.
 func runDatabaseTo(t *testing.T, stdout io.Writer, srv *httptest.Server, args ...string) result {
 	t.Helper()
 	return runFamily(t, stdout, []string{"admin", "database"}, srv, args...)
 }
 
-// A parent run with no subcommand prints its help, listing its
-// subcommands, sends nothing, and builds nothing.
 func TestDatabase_MountsTheSchemaGroupAndOneSubcommandPerEndpoint(t *testing.T) {
 	s, srv := newService(t, http.StatusOK, `{}`)
 	for args, wants := range map[string][]string{
@@ -50,8 +44,8 @@ func TestDatabase_MountsTheSchemaGroupAndOneSubcommandPerEndpoint(t *testing.T) 
 				t.Errorf("database %s help lacks %q:\n%s", args, want, r.stdout)
 			}
 		}
-		if len(r.built) != 0 {
-			t.Errorf("database %s: nodes built = %q, want none", args, r.built)
+		if len(r.builtNodes) != 0 {
+			t.Errorf("database %s: nodes built = %q, want none", args, r.builtNodes)
 		}
 	}
 	if len(s.received) != 0 {
@@ -59,7 +53,6 @@ func TestDatabase_MountsTheSchemaGroupAndOneSubcommandPerEndpoint(t *testing.T) 
 	}
 }
 
-// The admin command lists the database and storage families.
 func TestAdmin_MountsTheDatabaseAndStorageCommands(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	a := app.New(cli.Streams{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr})
@@ -77,8 +70,6 @@ func TestAdmin_MountsTheDatabaseAndStorageCommands(t *testing.T) {
 	}
 }
 
-// The seven endpoints that take no input: each sends its fixed request and
-// prints the reply.
 func TestFixedCommands_SendTheirRequestWithoutABody(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args   []string
@@ -97,7 +88,7 @@ func TestFixedCommands_SendTheirRequestWithoutABody(t *testing.T) {
 			s, srv := newService(t, http.StatusOK, `{"version":2,"dirty":false}`)
 			r := runDatabase(t, srv, tc.args...)
 			r.ok(t)
-			got := s.only(t)
+			got := s.onlyRequest(t)
 			if got.method != tc.method || got.uri != tc.uri {
 				t.Errorf("request = %s %s, want %s %s", got.method, got.uri, tc.method, tc.uri)
 			}
@@ -141,7 +132,7 @@ func TestSchemaDown_OmitsStepsWhenUnset(t *testing.T) {
 			s, srv := newService(t, http.StatusOK, `{"version":1}`)
 			r := runDatabase(t, srv, append([]string{"schema", "down"}, tc.args...)...)
 			r.ok(t)
-			got := s.only(t)
+			got := s.onlyRequest(t)
 			if got.method != http.MethodPost || got.uri != "/admin/database/schema/down" {
 				t.Errorf("request = %s %s, want POST /admin/database/schema/down", got.method, got.uri)
 			}
@@ -168,7 +159,7 @@ func TestSchemaSteps_SendsTheBodyTheFlagsBuild(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			s, srv := newService(t, http.StatusOK, `{"version":3}`)
 			runDatabase(t, srv, append([]string{"schema", "steps"}, tc.args...)...).ok(t)
-			got := s.only(t)
+			got := s.onlyRequest(t)
 			if got.method != http.MethodPost || got.uri != "/admin/database/schema/steps" {
 				t.Errorf("request = %s %s, want POST /admin/database/schema/steps", got.method, got.uri)
 			}
@@ -192,7 +183,7 @@ func TestSchemaForce_SendsTheBodyTheFlagsBuild(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			s, srv := newService(t, http.StatusOK, `{"version":7}`)
 			runDatabase(t, srv, append([]string{"schema", "force"}, tc.args...)...).ok(t)
-			got := s.only(t)
+			got := s.onlyRequest(t)
 			if got.method != http.MethodPost || got.uri != "/admin/database/schema/force" {
 				t.Errorf("request = %s %s, want POST /admin/database/schema/force", got.method, got.uri)
 			}
@@ -218,7 +209,7 @@ func TestSeed_SendsNoBodyWhenStateIsUnset(t *testing.T) {
 			s, srv := newService(t, http.StatusOK, `{"organizations":7}`)
 			r := runDatabase(t, srv, append([]string{"seed"}, tc.args...)...)
 			r.ok(t)
-			got := s.only(t)
+			got := s.onlyRequest(t)
 			if got.method != http.MethodPost || got.uri != "/admin/database/seed" {
 				t.Errorf("request = %s %s, want POST /admin/database/seed", got.method, got.uri)
 			}
@@ -248,7 +239,7 @@ func TestState_SendsTheBodyTheFlagsBuild(t *testing.T) {
 			s, srv := newService(t, http.StatusOK, `{"state":"default","seeded":{"organizations":7}}`)
 			r := runDatabase(t, srv, append([]string{"state"}, tc.args...)...)
 			r.ok(t)
-			got := s.only(t)
+			got := s.onlyRequest(t)
 			if got.method != http.MethodPost || got.uri != "/admin/database/state" {
 				t.Errorf("request = %s %s, want POST /admin/database/state", got.method, got.uri)
 			}
@@ -262,9 +253,6 @@ func TestState_SendsTheBodyTheFlagsBuild(t *testing.T) {
 	}
 }
 
-// The commands whose body is required refuse the flags path when a
-// required field flag is unset, as a usage error, before anything is built
-// or the request fires.
 func TestRequiredFieldFlags_AreRefusedWhenUnset(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args []string
@@ -318,8 +306,6 @@ func TestDatabase_RefuseAnUnknownFlag(t *testing.T) {
 	}
 }
 
-// A problem response is reported once, every member of the document on
-// its own line after the command's path, with nothing on stdout.
 func TestDatabase_ReportTheProblemAnErrorStatusCarries(t *testing.T) {
 	for name, tc := range map[string]struct {
 		status int
@@ -342,13 +328,11 @@ func TestDatabase_ReportTheProblemAnErrorStatusCarries(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, srv := newService(t, tc.status, tc.reply)
-			runDatabase(t, srv, tc.args...).failure(t, tc.want)
+			runDatabase(t, srv, tc.args...).failsWith(t, tc.want)
 		})
 	}
 }
 
-// A response that carries the wrong status and no problem document says
-// which status it wanted.
 func TestDatabase_ExpectOK(t *testing.T) {
 	_, srv := newService(t, http.StatusNoContent, "")
 	r := runDatabase(t, srv, "seed")
@@ -360,9 +344,6 @@ func TestDatabase_ExpectOK(t *testing.T) {
 	}
 }
 
-// Every database command builds the nodes it declares, no color and
-// client, the base node the client is bound to, and the lifecycle
-// configuration, and nothing else.
 func TestDatabase_BuildOnlyTheColorTheClientAndItsBase(t *testing.T) {
 	for _, args := range [][]string{
 		{"schema", "status"},
@@ -384,16 +365,13 @@ func TestDatabase_BuildOnlyTheColorTheClientAndItsBase(t *testing.T) {
 			if r.code != process.ExitFailure {
 				t.Errorf("code = %d, want the problem's %d; stderr = %q", r.code, process.ExitFailure, r.stderr)
 			}
-			if !slices.Equal(r.built, familyBuilt) {
-				t.Errorf("nodes built = %q, want %q", r.built, familyBuilt)
+			if !slices.Equal(r.builtNodes, familyBuilt) {
+				t.Errorf("nodes built = %q, want %q", r.builtNodes, familyBuilt)
 			}
 		})
 	}
 }
 
-// The client binds to the URL the base node resolves, from SLAB_BASE
-// when no --base is given: the admin endpoints share the service's base
-// URL with the domain ones.
 func TestDatabase_BindTheClientToSLABBase(t *testing.T) {
 	s, srv := newService(t, http.StatusOK, `{}`)
 	t.Setenv("SLAB_BASE", srv.URL)
@@ -402,14 +380,11 @@ func TestDatabase_BindTheClientToSLABBase(t *testing.T) {
 	if code := a.Run(context.Background(), []string{"admin", "database", "diagnostics"}); code != process.ExitOK {
 		t.Fatalf("code = %d; stderr = %q", code, stderr.String())
 	}
-	if got := s.only(t); got.uri != "/admin/database/diagnostics" {
+	if got := s.onlyRequest(t); got.uri != "/admin/database/diagnostics" {
 		t.Errorf("uri = %s", got.uri)
 	}
 }
 
-// A success is colored on a terminal unless --no-color, SLAB_NO_COLOR, or
-// NO_COLOR says otherwise. The terminal is the test's own: under go test
-// the process's stdout is never one.
 func TestDatabase_ColorTheResultOnATerminal(t *testing.T) {
 	on := style.New(true)
 	colored := on.Key(`"code"`) + ": " + on.Value(`"acme"`)
@@ -443,7 +418,6 @@ func TestDatabase_ColorTheResultOnATerminal(t *testing.T) {
 	}
 }
 
-// A stream that is no terminal is never colored, whatever the flags say.
 func TestDatabase_NeverColorAStreamThatIsNoTerminal(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	_, srv := newService(t, http.StatusOK, `{"code":"acme"}`)
@@ -454,7 +428,6 @@ func TestDatabase_NeverColorAStreamThatIsNoTerminal(t *testing.T) {
 	}
 }
 
-// A root flag may come before the admin word, or between the words.
 func TestDatabase_TakeRootFlagsAtAnyDepth(t *testing.T) {
 	for name, args := range map[string][]string{
 		"before admin":            {"--base", "%s", "admin", "database", "diagnostics"},
@@ -473,7 +446,7 @@ func TestDatabase_TakeRootFlagsAtAnyDepth(t *testing.T) {
 			if code := a.Run(context.Background(), args); code != process.ExitOK {
 				t.Fatalf("code = %d; stderr = %q", code, stderr.String())
 			}
-			if got := s.only(t); got.method != http.MethodGet || got.uri != "/admin/database/diagnostics" {
+			if got := s.onlyRequest(t); got.method != http.MethodGet || got.uri != "/admin/database/diagnostics" {
 				t.Errorf("request = %s %s, want GET /admin/database/diagnostics", got.method, got.uri)
 			}
 		})

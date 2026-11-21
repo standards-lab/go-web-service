@@ -12,9 +12,6 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 )
 
-// mimir serves canned answers for the Mimir datasource proxy's instant
-// query: answer returns the status and body for the nth query (from 0),
-// and every query's PromQL is recorded into got.
 func mimir(t *testing.T, got *[]string, answer func(n int) (int, string)) *httpx.Mimir {
 	t.Helper()
 	var n atomic.Int32
@@ -36,8 +33,6 @@ const vector = `{"status":"success","data":{"resultType":"vector","result":[
 	{"metric":{"sweep_reclaimer":"files","sweep_outcome":"drained"},"value":[1792106085.933,"13"]},
 	{"metric":{},"value":[1792106085.5,"0.5"]}]}}`
 
-// Query sends the PromQL through the proxy and decodes the vector: each
-// series' labels, its value, and its evaluation time to the millisecond.
 func TestMimirQuery_DecodesTheVector(t *testing.T) {
 	var got []string
 	c := mimir(t, &got, func(int) (int, string) { return http.StatusOK, vector })
@@ -64,8 +59,6 @@ func TestMimirQuery_DecodesTheVector(t *testing.T) {
 	}
 }
 
-// Every answer that is not a vector of numbers is an error naming the
-// query and why.
 func TestMimirQuery_RefusesWhatIsNotAVector(t *testing.T) {
 	for name, tc := range map[string]struct {
 		status int
@@ -90,7 +83,6 @@ func TestMimirQuery_RefusesWhatIsNotAVector(t *testing.T) {
 	}
 }
 
-// Await queries until the condition holds and returns those samples.
 func TestMimirAwait_ReturnsOnceTheConditionHolds(t *testing.T) {
 	var got []string
 	c := mimir(t, &got, func(n int) (int, string) {
@@ -108,8 +100,6 @@ func TestMimirAwait_ReturnsOnceTheConditionHolds(t *testing.T) {
 	}
 }
 
-// A condition that never holds ends the wait at its limit, with an error
-// that names the query and the limit.
 func TestMimirAwait_GivesUpAtTheLimit(t *testing.T) {
 	var got []string
 	c := mimir(t, &got, func(int) (int, string) { return http.StatusOK, vector })
@@ -122,8 +112,6 @@ func TestMimirAwait_GivesUpAtTheLimit(t *testing.T) {
 	}
 }
 
-// A failed query ends the wait with its error, without waiting out the
-// limit.
 func TestMimirAwait_EndsOnAFailedQuery(t *testing.T) {
 	var got []string
 	c := mimir(t, &got, func(int) (int, string) { return http.StatusBadGateway, `bad gateway` })

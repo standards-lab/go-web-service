@@ -11,37 +11,20 @@ import (
 	"github.com/standards-lab/go-core/process"
 )
 
-// mimirProxy is the Grafana route the sweeper scenario's queries reach
-// Mimir through: the datasource proxy to the provisioned Mimir datasource.
+// See tools/slab/tests.md
+
 const mimirProxy = "/api/datasources/proxy/uid/mimir/api/v1/query"
 
-// passes is a fake export's sweep_passes_total: a key naming a reclaimer
-// alone counts its drained passes, and "reclaimer/outcome" another
-// outcome's. The scenario reads an outcome with no key as 0, as Mimir
-// holds no series for an outcome that never happened.
 type passes map[string]int
 
-// sweeperFake stands in for the service and for Grafana with Mimir behind
-// its datasource proxy, on one listener, for the sweeper scenario. The
-// service is an eventsFake, so the branch's create, upload, and recursive
-// delete are answered as the service answers them and its sweep runs after
-// sweepReads reads of the marked directory. Mimir holds one export when
-// the run starts, before; the first query after the fake's sweep has run
-// publishes a second, after, sampled then, as the service's next export
-// would carry the nudged pass. Each query's PromQL is recorded, and a
-// query the fake does not recognize fails the test through err.
 type sweeperFake struct {
 	*eventsFake
-	before, after passes
-	exports       []fakeExport
-	queries       []string
-	// backlog is sweep_backlogged_ratio by reclaimer; a reclaimer it does
-	// not name reports 0.
-	backlog map[string]int
+	before, after      passes
+	exports            []fakeExport
+	queries            []string
+	backlogByReclaimer map[string]int
 }
 
-// fakeExport is one export as Mimir holds it: when it was sampled and the
-// counts it carried.
 type fakeExport struct {
 	at     time.Time
 	counts passes
@@ -67,26 +50,18 @@ func (f *sweeperFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// swept reports whether the scenario's recursive delete was answered and
-// its sweep has run: the fake recorded the delete's event and holds no
-// marked directory.
 func (f *sweeperFake) swept() bool {
 	return slices.Contains(f.emitted, "web-service.document.directory.deleted") && len(f.deleting) == 0
 }
 
-// query answers one instant query from the latest export, in the
-// Prometheus API's vector shape, publishing the after export first once
-// the sweep has run.
 func (f *sweeperFake) query(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	q := r.URL.Query().Get("query")
 	f.queries = append(f.queries, q)
 	if f.swept() && len(f.exports) == 1 {
-		// Sampled a second after now: the wire carries milliseconds, and
-		// the scenario waits for a sample strictly after its sweep, which
-		// a sample at now could truncate to before.
-		f.exports = append(f.exports, fakeExport{at: time.Now().Add(time.Second), counts: f.after})
+		sampledStrictlyAfterTheSweep := time.Now().Add(time.Second)
+		f.exports = append(f.exports, fakeExport{at: sampledStrictlyAfterTheSweep, counts: f.after})
 	}
 	latest := f.exports[len(f.exports)-1]
 	type entry struct {
@@ -105,7 +80,7 @@ func (f *sweeperFake) query(w http.ResponseWriter, r *http.Request) {
 		result = append(result, sample(map[string]string{}, float64(latest.at.UnixMilli())/1000))
 	case strings.Contains(q, "sweep_backlogged_ratio"):
 		for _, rec := range []string{"files", "outbox", "inbox"} {
-			result = append(result, sample(map[string]string{"sweep_reclaimer": rec}, float64(f.backlog[rec])))
+			result = append(result, sample(map[string]string{"sweep_reclaimer": rec}, float64(f.backlogByReclaimer[rec])))
 		}
 	case strings.Contains(q, "sweep_passes_total"):
 		for key, n := range latest.counts {
@@ -124,15 +99,11 @@ func (f *sweeperFake) query(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// runSweeperScenario runs the sweeper scenario against fake, serving as
-// both the service and Grafana, and returns the run.
 func runSweeperScenario(t *testing.T, fake *sweeperFake) scenarioRun {
 	t.Helper()
 	return runOrgScenario(t, "sweeper", fake, func() error { return fake.err })
 }
 
-// runSweeperOK is runSweeperScenario expecting the run to succeed, and
-// returns its narration.
 func runSweeperOK(t *testing.T, fake *sweeperFake) string {
 	t.Helper()
 	r := runSweeperScenario(t, fake)
@@ -145,13 +116,10 @@ func runSweeperOK(t *testing.T, fake *sweeperFake) string {
 	return r.stdout
 }
 
-// joined returns out with its wrapped lines joined, so a test matches a
-// sentence wherever the reporter wrapped it.
 func joined(out string) string {
 	return strings.Join(strings.Fields(out), " ")
 }
 
-// sweeperSteps are the sweeper scenario's headings, in order.
 var sweeperSteps = []string{
 	"[1/6] Pass Counts",
 	"[2/6] Branch Creation",
@@ -161,22 +129,16 @@ var sweeperSteps = []string{
 	"[6/6] Grafana View",
 }
 
-// The scenario runs its six steps in order, against a window where files
-// ran one pass more than the interval gave outbox and inbox.
 func TestScenario_SweeperRunsSixStepsInOrder(t *testing.T) {
 	fake := newSweeperFake(passes{"files": 5, "outbox": 5, "inbox": 5}, passes{"files": 7, "outbox": 6, "inbox": 6})
 	inOrder(t, runSweeperOK(t, fake), sweeperSteps)
 }
 
-// The first step shows the sweep block as config.local.json merges over
-// config.json, each value naming its file, and the counts of the export
-// it read, one row per reclaimer in the sweeper's order: each outcome under
-// its own column, and the backlog gauge.
 func TestScenario_SweeperShowsTheSweepBlockAndTheCounts(t *testing.T) {
 	fake := newSweeperFake(
 		passes{"files": 5, "outbox": 4, "outbox/more": 2, "inbox": 3, "inbox/error": 1},
 		passes{"files": 6, "outbox": 4, "outbox/more": 2, "inbox": 3, "inbox/error": 1})
-	fake.backlog = map[string]int{"outbox": 1}
+	fake.backlogByReclaimer = map[string]int{"outbox": 1}
 	first := step(t, runSweeperOK(t, fake), sweeperSteps[0])
 	for _, want := range []string{
 		"interval    30s    (config.json)",
@@ -192,11 +154,6 @@ func TestScenario_SweeperShowsTheSweepBlockAndTheCounts(t *testing.T) {
 	}
 }
 
-// The export after the sweep shows each reclaimer's passes in the window,
-// and the narration says what the movement shows as it fell: files' extra
-// pass over the interval's is the nudge's; outbox and inbox moving at all
-// is their interval; and when files ran no more than they did, the counts
-// do not single the nudged pass out.
 func TestScenario_SweeperNarratesTheWindowAsItFell(t *testing.T) {
 	for name, tc := range map[string]struct {
 		after passes
@@ -236,9 +193,6 @@ func TestScenario_SweeperNarratesTheWindowAsItFell(t *testing.T) {
 	}
 }
 
-// An export after the sweep that counts files no higher than before is
-// missing the nudged pass: the run fails at Next Export, naming it, and
-// goes no further.
 func TestScenario_SweeperFailsWhenTheNudgedPassIsMissing(t *testing.T) {
 	fake := newSweeperFake(passes{"files": 5, "outbox": 5, "inbox": 5}, passes{"files": 5, "outbox": 6, "inbox": 6})
 	r := runSweeperScenario(t, fake)
@@ -256,10 +210,6 @@ func TestScenario_SweeperFailsWhenTheNudgedPassIsMissing(t *testing.T) {
 	}
 }
 
-// The branch the run creates is named for the run and removed by its
-// recursive delete, waited out, so the run leaves no document but the
-// root its first write created, and a second run against the same fake
-// succeeds too.
 func TestScenario_SweeperLeavesNothingAndRunsTwice(t *testing.T) {
 	fake := newSweeperFake(passes{"files": 5, "outbox": 5, "inbox": 5}, passes{"files": 6, "outbox": 5, "inbox": 5})
 	out := runSweeperOK(t, fake)
@@ -277,9 +227,6 @@ func TestScenario_SweeperLeavesNothingAndRunsTwice(t *testing.T) {
 	runSweeperOK(t, second)
 }
 
-// The retention step names the local ages config.local.json sets against
-// config.json's week and shows the outbox's passes as of the last export,
-// claiming no row counts.
 func TestScenario_SweeperNarratesTheOutboxRetention(t *testing.T) {
 	fake := newSweeperFake(passes{"files": 5, "outbox": 5, "inbox": 5}, passes{"files": 6, "outbox": 6, "inbox": 5})
 	fifth := step(t, runSweeperOK(t, fake), sweeperSteps[4])
@@ -294,10 +241,6 @@ func TestScenario_SweeperNarratesTheOutboxRetention(t *testing.T) {
 	}
 }
 
-// The closing step points at Grafana's Explore, the Mimir datasource, and
-// the PromQL that sums the passes by reclaimer and outcome; every query
-// the run sent went through Grafana's proxy to Mimir and selected the
-// service's job.
 func TestScenario_SweeperPointsAtTheGrafanaQuery(t *testing.T) {
 	fake := newSweeperFake(passes{"files": 5, "outbox": 5, "inbox": 5}, passes{"files": 6, "outbox": 5, "inbox": 5})
 	last := step(t, runSweeperOK(t, fake), sweeperSteps[5])

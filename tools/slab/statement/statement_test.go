@@ -12,7 +12,6 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/statement"
 )
 
-// compiled builds a two-statement set over an in-memory directory.
 func compiled(t *testing.T) *query.Statements {
 	t.Helper()
 	fsys := fstest.MapFS{

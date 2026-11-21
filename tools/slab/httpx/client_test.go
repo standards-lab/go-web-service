@@ -14,7 +14,6 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/httpx"
 )
 
-// echo answers every request with a JSON record of what it received.
 type echo struct {
 	Method      string `json:"method"`
 	Path        string `json:"path"`
@@ -43,8 +42,8 @@ func echoServer(t *testing.T) *httptest.Server {
 
 func TestClientDo(t *testing.T) {
 	srv := echoServer(t)
-	// A trailing slash on the base must not double up against the path.
-	c := httpx.NewClient(srv.URL + "/")
+	baseWithTrailingSlash := srv.URL + "/"
+	c := httpx.NewClient(baseWithTrailingSlash)
 	ctx := context.Background()
 
 	type payload struct {

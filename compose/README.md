@@ -47,8 +47,7 @@ runtime publishes through (see [Stack](../docs/stack.md)). Like Postgres it carr
 monitoring endpoint stays inside the container, where the health check waits for JetStream itself
 (`/healthz?js-enabled-only=true`), not merely the listener, because the service's broker, started
 any earlier, would fail to provision its stream. The probe uses the image's busybox `wget`. The
-service owns its stream,
-`WEB_SERVICE`, and creates it on start. Data persists in the `go-web-service-nats` volume.
+service owns its stream, `WEB_SERVICE`, and creates it on start. Data persists in the `go-web-service-nats` volume.
 
 ## The observability profile
 

@@ -200,10 +200,10 @@ time.
 `dashboards/observability-stack.json` is the first dashboard, provisioned read-only
 (`allowUiUpdates: false` in `dashboards/dashboards.yaml`, so the file stays the source of truth).
 Its Collector and Pipelines rows read the collector's own self-telemetry; its Backends row queries
-the service's own logs and traces. Grafana reads the provider file once at startup but re-reads
-the JSON files it points at every `updateIntervalSeconds` (30), so an edited dashboard takes
-effect without a restart. The provider's path is the provisioned `dashboards/` directory, which also holds the
-provider file; Grafana treats only `*.json` there as dashboards, so the provider file is not
+the service's own logs and traces. Grafana reads the provider file once at startup but re-reads the
+JSON files it points at every `updateIntervalSeconds` (30), so an edited dashboard takes effect
+without a restart. The provider's path is the provisioned `dashboards/` directory, which also holds
+the provider file; Grafana treats only `*.json` there as dashboards, so the provider file is not
 mistaken for one.
 
 ### Ports

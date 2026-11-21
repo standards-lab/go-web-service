@@ -47,6 +47,7 @@ services to leave the `db:` group alone. Neither half of the `stack:` tasks depe
 so mise runs each pair in parallel.
 
 `mise run slab -- scenario storage` narrates the storage end to end against the running service: the
-`blobfs` and `app` migration sets, the seeded logos and document tree, the validators and
-refusals, and a recursive delete waited out through the sweep. `mise run slab -- scenario events` runs a
-command for every event type, for `events watch` ([Adding an event](messaging.md#adding-an-event)) to print.
+`blobfs` and `app` migration sets, the seeded logos and document tree, the validators and refusals,
+and a recursive delete waited out through the sweep. `mise run slab -- scenario events` runs a
+command for every event type, for `events watch` ([Adding an event](messaging.md#adding-an-event))
+to print.

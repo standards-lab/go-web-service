@@ -54,8 +54,6 @@ func (r Report) Unwrap() error {
 	return r.Problem
 }
 
-// member renders an extension member's value: a string as is, anything
-// else as compact JSON, which is how the document carried it.
 func member(v any) string {
 	if s, ok := v.(string); ok {
 		return s

@@ -24,5 +24,12 @@
 // through httpx; it is the only file here that imports httpx. commands.go
 // builds the database command, its schema subcommand, and the twelve leaf
 // subcommands over a Client, each resolving its input from field flags or a
-// verbatim --body and rendering what came back through output.
+// verbatim --body and rendering what came back through output. A leaf
+// refuses an input the service would refuse, so the request is not sent:
+// an unset --set, --steps on steps, or --version on force, where 0 is a
+// meaningful version (an empty history), and an unset --state on state.
+// What the service decides stays the service's: down omits an unset
+// --steps and leaves the default to it, seed sends no body without
+// --state so it applies its configured set, and state sends --confirm as
+// given, the refusal of an unconfirmed reset being the service's to state.
 package database

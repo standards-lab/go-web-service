@@ -10,13 +10,11 @@ import (
 	"time"
 )
 
-// mimirQueryRoute is Grafana's datasource proxy to the Mimir datasource
-// compose/grafana provisions (uid mimir), which forwards to Mimir's
-// Prometheus API prefix, and the instant query under it.
 const mimirQueryRoute = "/api/datasources/proxy/uid/mimir/api/v1/query"
 
 // Mimir sends instant queries to Mimir, the observability profile's
-// metrics store, through Grafana's datasource proxy, so a reader of
+// metrics store, through Grafana's datasource proxy to the Mimir
+// datasource compose/grafana provisions (uid mimir), so a reader of
 // metrics needs only the Grafana it already probes, and no second base
 // URL.
 type Mimir struct {
@@ -57,8 +55,6 @@ func (m *Mimir) Query(ctx context.Context, promql string) ([]Sample, error) {
 	return samples, nil
 }
 
-// vectorResponse is the Prometheus API's envelope around an instant
-// query's result, with each entry's value left as its JSON pair.
 type vectorResponse struct {
 	Status string `json:"status"`
 	Error  string `json:"error"`
@@ -71,9 +67,6 @@ type vectorResponse struct {
 	} `json:"data"`
 }
 
-// decodeVector decodes an instant query's response: a success whose result
-// is a vector, each entry's value a pair of the evaluation time in
-// fractional Unix seconds and the value as a string.
 func decodeVector(body []byte) ([]Sample, error) {
 	var r vectorResponse
 	if err := json.Unmarshal(body, &r); err != nil {

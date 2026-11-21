@@ -11,7 +11,9 @@ import (
 
 // Terminal is one end of a pseudo-terminal pair: the slave, which the test
 // hands to the code under test as its stdout, and the master, which reads
-// back what was written to it.
+// back what was written to it. The pair buffers only a few kilobytes
+// between the ends, so the master is drained as the code under test
+// writes, not after.
 type Terminal struct {
 	master, slave *os.File
 	read          chan string
@@ -41,8 +43,6 @@ func Open(t *testing.T) *Terminal {
 		t.Skipf("termtest: opening the pseudo-terminal's slave end: %v", err)
 	}
 	term := &Terminal{master: master, slave: slave, read: make(chan string, 1)}
-	// The pair buffers only a few kilobytes between the ends, so the master
-	// is drained as the code under test writes, not after.
 	go func() {
 		b, _ := io.ReadAll(master)
 		term.read <- string(b)

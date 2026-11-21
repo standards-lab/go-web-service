@@ -13,15 +13,9 @@ func main() {
 	os.Exit(run())
 }
 
-// run runs app and returns its exit code. It is separate from main so the
-// deferred stop releases the signal registration before os.Exit, which
-// skips deferred calls.
 func run() int {
 	ctx, stop := process.SignalContext()
 	defer stop()
-	// The first signal cancels the context; stop then restores the default
-	// handlers so a second signal terminates the process even if a scenario
-	// ignores the cancellation.
 	go func() {
 		<-ctx.Done()
 		stop()

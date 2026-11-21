@@ -12,7 +12,12 @@ import (
 // literals unchanged. It walks the text with encoding/json's tokenizer, so
 // it never has to lex JSON itself. Text that fails to tokenize anywhere,
 // or ends inside an open object or array, is returned unchanged with no
-// color at all, never colored up to the break.
+// color at all, never colored up to the break; the tokenizer reports a
+// document cut off between tokens as a plain end of input, so an end with
+// a container still open counts as broken too. Between tokens it copies
+// the whitespace and punctuation as indented, and each token's literal
+// comes from the text, so escapes print exactly as the document carried
+// them.
 func (s Style) JSON(text string) string {
 	if !s.on {
 		return text
@@ -21,31 +26,22 @@ func (s Style) JSON(text string) string {
 	dec.UseNumber()
 	var b strings.Builder
 	b.Grow(len(text) + len(text)/4)
-	// stack records, per open container, whether the next scalar is an
-	// object key (objects alternate key, value; arrays hold only values).
 	type frame struct {
 		object  bool
 		wantKey bool
 	}
 	var stack []frame
-	pos := 0 // bytes of text copied so far
+	copied := 0
 	for {
 		tok, err := dec.Token()
-		// The tokenizer reports a document cut off between tokens as a
-		// plain io.EOF, so an end of input with a container still open
-		// counts as broken too.
 		if errors.Is(err, io.EOF) && len(stack) == 0 {
 			break
 		}
 		if err != nil {
 			return text
 		}
-		// Everything between the last token's end and this token's start
-		// is whitespace and punctuation Indent put there; copy it as is
-		// and take the token's literal from the source text, so escapes
-		// print exactly as the body carried them.
 		end := int(dec.InputOffset())
-		startTok := pos
+		startTok := copied
 		for startTok < end && strings.IndexByte(" \t\r\n:,", text[startTok]) >= 0 {
 			startTok++
 		}
@@ -53,8 +49,8 @@ func (s Style) JSON(text string) string {
 			return text
 		}
 		lit := text[startTok:end]
-		b.WriteString(text[pos:startTok])
-		pos = end
+		b.WriteString(text[copied:startTok])
+		copied = end
 
 		top := len(stack) - 1
 		isKey := top >= 0 && stack[top].object && stack[top].wantKey
@@ -90,6 +86,6 @@ func (s Style) JSON(text string) string {
 			stack[top].wantKey = !stack[top].wantKey
 		}
 	}
-	b.WriteString(text[pos:])
+	b.WriteString(text[copied:])
 	return b.String()
 }

@@ -26,66 +26,41 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/style"
 )
 
-// The organizations the storage scenario addresses by path: acme, whose
-// logo it replaces and whose seeded document tree it reads, and finance,
-// the other organization its isolation step asks for acme's ids.
 const (
 	storageOrgPath = "/acme"
 	otherOrgPath   = "/acme/finance"
 )
 
-// The seeded entries the steps target, by their path under acme's document
-// root; their ids come from the seed file, never from a listing.
 const (
 	guardedFilePath = "/README.txt"
 	takenDirPath    = "/engineering"
 )
 
-// replacementFixture is the seeded fixture the logo step uploads in place
-// of acme's own: another organization's logo, a PNG that passes the
-// upload's sniffed-type rule, under fixturesDir.
 const replacementFixture = "engineering.png"
 
-// cursorPageSize is the page size the cursor walk asks for: one, so acme's
-// three seeded top-level directories take three pages and two cursors.
 const cursorPageSize = 1
 
-// detailNameTaken is the curated detail of a taken name's 409:
-// data.DetailNameTaken, restated because slab does not import the service.
 const detailNameTaken = "an entry with that name already exists"
 
-// schemaRoute and seedRoute are the database admin service's schema status
-// and additive seed, inside the /admin mount, the routes database.Client's
-// Status and Seed send to; the steps build their requests beside their
-// narration, as reset does.
 const (
 	schemaRoute = database.Database + "/schema"
 	seedRoute   = database.Database + "/seed"
 )
 
-// declaredSets are the sets the schema step expects the service to
-// declare: blobfs's own set and the application's own.
 var declaredSets = []string{"blobfs", "app"}
 
-// seedFile is the part of data/seeds/<state>.json the scenario reads: the
-// organizations and logos only counted, and the document trees whole, for
-// the fixed ids the steps target and the counts the reset reports.
 type seedFile struct {
 	Organizations []json.RawMessage `json:"organizations"`
 	Logos         []json.RawMessage `json:"logos"`
 	Documents     []seedTree        `json:"documents"`
 }
 
-// seedTree is one organization's seeded document hierarchy: the
-// organization's path, its root's fixed id, and the entries under it.
 type seedTree struct {
 	Organization string      `json:"organization"`
 	Root         string      `json:"root"`
 	Entries      []seedEntry `json:"entries"`
 }
 
-// seedEntry is a seeded directory or file: a file names its content type,
-// and a directory names none and may hold entries of its own.
 type seedEntry struct {
 	ID          string      `json:"id"`
 	Name        string      `json:"name"`
@@ -93,17 +68,12 @@ type seedEntry struct {
 	Entries     []seedEntry `json:"entries"`
 }
 
-// seeded is the counts the seeder reports for a state: the admin seed's
-// response, and the seeded member of the state reset's.
 type seeded struct {
 	Documents     int `json:"documents"`
 	Logos         int `json:"logos"`
 	Organizations int `json:"organizations"`
 }
 
-// seedCounts is what a reset to the seed file's state reports seeding:
-// every organization, every logo, and every document entry, directories
-// and files, the roots not counted.
 func (s seedFile) seedCounts() seeded {
 	n := 0
 	var count func([]seedEntry)
@@ -119,7 +89,6 @@ func (s seedFile) seedCounts() seeded {
 	return seeded{Documents: n, Logos: len(s.Logos), Organizations: len(s.Organizations)}
 }
 
-// tree returns the seeded tree of the organization at orgPath.
 func (s seedFile) tree(orgPath string) (seedTree, error) {
 	for _, t := range s.Documents {
 		if t.Organization == orgPath {
@@ -129,8 +98,6 @@ func (s seedFile) tree(orgPath string) (seedTree, error) {
 	return seedTree{}, fmt.Errorf("the seed has no document tree for %s", orgPath)
 }
 
-// paths returns every entry of t by its path under the root, a directory's
-// with a trailing slash, mapped to its fixed id.
 func (t seedTree) paths() map[string]string {
 	out := make(map[string]string)
 	var walk func(prefix string, entries []seedEntry)
@@ -149,8 +116,6 @@ func (t seedTree) paths() map[string]string {
 	return out
 }
 
-// loadSeed reads and decodes data/seeds/<seedState>.json from the
-// repository the repo override locates.
 func loadSeed(override string) (seedFile, error) {
 	fsys, err := repo.FS(override)
 	if err != nil {
@@ -168,12 +133,6 @@ func loadSeed(override string) (seedFile, error) {
 	return s, nil
 }
 
-// storage is what the storage scenario's steps hand forward: the client,
-// the seed file and acme's seeded paths, the two organizations, the logo's
-// validator, the guarded file as last read, and the branch the recursive
-// delete removes, with the Location its 202 named. Each is replaced by the
-// step that reads it first, the client by the first step, so nothing a
-// run reads is left from a run before it.
 type storage struct {
 	n        Nodes
 	client   *httpx.Client
@@ -398,8 +357,6 @@ func (s *storage) deleteLogo(ctx context.Context, inv *cli.Invocation, r *scenar
 	return err
 }
 
-// getLogo sends a narrated GET of acme's logo, its response shown
-// summarized: the logo's bytes are a PNG, which would print as noise.
 func (s *storage) getLogo(ctx context.Context, r *scenario.Reporter, st style.Style) (*httpx.Response, error) {
 	if err := showApart(r, "", output.Request(st, http.MethodGet, logoRoute(s.acme.ID), nil, nil)); err != nil {
 		return nil, err
@@ -469,7 +426,6 @@ func (s *storage) documentTree(ctx context.Context, inv *cli.Invocation, r *scen
 	return nil
 }
 
-// get sends a narrated GET of p, expects 200, and decodes the body into v.
 func (s *storage) get(ctx context.Context, r *scenario.Reporter, st style.Style, p string, v any) error {
 	res, err := call(ctx, r, st, s.client, http.MethodGet, p, nil, nil)
 	if err != nil {
@@ -481,8 +437,6 @@ func (s *storage) get(ctx context.Context, r *scenario.Reporter, st style.Style,
 	return res.JSON(v)
 }
 
-// getQuiet is get without the narration, for the reads a step makes to
-// build what it prints rather than to show.
 func (s *storage) getQuiet(ctx context.Context, p string, v any) error {
 	res, err := s.client.Get(ctx, p)
 	if err != nil {
@@ -542,9 +496,6 @@ func (s *storage) cursorWalk(ctx context.Context, inv *cli.Invocation, r *scenar
 	return nil
 }
 
-// inOrder reports whether want appears within got in the same relative
-// order: a sorted walk visits the seeded names in their order, with any
-// other entry wherever its name falls.
 func inOrder(got, want []string) bool {
 	i := 0
 	for _, g := range got {
@@ -555,7 +506,6 @@ func inOrder(got, want []string) bool {
 	return i == len(want)
 }
 
-// seededID returns the fixed id of acme's seeded entry at p.
 func (s *storage) seededID(p string) (string, error) {
 	id, ok := s.paths[p]
 	if !ok {
@@ -766,9 +716,6 @@ func (s *storage) reset(ctx context.Context, inv *cli.Invocation, r *scenario.Re
 	return nil
 }
 
-// summarized returns res with a body that is not JSON replaced by a line
-// naming its length and type, for a download whose bytes would print as
-// noise; a JSON body, a problem document among them, is left as it is.
 func summarized(res *httpx.Response) *httpx.Response {
 	if len(res.Body) == 0 || json.Valid(res.Body) {
 		return res

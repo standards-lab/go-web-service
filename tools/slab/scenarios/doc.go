@@ -63,4 +63,47 @@
 // --wait. A step's method name is its Intent in lowerCamel, with articles and
 // prepositions dropped and a nominalized title turned back into its verb
 // ("Catalog registration" becomes registerCatalog).
+//
+// A scenario's steps hand forward what they read in one value, each part
+// replaced by the step that reads it first, the client by the first step,
+// so nothing a run reads is left from a run before it. A read a step makes
+// for bookkeeping, such as the ids and versions a later command guards on,
+// is not narrated. The domain and problems scenarios start by resetting to
+// the seeded state, so a fixed code or version is safe to target: the
+// domain scenario writes no row twice, so each If-Match carries the version
+// where its row was last seen, and no problems condition writes a row at
+// all.
+//
+// A need node's probe that the run context ended during, by a signal or by
+// another need's failed start in the same layer, returns the context's
+// error, which the lifecycle drops once a failure is on record, so the
+// cancelled probe adds no second report naming a task that would fix
+// nothing.
+//
+// Some values are restated from the service, which slab does not import:
+// the service.name it exports (internal/app/telemetry.go and
+// compose/otel-collector/otel-collector.yaml state it too), the curated
+// detail of a taken name's 409 (data.DetailNameTaken), the sweeper's
+// reclaimers and outcomes (internal/app's reactors.go and telemetry.go),
+// and the command body limit (domain/organization/handler.go), a fixture
+// value for the problems scenario rather than a restated contract. Its
+// absent id is the one integration/organization_test.go uses: valid UUID
+// syntax, never minted.
+//
+// A wait for the sweep is bounded at 45 seconds: the delete nudges the
+// sweep, so a small branch is gone well inside it, and the sweep's own
+// 30-second interval is the fallback the bound leaves room for. The sweeper
+// scenario waits for an export up to two of the service's metric export
+// intervals, the OpenTelemetry SDK's 60-second default, which the service,
+// the collector, and the configuration leave unset, so the export in
+// flight and the next both fit, plus half a minute for the collector's
+// batch and Mimir's ingest. It
+// reads the sweep block as config.local.json merges over config.json
+// (mise run serve runs with APP_ENV=local), without the APP_SWEEP_*
+// overrides of the service's environment, which slab cannot see. Its
+// narration claims no more than the counts show: go-database's
+// sweep.Sweeper runs every reclaimer that is due at each delivery, a tick
+// or a nudge, counting one due once its interval less half a tick has
+// passed (Sweeper.due), so when files ran no more passes than either of the
+// others the counts cannot tell the nudged pass from a tick.
 package scenarios

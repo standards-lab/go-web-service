@@ -11,10 +11,6 @@ import (
 	"time"
 )
 
-// timeout bounds every request a Client sends, whatever context it is given:
-// a scenario that hangs on one call should fail with a reason rather than
-// sit until the user interrupts it. A caller with a shorter bound passes it
-// through the context.
 const timeout = 30 * time.Second
 
 // Client issues requests against one service through the same HTTP surface
@@ -30,7 +26,11 @@ type Client struct {
 // one connection per host, for the reason webtest.NewClient gives: the
 // default transport can dial a second connection while an idle one is being
 // returned and leave it unused, and the server's graceful shutdown waits for
-// a connection that never sent a request.
+// a connection that never sent a request. Every request it sends is
+// bounded at 30 seconds, whatever context it is given, so a scenario that
+// hangs on one call fails with a reason rather than sitting until the user
+// interrupts it; a caller with a shorter bound passes it through the
+// context.
 func NewClient(base string) *Client {
 	return &Client{base: strings.TrimRight(base, "/"), http: newHTTPClient(timeout)}
 }

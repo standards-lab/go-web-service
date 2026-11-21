@@ -19,9 +19,6 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/statement"
 )
 
-// The sources the sqlate scenario reads, relative to the repository root,
-// are one pattern in the application's namespace and the one statement
-// that includes it.
 const (
 	appNamespace  = "app"
 	patternsDir   = "data/patterns"
@@ -30,11 +27,6 @@ const (
 	statementName = "create"
 )
 
-// sqlate is what the sqlate scenario's steps hand forward: each step fills
-// what a later one reads. The scenario is built once, over one sqlate, and
-// a run's first step replaces the filesystem and the third the statements
-// before any later step reads them, so nothing a run reads is left from a
-// run before it.
 type sqlate struct {
 	n     Nodes
 	fsys  fs.FS

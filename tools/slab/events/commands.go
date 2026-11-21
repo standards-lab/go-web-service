@@ -12,8 +12,6 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/output"
 )
 
-// commandPath prefixes every line the watch writes to stderr, as the
-// dispatcher prefixes the report of a command's failure.
 const commandPath = "slab events watch"
 
 // Commands builds the events command, on go-cli-sdk, with its one leaf,
@@ -54,8 +52,6 @@ func Commands(broker *graph.Node[*Broker], out output.Source) []*cli.Command {
 	return []*cli.Command{events}
 }
 
-// announce writes the line a watch starts with, naming what it watches, on
-// w, the invocation's stderr, so stdout carries the events alone.
 func announce(w io.Writer, b *Broker, fromStart bool) {
 	from := "events published from now on"
 	if fromStart {

@@ -2,8 +2,6 @@ package style
 
 import "strings"
 
-// sqlKeywords is the hand-maintained list SQL bolds. Match is exact: the
-// repository's statements write keywords in upper case.
 var sqlKeywords = map[string]bool{
 	"SELECT": true, "FROM": true, "WHERE": true, "INSERT": true, "UPDATE": true,
 	"DELETE": true, "SET": true, "JOIN": true, "ON": true, "AND": true, "OR": true,
@@ -25,7 +23,10 @@ const (
 // line as a trailing comment; and in the code between, each whole-word
 // keyword is bold. Words are maximal runs of letters, digits, and
 // underscores. A -- inside a string literal is taken for a comment too:
-// the repository's statements bind values rather than quoting them.
+// the repository's statements bind values rather than quoting them. An
+// unclosed {{ is no marker and reads as code. The keywords are a fixed,
+// hand-maintained list matched exactly, in upper case, as the repository's
+// statements write them.
 func (s Style) SQL(text string) string {
 	if !s.on {
 		return text
@@ -41,7 +42,6 @@ func (s Style) SQL(text string) string {
 	return b.String()
 }
 
-// sqlLine writes one line of SQL's coloring to b.
 func (s Style) sqlLine(b *strings.Builder, line string) {
 	if strings.HasPrefix(strings.TrimLeft(line, " \t"), sqlComment) {
 		b.WriteString(s.Dim(line))
@@ -53,7 +53,6 @@ func (s Style) sqlLine(b *strings.Builder, line string) {
 		if open >= 0 {
 			end = strings.Index(line[open:], sqlMarkerClose)
 		}
-		// An unclosed {{ is no marker: it reads as code.
 		if open < 0 || end < 0 || (comment >= 0 && comment < open) {
 			if comment < 0 {
 				s.sqlCode(b, line)
@@ -70,8 +69,6 @@ func (s Style) sqlLine(b *strings.Builder, line string) {
 	}
 }
 
-// sqlCode writes code, which holds no comment or marker, to b with each
-// whole-word keyword bold.
 func (s Style) sqlCode(b *strings.Builder, code string) {
 	start := -1
 	flush := func(end int) {

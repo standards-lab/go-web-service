@@ -8,14 +8,8 @@ import (
 	"time"
 )
 
-// probe is the client Probe sends with: a short timeout, so a service that
-// has bound its port but not yet served answers false on this poll and
-// true on a later one, and its own connection, so a probe never holds a
-// scenario client's one connection.
 var probe = newHTTPClient(time.Second)
 
-// grafanaHealthPath is Grafana's health endpoint, which answers 200 once
-// Grafana serves.
 const grafanaHealthPath = "/api/health"
 
 // StatusError is a probe's answer when the endpoint answered with a status
@@ -34,7 +28,10 @@ func (e *StatusError) Error() string {
 // Probe returns nil when base answers GET path with 200, and otherwise the
 // reason it did not: a [*StatusError] naming the status it answered
 // instead, or the transport's error when nothing answered. It sends one
-// request with a one-second timeout and discards the body.
+// request with a one-second timeout and discards the body, so a service
+// that has bound its port but not yet served fails this probe and passes a
+// later one. A probe sends over its own connection, never holding a
+// scenario client's one connection.
 func Probe(ctx context.Context, base, path string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+path, nil)
 	if err != nil {

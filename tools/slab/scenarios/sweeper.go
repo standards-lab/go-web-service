@@ -22,22 +22,11 @@ import (
 	"github.com/standards-lab/go-web-service/tools/slab/repo"
 )
 
-// The sweeper's reclaimers in the order it registers and runs them, and
-// the sweep.outcome values of its pass counter, restated from the service's
-// internal/app (reactors.go and telemetry.go), which slab does not import.
 var (
 	reclaimers = []string{"files", "outbox", "inbox"}
 	outcomes   = []string{"drained", "more", "error"}
 )
 
-// The PromQL the scenario reads the sweeper's metrics with, as the
-// collector writes them to Mimir: sweep.passes is the counter
-// sweep_passes_total, by sweep_reclaimer and sweep_outcome, and
-// sweep.backlogged the gauge sweep_backlogged_ratio, by sweep_reclaimer,
-// both under the service's job. passesQuery is also the query the closing
-// step points Grafana's Explore at; exportedQuery is the time the files
-// series' latest sample was written, which is the time of the export that
-// carried it.
 const (
 	jobMatcher    = `job="` + serviceName + `"`
 	passesQuery   = `sum by (sweep_reclaimer, sweep_outcome) (sweep_passes_total{` + jobMatcher + `})`
@@ -45,42 +34,24 @@ const (
 	exportedQuery = `max(timestamp(sweep_passes_total{` + jobMatcher + `,sweep_reclaimer="files"}))`
 )
 
-// mimirName is the Mimir datasource's name in Grafana, which the closing
-// step tells the reader to pick, and sweeperOrgPath the organization the
-// run's branch is created under.
 const (
 	mimirName      = "Mimir"
 	sweeperOrgPath = "/acme"
 )
 
-// exportInterval is how often the service's metric reader exports: the
-// OpenTelemetry SDK's default for a periodic reader, which the service
-// constructs with no interval of its own (internal/app/telemetry.go);
-// OTEL_METRIC_EXPORT_INTERVAL in the service's environment would change
-// it, and neither the collector nor the configuration sets it. exportLimit
-// bounds each wait for an export: two intervals, so the export in flight
-// when the wait starts and the one after it both fit, with room for the
-// collector's batch and Mimir's ingest. exportPoll is how often a wait
-// asks Mimir.
 const (
 	exportInterval = 60 * time.Second
 	exportLimit    = 2*exportInterval + 30*time.Second
 	exportPoll     = 2 * time.Second
 )
 
-// The configuration files the scenario reads the sweep block from, at the
-// repository root: the base and the local overlay mise run serve runs
-// with (APP_ENV=local).
 const (
 	baseConfig  = "config.json"
 	localConfig = "config.local.json"
 )
 
-// passCounts is sweep_passes_total by reclaimer and then outcome; an
-// outcome a reclaimer has never had has no series and counts 0.
 type passCounts map[string]map[string]int64
 
-// total returns reclaimer's passes over every outcome.
 func (c passCounts) total(reclaimer string) int64 {
 	var n int64
 	for _, v := range c[reclaimer] {
@@ -89,12 +60,6 @@ func (c passCounts) total(reclaimer string) int64 {
 	return n
 }
 
-// sweeper is what the sweeper scenario's steps hand forward: the clients,
-// the run's stamp, the sweep block as the local stack reads it, the counts
-// the first step read with the time of the export that carried them, the
-// counts after the sweep, the branch, and when its sweep finished. Each is
-// replaced by the step that reads it, the clients by the first step, so
-// nothing a run reads is left from a run before it.
 type sweeper struct {
 	n        Nodes
 	client   *httpx.Client
@@ -163,10 +128,6 @@ func (s *sweeper) passCounts(ctx context.Context, inv *cli.Invocation, r *scenar
 	return show(r, "Passes by outcome, exported at "+clock(s.beforeAt), output.Table(st, countRows(s.before, backlog)))
 }
 
-// awaitFirstExport waits until Mimir holds the backlog gauge for every
-// reclaimer, which the service reports from its start: until then the
-// service has not exported since it started, or not since Mimir's data
-// was dropped.
 func (s *sweeper) awaitFirstExport(ctx context.Context) error {
 	_, err := s.mimir.Await(ctx, backlogQuery, exportPoll, exportLimit, func(samples []httpx.Sample) bool {
 		return len(byReclaimer(samples)) == len(reclaimers)
@@ -177,9 +138,6 @@ func (s *sweeper) awaitFirstExport(ctx context.Context) error {
 	return nil
 }
 
-// read returns the time of the latest export of the files series and the
-// pass counts as of it or later: the time is read first, so the counts are
-// never older than the export it names.
 func (s *sweeper) read(ctx context.Context) (time.Time, passCounts, error) {
 	at, err := s.exportedAt(ctx)
 	if err != nil {
@@ -192,8 +150,6 @@ func (s *sweeper) read(ctx context.Context) (time.Time, passCounts, error) {
 	return at, countsOf(samples), nil
 }
 
-// exportedAt returns the time of the latest export of the files series,
-// the zero time when Mimir holds none.
 func (s *sweeper) exportedAt(ctx context.Context) (time.Time, error) {
 	samples, err := s.mimir.Query(ctx, exportedQuery)
 	if err != nil {
@@ -202,7 +158,6 @@ func (s *sweeper) exportedAt(ctx context.Context) (time.Time, error) {
 	return exportTime(samples), nil
 }
 
-// backlog returns the backlog gauge by reclaimer.
 func (s *sweeper) backlog(ctx context.Context) (map[string]float64, error) {
 	samples, err := s.mimir.Query(ctx, backlogQuery)
 	if err != nil {
@@ -319,7 +274,6 @@ func (s *sweeper) grafanaView(ctx context.Context, inv *cli.Invocation, r *scena
 	return showApart(r, "Observability", output.Metrics(st, inv.Get(s.n.GrafanaUp).URL, mimirName, passesQuery))
 }
 
-// countsOf returns the samples of passesQuery as pass counts.
 func countsOf(samples []httpx.Sample) passCounts {
 	c := passCounts{}
 	for _, sm := range samples {
@@ -332,7 +286,6 @@ func countsOf(samples []httpx.Sample) passCounts {
 	return c
 }
 
-// byReclaimer returns the samples' values by their sweep_reclaimer label.
 func byReclaimer(samples []httpx.Sample) map[string]float64 {
 	m := make(map[string]float64, len(samples))
 	for _, sm := range samples {
@@ -343,8 +296,6 @@ func byReclaimer(samples []httpx.Sample) map[string]float64 {
 	return m
 }
 
-// exportTime returns the time exportedQuery's one sample names, a Unix
-// time in fractional seconds, or the zero time when it has none.
 func exportTime(samples []httpx.Sample) time.Time {
 	if len(samples) == 0 {
 		return time.Time{}
@@ -352,7 +303,6 @@ func exportTime(samples []httpx.Sample) time.Time {
 	return time.UnixMilli(int64(samples[0].Value * 1000))
 }
 
-// movement returns each reclaimer's passes in after past those in before.
 func movement(before, after passCounts) map[string]int64 {
 	m := make(map[string]int64, len(reclaimers))
 	for _, rec := range reclaimers {
@@ -361,15 +311,6 @@ func movement(before, after passCounts) map[string]int64 {
 	return m
 }
 
-// narrateMovement says what the window's movement shows, as it fell. The
-// files reclaimer's passes hold the nudged one. No command names outbox or
-// inbox, so theirs ran on the interval: go-database's sweep.Sweeper runs
-// every reclaimer that is due at each delivery, a tick or a nudge, and
-// counts one due once its interval less half a tick has passed since its
-// last cycle (Sweeper.due), so the delivery a nudge earns runs them too
-// when they are that close. It claims no more than the counts show: when
-// files ran no more passes than the most either of the others ran, the
-// counts cannot tell the nudged pass from a tick.
 func narrateMovement(moved map[string]int64, interval string, window time.Duration) string {
 	files, outbox, inbox := moved["files"], moved["outbox"], moved["inbox"]
 	var b strings.Builder
@@ -388,7 +329,6 @@ func narrateMovement(moved map[string]int64, interval string, window time.Durati
 	return b.String()
 }
 
-// plural returns n and noun, with noun's plural when n is not one.
 func plural(n int64, noun string) string {
 	if n == 1 {
 		return "1 " + noun
@@ -396,13 +336,10 @@ func plural(n int64, noun string) string {
 	return strconv.FormatInt(n, 10) + " " + noun + "es"
 }
 
-// countRows returns the rows of the pass-count table for every reclaimer.
 func countRows(c passCounts, backlog map[string]float64) [][2]string {
 	return countRowsOf(reclaimers, c, backlog)
 }
 
-// countRowsOf returns one row per reclaimer in names: its passes by outcome
-// and its backlog gauge.
 func countRowsOf(names []string, c passCounts, backlog map[string]float64) [][2]string {
 	rows := make([][2]string, 0, len(names))
 	for _, rec := range names {
@@ -416,9 +353,6 @@ func countRowsOf(names []string, c passCounts, backlog map[string]float64) [][2]
 	return rows
 }
 
-// deltaRows returns one row per reclaimer: how many passes it ran between
-// before and after, then each outcome's count, as before→after where it
-// moved, and its backlog gauge.
 func deltaRows(before, after passCounts, backlog map[string]float64) [][2]string {
 	rows := make([][2]string, 0, len(reclaimers))
 	for _, rec := range reclaimers {
@@ -437,26 +371,17 @@ func deltaRows(before, after passCounts, backlog map[string]float64) [][2]string
 	return rows
 }
 
-// clock renders t as the wall-clock time a reader compares with a log line.
 func clock(t time.Time) string {
 	return t.Format("15:04:05")
 }
 
-// sweepBlock is the sweep block as the local stack merges it: each value
-// from localConfig where it sets one, else from baseConfig, as the
-// service's configuration layers them, without the APP_SWEEP_* overrides
-// of the environment the service runs in, which slab cannot see. It keeps
-// baseConfig's retention ages too, for the narration's comparison.
 type sweepBlock struct {
 	Interval, Batch, StaleAge, OutboxAge, InboxAge setting
 	baseOutbox, baseInbox                          string
 }
 
-// setting is one value of the sweep block, as written, and the file it
-// came from.
 type setting struct{ Value, From string }
 
-// rows returns the block as table rows, each value naming its file.
 func (b sweepBlock) rows() [][2]string {
 	rows := make([][2]string, 0, 5)
 	for _, kv := range []struct {
@@ -474,8 +399,6 @@ func (b sweepBlock) rows() [][2]string {
 	return rows
 }
 
-// sweepFile is the part of a configuration file the scenario reads: its
-// sweep block, each value as written. batch is a number, kept raw.
 type sweepFile struct {
 	Sweep struct {
 		Interval  string          `json:"interval"`
@@ -486,9 +409,6 @@ type sweepFile struct {
 	} `json:"sweep"`
 }
 
-// loadSweepBlock reads the sweep block from baseConfig and localConfig in
-// the repository the override locates, and merges the second over the
-// first.
 func loadSweepBlock(override string) (sweepBlock, error) {
 	fsys, err := repo.FS(override)
 	if err != nil {

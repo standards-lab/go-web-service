@@ -38,8 +38,6 @@ func Table(st style.Style, rows [][2]string) Render {
 	return aligned(st, rows, "  ")
 }
 
-// aligned returns the Render of name/value pairs, one per line: each name
-// keyed under st and padded to the longest, then sep, then the value.
 func aligned(st style.Style, rows [][2]string, sep string) Render {
 	return func(w io.Writer) error {
 		width := 0
@@ -67,9 +65,6 @@ func JSON(st style.Style, raw []byte) Render {
 	}
 }
 
-// requestContentType is the header httpx.Client.Do sets on its own
-// whenever a request carries a body; Request shows it so the block shows
-// what is sent.
 const requestContentType = "Content-Type"
 
 // Request returns the Render of the outgoing side of one HTTP call as
@@ -109,16 +104,14 @@ func Request(st style.Style, method, path string, headers []httpx.Header, body a
 	}
 }
 
-// shownHeaders are the response headers Response shows when present, in
-// this order; every other header is omitted. ETag and Last-Modified are a
-// stored object's validators, which a download carries and a conditional
-// read names back; a JSON response carries neither.
 var shownHeaders = []string{"Content-Type", "ETag", "Last-Modified", "Location", "Traceparent", "X-Request-Id"}
 
 // Response returns the Render of the incoming side of one HTTP call: the
 // status line, then, after a blank line, the body when there is one,
 // indented and colored when it is JSON, and, after another, the headers
-// in shownHeaders that res carries.
+// in shownHeaders that res carries. ETag and Last-Modified are a stored
+// object's validators, which a download carries and a conditional read
+// names back; a JSON response carries neither.
 func Response(st style.Style, res *httpx.Response) Render {
 	return func(w io.Writer) error {
 		var b bytes.Buffer
@@ -169,14 +162,10 @@ func Metrics(st style.Style, grafanaBase, datasource, promql string) Render {
 	}, ": ")
 }
 
-// writeHeader writes one header line, its name keyed under st.
 func writeHeader(b *bytes.Buffer, st style.Style, name, value string) {
 	fmt.Fprintf(b, "%s: %s\n", st.Key(name), value)
 }
 
-// writeBody writes an HTTP body after a blank line: a JSON body indented
-// and colored under st, any other body as it came, and nothing at all for
-// an empty one.
 func writeBody(b *bytes.Buffer, st style.Style, raw []byte) {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 {
@@ -191,7 +180,6 @@ func writeBody(b *bytes.Buffer, st style.Style, raw []byte) {
 	fmt.Fprintln(b, st.JSON(pretty.String()))
 }
 
-// hasHeader reports whether headers names name, compared as HTTP does.
 func hasHeader(headers []httpx.Header, name string) bool {
 	for _, h := range headers {
 		if strings.EqualFold(h.Name, name) {

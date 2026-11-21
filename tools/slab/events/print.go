@@ -25,7 +25,6 @@ func Render(st style.Style, e event.Event) output.Render {
 	return func(w io.Writer) error { return render(w, st, e) }
 }
 
-// render writes e to w, as [Render] describes.
 func render(w io.Writer, st style.Style, e event.Event) error {
 	if _, err := fmt.Fprintln(w, st.Status(e.Type)); err != nil {
 		return err
@@ -47,7 +46,6 @@ func render(w io.Writer, st style.Style, e event.Event) error {
 	return err
 }
 
-// printData writes e's data, as [Render] describes.
 func printData(w io.Writer, st style.Style, e event.Event) error {
 	data := bytes.TrimSpace(e.Data)
 	if len(data) == 0 {

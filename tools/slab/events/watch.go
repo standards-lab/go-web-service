@@ -11,16 +11,8 @@ import (
 	"github.com/standards-lab/go-core/event"
 )
 
-// cleanupWait bounds the stop and the consumer's removal once the watch's
-// context has ended.
 const cleanupWait = 5 * time.Second
 
-// inactiveThreshold is how long the server keeps the watch's consumer after
-// its last pull. The watch removes the consumer itself when it returns; the
-// threshold is the backstop for a process killed before it can, shorter
-// than the ordered consumer's five-minute default so a killed watcher's
-// consumer does not linger. A running watch pulls continually, well inside
-// it.
 const inactiveThreshold = time.Minute
 
 // Watch delivers to show each event the stream holds under the broker's
@@ -33,8 +25,15 @@ const inactiveThreshold = time.Minute
 // from the last sequence it saw whenever it falls out of order or the
 // connection returns, so the watch reads the stream without settling
 // anything and leaves the service's own consumers untouched. When ctx ends
-// it stops consuming and deletes the consumer, so the watch leaves no
-// consumer on the server.
+// it stops consuming, waits up to five seconds for the delivery to finish,
+// and deletes the ordered consumer's current server-side consumer, which
+// the client stops but never deletes; an earlier one, replaced on a reset,
+// the client deletes itself, and a consumer already gone, as after the
+// server's restart, is no error. So the watch leaves no consumer on the
+// server. The server removes the consumer a minute after its last pull, a
+// backstop for a process killed before it can, shorter than the ordered
+// consumer's five-minute default so a killed watcher's consumer does not
+// linger; a running watch pulls continually, well inside it.
 //
 // A message that does not decode as an event is reported to report and
 // skipped, as is any error the consumer survives, such as missed
@@ -74,11 +73,6 @@ func (b *Broker) Watch(ctx context.Context, fromStart bool, show func(event.Even
 	return b.stop(context.WithoutCancel(ctx), js, cons, cc)
 }
 
-// stop stops consuming, waits up to cleanupWait for the delivery to finish,
-// and deletes the ordered consumer's current server-side consumer. The
-// client stops but never deletes it, and an earlier one, replaced on a
-// reset, the client deletes itself. A consumer already gone, as after the
-// server's restart, is no error.
 func (b *Broker) stop(ctx context.Context, js jetstream.JetStream, cons jetstream.Consumer, cc jetstream.ConsumeContext) error {
 	ctx, cancel := context.WithTimeout(ctx, cleanupWait)
 	defer cancel()

@@ -10,8 +10,6 @@ import (
 	"github.com/standards-lab/go-messaging/nats"
 )
 
-// connectionName is the name slab's connection reports to the server, so a
-// watcher is told apart from the service's own connection.
 const connectionName = "slab"
 
 // Broker is the broker node's value: go-messaging's NATS broker on the
@@ -31,7 +29,8 @@ type Broker struct {
 
 // NewBroker returns the broker on the NATS server at url, bound to stream
 // under prefix, unconnected: it checks the configuration, as nats.New does,
-// and does no I/O.
+// and does no I/O. Its connection reports the name slab to the server, so a
+// watcher is told apart from the service's own connection.
 func NewBroker(url, stream, prefix string) (*Broker, error) {
 	owner := false
 	cfg := nats.Config{URL: url, Name: connectionName, Stream: stream, Prefix: prefix, Owner: &owner}
@@ -46,14 +45,14 @@ func NewBroker(url, stream, prefix string) (*Broker, error) {
 // fixes what it found: nothing answering is the compose stack down, and a
 // missing stream is the service never having started on this server,
 // since the service is the stream's owner and creates it at its own start.
+// A run that ended during the connect, by a signal, returns the context's
+// error, which the lifecycle reports as no failure of its own.
 func (b *Broker) Start(ctx context.Context) error {
 	err := b.Broker.Start(ctx)
 	switch {
 	case err == nil:
 		return nil
 	case ctx.Err() != nil:
-		// The run ended during the connect, by a signal: the context's
-		// error, which the lifecycle reports as no failure of its own.
 		return ctx.Err()
 	case errors.Is(err, natsgo.ErrNoServers):
 		return fmt.Errorf("nothing answers at %s (start the stack with: mise run db:up): %w", b.cfg.URL, err)

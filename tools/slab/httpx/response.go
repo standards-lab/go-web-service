@@ -18,8 +18,6 @@ type Response struct {
 	Body   []byte
 }
 
-// traceIDPattern is the shape of a W3C trace id as the service renders it:
-// 16 bytes, hex-encoded, lowercase.
 var traceIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 // TraceID returns the request's trace id, which the service echoes in the

@@ -79,7 +79,7 @@ func TestAdmin(t *testing.T) {
 
 	t.Run("diagnostics", func(t *testing.T) {
 		d := webtest.Decode[diagnostics](t, c.Get(t, admin+"/diagnostics"), http.StatusOK)
-		if d.Dialect != "postgres" || d.Ping <= 0 || !strings.HasPrefix(d.ServerVersion, "PostgreSQL 18") || d.Pool.Open < 1 {
+		if d.Dialect != "postgres" || d.Ping <= 0 || !strings.HasPrefix(d.ServerVersion, "PostgreSQL 19") || d.Pool.Open < 1 {
 			t.Errorf("diagnostics = %+v", d)
 		}
 		if !slices.Equal(d.Namespaces, []string{"app", "blobfs", "sql"}) {

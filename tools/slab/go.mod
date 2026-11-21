@@ -3,14 +3,14 @@ module github.com/standards-lab/go-web-service/tools/slab
 go 1.27
 
 require (
-	github.com/nats-io/nats.go v1.55.0
+	github.com/nats-io/nats.go v1.56.0
 	github.com/standards-lab/blobfs v0.8.0
 	github.com/standards-lab/go-cli-sdk v0.4.0
 	github.com/standards-lab/go-core v0.12.0
 	github.com/standards-lab/go-messaging/nats v0.3.0
-	github.com/standards-lab/go-web-sdk v0.17.0
+	github.com/standards-lab/go-web-sdk v0.18.0
 	github.com/standards-lab/sqlate v0.7.0
-	github.com/standards-lab/sqlate/postgres v0.7.0
+	github.com/standards-lab/sqlate/postgres v0.8.0
 	golang.org/x/sys v0.50.0
 	golang.org/x/term v0.48.0
 )

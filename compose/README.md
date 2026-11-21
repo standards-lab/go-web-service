@@ -17,7 +17,7 @@ data lives in named volumes, which each group's `down` task keeps and its `reset
 
 ## Postgres
 
-`compose/postgres.yml` runs Postgres 18 (`compose/postgres/`), the service's declared SQL
+`compose/postgres.yml` runs Postgres 19 (`compose/postgres/`), the service's declared SQL
 engine (see [Stack](../README.md#stack)), as user, password, and database `app`. It carries no
 profile, so every compose invocation starts it.
 `mise run db:up` brings it up and waits for health; `mise run db:down` stops it;

@@ -12,7 +12,7 @@ The service is one composition on one declared stack, with one provider per capa
 on another engine or identity provider would be a separate repository, never a switch inside
 this one.
 
-- SQL: Postgres 18, through [go-database](https://github.com/standards-lab/go-database) for the
+- SQL: Postgres 19, through [go-database](https://github.com/standards-lab/go-database) for the
   pool and its administration and [sqlate](https://github.com/standards-lab/sqlate) for the
   authored SQL. Locally it runs from the compose file. A managed deployment is planned on
   Azure Database for PostgreSQL or Amazon RDS through the same provider, changing only the

@@ -1,6 +1,6 @@
 # The development stack's PostgreSQL: the service's SQL engine, which
 # config.json's database block names. This FROM line is PostgreSQL's one pin.
-FROM postgres:18.6-alpine
+FROM postgres:19.0-alpine
 
 # The user, password, and database config.json and secrets.example.json name;
 # development values, not secrets.

@@ -34,6 +34,12 @@ point of choosing Postgres is to use it, and it is contained: each file declares
 `sqlint` fails a standard file that uses a native form, and the admin mount reports each
 statement's tier.
 
+`sqlint.toml` mirrors the runtime catalog the composition root builds
+(`internal/app/infrastructure.go`), so the linter compiles every statement exactly as the service
+does: the engine is sqlate's PostgreSQL, against its native forms, and the sources are sqlate's
+patterns under `sql`, blobfs's under `blobfs`, and the application's `data/patterns` under `app`.
+Each role (statements, patterns, migrations) names its directories and the checks that apply.
+
 Only the composition root (`internal/app`) imports a provider. `infrastructure.go` builds the
 pool through go-database's provider, takes the dialect from sqlate's, builds the object store's
 client through go-storage's `azureblob` and the broker through go-messaging's `nats`, and

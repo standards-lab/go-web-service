@@ -31,6 +31,20 @@ mise. `serve`'s full command also needs a shell that understands `/dev/tcp` (bas
 | `mise run db:state <state>` | `curl -d '{"state":"<state>","confirm":true}' localhost:8080/admin/database/state` | Reset the running service's database to a named state |
 | `mise run slab -- scenario <name>` | `cd tools/slab && go run ./cmd/slab` | Run a narrated scenario (`mise run slab -- scenario` lists them) — see [`tools/slab/README.md`](../tools/slab/README.md) |
 
+Every Go task runs in each module `GO_MODULES` lists in `mise.toml` (`.` and `tools/slab`). The
+check stops at the first Go or sqlint failure; its `go test` runs the unit tier only, the
+integration tier staying behind its build tag, while vet, fix, and lint read the integration suite
+too (`-tags integration`). `lint-context` and `lint-references` both run before either fails the
+check. slab is its own module so go-cli-sdk, `golang.org/x/term`, and `golang.org/x/sys` never
+enter `cmd/server`'s dependency graph; its task runs from `tools/slab` rather than passing through
+at the root, so a clone without a `go.work` still resolves slab's dependencies against the
+published releases.
+
+Compose's `up` always starts the unprofiled services alongside an activated profile, and its
+`down` is project-wide, so `otel:up`, `otel:down`, and `otel:reset` name the five observability
+services to leave the `db:` group alone. Neither half of the `stack:` tasks depends on the other,
+so mise runs each pair in parallel.
+
 `mise run slab -- scenario storage` narrates the storage end to end against the running service: the
 two migration sets, the seeded logos and document tree, the validators and refusals, and a
 recursive delete waited out through the sweep. `mise run slab -- scenario events` runs a

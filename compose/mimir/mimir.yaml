@@ -1,10 +1,11 @@
+# Mimir as a single binary on local storage.
+# See compose/README.md
+
 multitenancy_enabled: false
 
 server:
   http_listen_port: 9009
 
-# Single-binary settings: one ingester, a local in-memory ring, and no
-# readiness delay (the default 15s exists to pace rolling updates).
 ingester:
   ring:
     replication_factor: 1

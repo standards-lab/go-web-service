@@ -18,11 +18,6 @@ jobs:
       - name: mise run check
         run: mise run check
 
-  # The integration tier: the composed service, black-box, against the same
-  # compose definition a developer runs, as its own project. On merge to main
-  # and on demand, below the per-PR unit rate by design; a release is cut only
-  # from a main whose run has passed. The task builds the stack, prints its
-  # logs on a failure, and tears it down itself.
   integration:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest

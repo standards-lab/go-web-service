@@ -13,6 +13,7 @@
 # Each scan captures its command's output in a variable before reading it, so
 # under set -e a scan command that fails (a go list missing a go.sum entry)
 # fails currency instead of reporting nothing.
+# See architecture/principles/rolling-currency.md
 set -euo pipefail
 cd "$MISE_PROJECT_ROOT"
 export GOWORK=off
@@ -52,7 +53,7 @@ report_outdated_requirements() {
 
 tool_modules() {
 	local out err
-	err=$(mktemp)
+	err=$(mktemp) || return
 	if ! out=$(go list -f '{{.Module.Path}}' tool 2>"$err"); then
 		cat "$err" >&2
 		rm -f "$err"
@@ -91,7 +92,7 @@ report_outdated_mise_tools() {
 
 workflow_files() {
 	local root top
-	root=$(pwd -P)
+	root=$(pwd -P) || return
 	top=$(git rev-parse --show-toplevel 2>/dev/null || echo "$root")
 	printf '%s\n' "$root"/.github/workflows/*.yml
 	if [ "$top" != "$root" ]; then

@@ -199,14 +199,16 @@ func TestDocument(t *testing.T) {
 		c.Delete(t, docs+"/directories/"+reports.ID, webtest.IfMatch(reports.Version)).Expect(t, http.StatusNoContent)
 		root := webtest.Decode[directory](t, c.Get(t, docs+"/directories/root"), http.StatusOK)
 
-		t.Run("the owner row goes with the root, so the organization reads rootless", func(t *testing.T) {
+		if !t.Run("the owner row goes with the root, so the organization reads rootless", func(t *testing.T) {
 			c.Delete(t, docs+"/directories/root", webtest.IfMatch(root.Version)).Expect(t, http.StatusNoContent)
 			_ = c.Get(t, docs+"/directories/root").Problem(t, http.StatusNotFound)
 			_ = c.Get(t, docs+"/directories/"+root.ID).Problem(t, http.StatusNotFound)
 			if p := webtest.Decode[directoryPage](t, c.Get(t, docs+"/directories/root/directories"), http.StatusOK); len(p.Items) != 0 || p.Total == nil || *p.Total != 0 {
 				t.Errorf("the rootless organization's listing = %+v; want an empty page", p)
 			}
-		})
+		}) {
+			return
+		}
 
 		t.Run("the next write ensures a new root", func(t *testing.T) {
 			_ = webtest.Decode[identity](t, c.Post(t, docs+"/directories", map[string]string{"parent_id": "root", "name": "reports"}), http.StatusCreated)

@@ -51,8 +51,6 @@ var (
 // composition root injects.
 type Recorder = event.Recorder[*sqlate.Tx]
 
-// raiseStored reads the organization as tx holds it, after the command
-// that changed it, and raises kind about it.
 func (s *store) raiseStored(ctx context.Context, tx *sqlate.Tx, q *event.Queue, kind event.EventKind[OrganizationData], id string) error {
 	o, err := s.storedRows.One(ctx, tx, query.Args{"id": id})
 	if err != nil {
@@ -62,10 +60,6 @@ func (s *store) raiseStored(ctx context.Context, tx *sqlate.Tx, q *event.Queue, 
 	return nil
 }
 
-// raiseUploaded raises LogoUploaded for the organization's logo, the file
-// its write completed. A file without the size and entity tag its
-// completion records is a defect in the completion, and fails the
-// activation.
 func raiseUploaded(q *event.Queue, organizationID string, f blobfs.File) error {
 	if f.Size == nil || f.ETag == nil {
 		return fmt.Errorf("file %s completed without its size or entity tag", f.ID)

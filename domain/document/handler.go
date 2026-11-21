@@ -14,17 +14,10 @@ import (
 	"github.com/standards-lab/go-web-service/sdk"
 )
 
-// maxCommandBody bounds a command's request body; a command carries a few
-// fields, never bulk data.
 const maxCommandBody = 1 << 16
 
-// maxFileBody bounds an upload at 10 MiB, the layer's limit for one
-// document.
 const maxFileBody = 10 << 20
 
-// handler binds the layer's endpoints to its service under the injected
-// paging policy and file transfer. Every handler returns its error; the
-// group's writer maps it to a problem.
 type handler struct {
 	service *Service
 	limits  web.Limits
@@ -118,12 +111,6 @@ func (h *handler) listFiles(w http.ResponseWriter, r *http.Request) error {
 	return web.WriteJSON(w, http.StatusOK, web.NewPage(items, q, paging))
 }
 
-// deleteDirectory reads its inputs in the guarded command's order, the
-// path ids, the If-Match version, then ?recursive as a boolean, absent
-// false. An empty directory is removed, 204. A recursive delete marks the
-// branch and answers 202 with no body, its Location the directory's read,
-// which reports it deleting until the sweep removes it; a repeated one is
-// accepted again.
 func (h *handler) deleteDirectory(w http.ResponseWriter, r *http.Request) error {
 	org, id, err := directoryPath(r)
 	if err != nil {
@@ -156,9 +143,6 @@ func (h *handler) deleteDirectory(w http.ResponseWriter, r *http.Request) error 
 	return nil
 }
 
-// moveDirectory reads its inputs in the guarded command's order, the path
-// ids, the If-Match version, then the body; sdk.Command's path read does
-// not take the root alias, which the service refuses with its own reason.
 func (h *handler) moveDirectory(w http.ResponseWriter, r *http.Request) error {
 	org, id, err := directoryPath(r)
 	if err != nil {
@@ -179,10 +163,6 @@ func (h *handler) moveDirectory(w http.ResponseWriter, r *http.Request) error {
 	return web.WriteJSON(w, http.StatusOK, ident)
 }
 
-// uploadFile reads the path ids, then the required name query parameter,
-// then the body. It accepts any media type: the download never renders
-// the bytes, so the type is only what the client declared. The Location is
-// the new file's metadata.
 func (h *handler) uploadFile(w http.ResponseWriter, r *http.Request) error {
 	org, id, err := directoryPath(r)
 	if err != nil {
@@ -220,10 +200,6 @@ func (h *handler) file(w http.ResponseWriter, r *http.Request) error {
 	return web.WriteJSON(w, http.StatusOK, f)
 }
 
-// content proxies an available file's bytes as an attachment: user
-// content is never rendered inline, since stored HTML would run in the
-// API's origin. The organization's documents are for no shared cache, and
-// a client revalidates by ETag on every use.
 func (h *handler) content(w http.ResponseWriter, r *http.Request) error {
 	org, id, err := filePath(r)
 	if err != nil {
@@ -241,7 +217,6 @@ func (h *handler) content(w http.ResponseWriter, r *http.Request) error {
 	return web.WriteObject(w, r, c.Object, c.Open)
 }
 
-// deleteFile reads the path ids, then the If-Match version.
 func (h *handler) deleteFile(w http.ResponseWriter, r *http.Request) error {
 	org, id, err := filePath(r)
 	if err != nil {
@@ -274,8 +249,6 @@ func (h *handler) moveFile(w http.ResponseWriter, r *http.Request) error {
 	return web.WriteJSON(w, http.StatusOK, ident)
 }
 
-// directoryPath reads the organization's id and a directory's, the root
-// alias or a UUID in canonical form.
 func directoryPath(r *http.Request) (org, id string, err error) {
 	if org, err = web.PathUUID(r, "org"); err != nil {
 		return "", "", err
@@ -287,7 +260,6 @@ func directoryPath(r *http.Request) (org, id string, err error) {
 	return org, id, err
 }
 
-// filePath reads the organization's id and a file's.
 func filePath(r *http.Request) (org, id string, err error) {
 	if org, err = web.PathUUID(r, "org"); err != nil {
 		return "", "", err
@@ -296,10 +268,6 @@ func filePath(r *http.Request) (org, id string, err error) {
 	return org, id, err
 }
 
-// status is the layer's own error vocabulary as one web.ProblemMatcher: a
-// validation rejection (400). The SDK maps its own request errors, a
-// malformed path id among them, and the library's vocabulary is
-// data.Status, composed after this one.
 func status(err error) (web.Problem, bool) {
 	if errors.Is(err, ErrValidation) {
 		return web.Problem{Status: http.StatusBadRequest}, true

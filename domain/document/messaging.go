@@ -60,9 +60,6 @@ var (
 // composition root injects.
 type Recorder = event.Recorder[*sqlate.Tx]
 
-// raiseDirectory raises kind about the organization's directory d, the row
-// as the command that wrote it returned it, the document root presented as
-// the API presents it.
 func raiseDirectory(q *event.Queue, kind event.EventKind[DirectoryData], organizationID, root string, d blobfs.Directory) {
 	data := DirectoryData{DirectoryID: d.ID, OrganizationID: organizationID, ParentID: d.ParentID, Name: d.Name, Version: d.Version}
 	if d.ID == root {
@@ -71,9 +68,6 @@ func raiseDirectory(q *event.Queue, kind event.EventKind[DirectoryData], organiz
 	kind.Raise(q, d.ID, data)
 }
 
-// raiseMarked raises DirectoryDeleted for the organization's directory
-// with id, just marked deleting, read in tx at the version the mark left
-// it at.
 func (s *store) raiseMarked(ctx context.Context, tx *sqlate.Tx, q *event.Queue, organizationID, id string) error {
 	d, err := s.storage.FS.Directories.Find(ctx, tx, id)
 	if err != nil {
@@ -83,10 +77,6 @@ func (s *store) raiseMarked(ctx context.Context, tx *sqlate.Tx, q *event.Queue, 
 	return nil
 }
 
-// emitUploaded raises FileUploaded for the organization's file, just made
-// available, and writes it into tx through the recorder. A file without
-// the size and entity tag its completion records is a defect in the
-// completion, and fails the transaction.
 func (s *store) emitUploaded(ctx context.Context, tx *sqlate.Tx, organizationID string, f blobfs.File) error {
 	if f.Size == nil || f.ETag == nil {
 		return fmt.Errorf("file %s completed without its size or entity tag", f.ID)
@@ -94,17 +84,12 @@ func (s *store) emitUploaded(ctx context.Context, tx *sqlate.Tx, organizationID 
 	return s.emit(ctx, tx, func(q *event.Queue) { FileUploaded.Raise(q, f.ID, fileData(organizationID, f)) })
 }
 
-// emitDeleted raises FileDeleted for the organization's file, just moved
-// to deleting, at the version its delete left it at, and writes it into
-// tx through the recorder.
 func (s *store) emitDeleted(ctx context.Context, tx *sqlate.Tx, organizationID string, f blobfs.File) error {
 	return s.emit(ctx, tx, func(q *event.Queue) {
 		FileDeleted.Raise(q, f.ID, FileDeletedData{FileID: f.ID, OrganizationID: organizationID, Version: f.Version})
 	})
 }
 
-// emit writes the events raise raises into tx through the recorder, for a
-// hook a protocol runs in its own transaction.
 func (s *store) emit(ctx context.Context, tx *sqlate.Tx, raise func(*event.Queue)) error {
 	_, err := s.events.Emit(ctx, func(_ *sqlate.Tx, q *event.Queue) (struct{}, error) {
 		raise(q)
@@ -113,8 +98,6 @@ func (s *store) emit(ctx context.Context, tx *sqlate.Tx, raise func(*event.Queue
 	return err
 }
 
-// fileData is the organization's file f as FileUploaded and FileMoved
-// carry it: its stored state, as the command that wrote it returned it.
 func fileData(organizationID string, f blobfs.File) FileUploadedData {
 	return FileUploadedData{
 		FileID: f.ID, OrganizationID: organizationID, DirectoryID: f.DirectoryID, Name: f.Name,

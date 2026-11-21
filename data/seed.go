@@ -89,7 +89,7 @@ type Seeder struct {
 func NewSeeder(db *Database, contributions ...Contribution) *Seeder {
 	fixtures, err := fs.Sub(seedFiles, "seeds/fixtures")
 	if err != nil {
-		panic(fmt.Sprintf("seeds: %v", err)) // the directory is embedded
+		panic(fmt.Sprintf("seeds: %v", err))
 	}
 	s := &Seeder{db: db, all: contributions, fixtures: fixtures}
 	keys := make(map[string]bool, len(contributions))
@@ -129,7 +129,7 @@ func (s *Seeder) Verify(ctx context.Context) error {
 func (s *Seeder) States() []string {
 	entries, err := fs.ReadDir(seedFiles, "seeds")
 	if err != nil {
-		panic(fmt.Sprintf("seeds: %v", err)) // the directory is embedded
+		panic(fmt.Sprintf("seeds: %v", err))
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -210,8 +210,6 @@ func SeedRows[T any](rows json.RawMessage) ([]T, error) {
 	return out, nil
 }
 
-// readSeed decodes seeds/<name>.json, an object of rows by contribution
-// key. A name with no file is [admin.ErrUnknownState].
 func readSeed(name string, v any) error {
 	f, err := seedFiles.Open("seeds/" + name + ".json")
 	if errors.Is(err, fs.ErrNotExist) {

@@ -16,8 +16,6 @@ import (
 // field-level reason, it reaches the wire as a 400's detail.
 var ErrValidation = errors.New("invalid command")
 
-// codePattern mirrors the schema's cc_organization_code check, so a bad
-// code is a 400 with detail rather than a database check violation.
 var codePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // Organization is one node of the organization hierarchy, as the read
@@ -161,28 +159,18 @@ type LogoDeletedData struct {
 	Version        int64  `json:"version"`
 }
 
-// seedRow is one organization of a named state, in the vocabulary of the
-// API: an organization names its parent by code, the empty code being the
-// root, and the rows come parents first.
 type seedRow struct {
 	Parent string `json:"parent"`
 	Code   string `json:"code"`
 	Name   string `json:"name"`
 }
 
-// logoSeedRow is one logo of a named state: the organization it belongs
-// to, by path, the file's id, fixed so a reset writes it again under the
-// same key, and the fixture that holds its bytes, by path under the seed's
-// fixtures.
 type logoSeedRow struct {
 	Organization string `json:"organization"`
 	ID           string `json:"id"`
 	Fixture      string `json:"fixture"`
 }
 
-// logoTypes is the logo's allowlist: the raster image media types a
-// browser renders inertly, each with the extension its stored name takes.
-// SVG is left out because it is script-capable.
 var logoTypes = map[string]string{
 	"image/png":  ".png",
 	"image/jpeg": ".jpg",
@@ -190,9 +178,6 @@ var logoTypes = map[string]string{
 	"image/gif":  ".gif",
 }
 
-// logoExtension returns the stored name's extension for an upload of
-// mediaType, or refuses a type the allowlist does not hold as the web
-// SDK's Content-Type refusal, a 415.
 func logoExtension(mediaType string) (string, error) {
 	ext, ok := logoTypes[mediaType]
 	if !ok {
@@ -211,8 +196,6 @@ type Logo struct {
 	Object web.Object
 	Open   func() (io.ReadCloser, error)
 }
-
-// The field rules the commands share.
 
 func validCode(code string) error {
 	if !codePattern.MatchString(code) {

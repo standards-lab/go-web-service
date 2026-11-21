@@ -77,7 +77,6 @@ func (d *Database) Record(v query.Verifier) {
 	d.verifiers = append(d.verifiers, v)
 }
 
-// recorded returns the verifiers registered so far, in registration order.
 func (d *Database) recorded() []query.Verifier {
 	d.mu.Lock()
 	defer d.mu.Unlock()

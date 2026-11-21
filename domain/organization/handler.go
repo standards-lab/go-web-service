@@ -13,17 +13,10 @@ import (
 	"github.com/standards-lab/go-web-service/sdk"
 )
 
-// maxCommandBody bounds a command's request body; a command carries a few
-// fields, never bulk data.
 const maxCommandBody = 1 << 16
 
-// maxLogoBody bounds a logo upload at 1 MiB: an organization's mark, never
-// a photograph.
 const maxLogoBody = 1 << 20
 
-// handler binds the layer's endpoints to its service under the injected
-// paging policy and logo transfer. Every handler returns its error; the
-// group's writer maps it to a problem.
 type handler struct {
 	service *Service
 	limits  web.Limits
@@ -79,9 +72,6 @@ func (h *handler) find(w http.ResponseWriter, r *http.Request) error {
 	return web.WriteJSON(w, http.StatusOK, o)
 }
 
-// lookup reads the organization at the composed path the query's path
-// names, with or without its leading slash; an absent path is a validation
-// rejection.
 func (h *handler) lookup(w http.ResponseWriter, r *http.Request) error {
 	path := r.URL.Query().Get("path")
 	if path == "" {
@@ -167,9 +157,6 @@ func (h *handler) putLogo(w http.ResponseWriter, r *http.Request) error {
 	return web.WriteJSON(w, http.StatusCreated, ident)
 }
 
-// logo proxies the active logo's bytes. no-cache has a client revalidate
-// by ETag on every use, since a replacement changes the logo under the same
-// URL.
 func (h *handler) logo(w http.ResponseWriter, r *http.Request) error {
 	id, err := web.PathUUID(r, "id")
 	if err != nil {
@@ -198,10 +185,6 @@ func (h *handler) deleteLogo(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// status is the layer's own error vocabulary as one web.ProblemMatcher: a
-// validation rejection (400) and the cycle (409, data.DetailConflict). The
-// SDK maps its own request errors, a malformed path id among them, and the
-// library's vocabulary is data.Status, composed after this one.
 func status(err error) (web.Problem, bool) {
 	switch {
 	case errors.Is(err, ErrValidation):

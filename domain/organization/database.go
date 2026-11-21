@@ -21,15 +21,6 @@ import (
 //go:embed statements/*.sql
 var files embed.FS
 
-// store is the domain's SQL client: the statements of statements/ bound
-// once to their typed handles, and the operations as methods named for
-// their commands, so the file, the store method, the service method, and
-// the route share one name. The tree lock is the data package's, taken by
-// its registered name. The entities' tags are the scan and binding
-// contract, so no scan function or Args literal is written for an entity
-// here. It is the package's sole importer of the query library. The image
-// statements are steps the logo's protocols in storage.go sequence around
-// blobfs's, so their methods take the session the protocol hands them.
 type store struct {
 	db             *data.Database
 	storage        *data.Storage
@@ -51,10 +42,6 @@ type store struct {
 	findSeededRows query.Rows[string]
 }
 
-// newStore compiles the statements against the service's catalog, binds the
-// handles, and registers the inventory under the domain's name with the
-// store as its verifier, so the seeder's Verify checks it. A compile
-// failure is a wiring defect and panics; no I/O happens here.
 func newStore(db *data.Database, st *data.Storage, logger *slog.Logger, events *Recorder) *store {
 	stmts := db.Catalog.MustCompile(files, "statements", db.Dialect())
 	check := stmts.Statement("version")
@@ -97,9 +84,6 @@ func (s *store) find(ctx context.Context, field, value string) (Organization, er
 	return s.view.One(ctx, s.db, field, value)
 }
 
-// create inserts the organization and emits OrganizationCreated in one
-// transaction, so a create the engine refuses, a duplicate sibling code or
-// a nonexistent parent, commits neither.
 func (s *store) create(ctx context.Context, c CreateOrganization) (Identity, error) {
 	return s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (Identity, error) {
 		id, err := s.createRows.One(ctx, tx, query.ArgsOf(c))
@@ -110,8 +94,6 @@ func (s *store) create(ctx context.Context, c CreateOrganization) (Identity, err
 	}), nil)
 }
 
-// edit runs the guarded update and emits OrganizationEdited in one
-// transaction, so an update the guard refuses commits no event.
 func (s *store) edit(ctx context.Context, id string, version int64, e EditOrganization) (Identity, error) {
 	v, err := s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (int64, error) {
 		v, err := s.editGuard.Run(ctx, tx, version, query.ArgsOf(e).With("id", id))
@@ -123,12 +105,6 @@ func (s *store) edit(ctx context.Context, id string, version int64, e EditOrgani
 	return Identity{ID: id, Version: v}, err
 }
 
-// transfer is the domain's action: under the tree's lock, the cycle check
-// walks the new parent's ancestor chain, then the guarded update moves
-// parent_id, and OrganizationTransferred is emitted in the same
-// transaction. A nonexistent new parent falls through the walk to the
-// foreign-key violation; a cycle, a guard's refusal, or a violation
-// commits no event.
 func (s *store) transfer(ctx context.Context, id string, version int64, t TransferOrganization) (Identity, error) {
 	v, err := s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (int64, error) {
 		if err := s.db.Lock(ctx, tx, data.LockOrganizationTree); err != nil {
@@ -152,9 +128,6 @@ func (s *store) transfer(ctx context.Context, id string, version int64, t Transf
 	return Identity{ID: id, Version: v}, err
 }
 
-// delete runs the guarded delete and emits OrganizationDeleted in one
-// transaction, the version the row was removed at being the one the guard
-// matched; a guard's refusal or a child's foreign key commits no event.
 func (s *store) delete(ctx context.Context, id string, version int64) error {
 	_, err := s.db.Transact(ctx, s.events.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (struct{}, error) {
 		if _, err := s.deleteGuard.Run(ctx, tx, version, query.Args{"id": id}); err != nil {
@@ -166,36 +139,25 @@ func (s *store) delete(ctx context.Context, id string, version int64) error {
 	return err
 }
 
-// exists reads the organization by its key alone, without the read
-// model's lineage walk; a nonexistent organization is sql.ErrNoRows.
 func (s *store) exists(ctx context.Context, sess sqlate.Session, id string) error {
 	_, err := s.versionRows.One(ctx, sess, query.Args{"id": id})
 	return err
 }
 
-// activeLogo reads the file the organization's active image binds,
-// whatever its status, or sql.ErrNoRows.
 func (s *store) activeLogo(ctx context.Context, sess sqlate.Session, organizationID string) (blobfs.File, error) {
 	return s.activeLogoRows.One(ctx, sess, query.Args{"organization_id": organizationID})
 }
 
-// attach binds the file to the organization as its active image; the
-// image it replaces must be removed first in the same transaction.
 func (s *store) attach(ctx context.Context, tx *sqlate.Tx, organizationID, fileID string) error {
 	_, err := s.attachImage.Exec(ctx, tx, query.Args{"organization_id": organizationID, "file_id": fileID})
 	return err
 }
 
-// detach removes the image binding the file.
 func (s *store) detach(ctx context.Context, tx *sqlate.Tx, fileID string) error {
 	_, err := s.detachImage.Exec(ctx, tx, query.Args{"file_id": fileID})
 	return err
 }
 
-// seed is the domain's seed contribution to the data package's named states:
-// the organizations a state carries under "organizations", seeded by the
-// store's own statements in the seed's transaction, which commits each
-// inserted organization's OrganizationCreated with it.
 type seed struct{ store *store }
 
 var _ data.Seed = seed{}
@@ -237,11 +199,6 @@ func (s seed) Apply(ctx context.Context, tx *sqlate.Tx, raw json.RawMessage) (in
 	return inserted, nil
 }
 
-// seedOne seeds one organization or finds the one already there, returning
-// its id and whether this call inserted it. The seed statement returns no
-// row on conflict; sql.ErrNoRows is that signal. An insert raises
-// OrganizationCreated in tx, the seed's transaction, its data the row read
-// back as a create's is; a row found raises nothing.
 func (s *store) seedOne(ctx context.Context, tx *sqlate.Tx, parent any, o seedRow) (id string, inserted bool, err error) {
 	type seeded struct {
 		id       string

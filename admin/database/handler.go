@@ -11,8 +11,6 @@ import (
 	"github.com/standards-lab/go-web-sdk"
 )
 
-// maxBody bounds an administrative request body: a set name and a step
-// count or a version, never more.
 const maxBody = 1 << 10
 
 // ErrUnconfirmed rejects a reset whose body does not confirm it.
@@ -109,7 +107,6 @@ func (h *handler) up(w http.ResponseWriter, r *http.Request) error {
 	return respond(w)(exclusive(r.Context(), h.gate, h.service.Up))
 }
 
-// down reverts one migration of the named set when the body omits steps.
 func (h *handler) down(w http.ResponseWriter, r *http.Request) error {
 	body, err := web.DecodeJSON[Steps](w, r, maxBody)
 	if err != nil {
@@ -141,7 +138,6 @@ func (h *handler) force(w http.ResponseWriter, r *http.Request) error {
 	return respond(w)(h.service.Force(r.Context(), body.Set, body.Version))
 }
 
-// seed applies the configured set when the request carries no body.
 func (h *handler) seed(w http.ResponseWriter, r *http.Request) error {
 	var body State
 	if r.ContentLength != 0 {
@@ -174,9 +170,6 @@ func (h *handler) state(w http.ResponseWriter, r *http.Request) error {
 	return web.WriteJSON(w, http.StatusOK, tr)
 }
 
-// exclusive runs op holding gate exclusively, and releases it once op
-// returns. A gate that ctx ended before it was held runs nothing and
-// returns ctx's error.
 func exclusive[T any](ctx context.Context, gate SchemaGate, op func(context.Context) (T, error)) (T, error) {
 	release, err := gate.Exclusive(ctx)
 	if err != nil {
@@ -187,7 +180,6 @@ func exclusive[T any](ctx context.Context, gate SchemaGate, op func(context.Cont
 	return op(ctx)
 }
 
-// respond writes an operation's resulting status, or returns its error.
 func respond(w http.ResponseWriter) func(admin.Status, error) error {
 	return func(st admin.Status, err error) error {
 		if err != nil {
@@ -197,13 +189,6 @@ func respond(w http.ResponseWriter) func(admin.Status, error) error {
 	}
 }
 
-// status is the domain's error vocabulary as one web.ProblemMatcher. A
-// rejected verb argument (a version outside its set among them), a set the
-// migrator does not declare, a state the seeder does not declare, and an
-// unconfirmed reset are 400; a seed the environment cannot serve is 403;
-// a schema state the operation cannot proceed from, admin.ErrConflict, is
-// 409. A dialect without the lock capability stays unmatched: it is a
-// wiring defect (500).
 func status(err error) (web.Problem, bool) {
 	switch {
 	case errors.Is(err, admin.ErrValidation), errors.Is(err, admin.ErrUnknownSet),

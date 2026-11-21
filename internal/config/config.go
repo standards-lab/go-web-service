@@ -15,8 +15,6 @@ import (
 	"github.com/standards-lab/go-web-sdk/middleware/rate-limit"
 )
 
-// envPrefix namespaces the service's environment variables ("app" →
-// APP_LOG_LEVEL); a seeded service renames its whole namespace here.
 const envPrefix = "app"
 
 // Config is the service's root configuration: the library capability blocks
